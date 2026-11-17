@@ -8,9 +8,10 @@
 
 ## Checklist
 
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` pass
+- [ ] `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` pass
 - [ ] Nothing Telepad runs can change a remote host
-- [ ] No ssh or network calls on the UI thread; OS-specific code only in `src/platform.rs`
+- [ ] Views only send `Msg`s; state changes in `update()` (with a test); I/O only in the runtime
+- [ ] No ssh or network calls on the UI thread; OS-specific code only in `telepad-core/src/platform.rs`
 - [ ] New metric: `script.sh` section + parser + fixture test + UI
 - [ ] Tests/fixtures use documentation IPs (`192.0.2.x`) and made-up host names
 - [ ] `docs/USER_MANUAL.md` updated if the UI or behaviour changed
