@@ -1,0 +1,25 @@
+[package]
+name = "telepad"
+version = "0.4.0"
+edition = "2024"
+description = "Desktop infrastructure monitor over plain OpenSSH: OS, CPU, memory, disks, sensors, IPs and Docker per host, one-click SSH/RDP."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yohannaftali/telepad"
+readme = "README.md"
+keywords = ["monitoring", "ssh", "docker", "infrastructure", "egui"]
+categories = ["command-line-utilities", "gui", "network-programming"]
+
+[dependencies]
+anyhow = "1.0.104"
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "accesskit", "wayland", "x11"] }
+egui_extras = { version = "0.37.0", default-features = false, features = ["svg"] }
+rfd = "0.18.0"
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+self-replace = "1.5.1"
+semver = "1.0.28"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+ureq = "3.5.2"
+zip = { version = "9.6.1", default-features = false, features = ["deflate"] }

@@ -1,0 +1,40 @@
+===HOSTNAME===
+nas
+===OSRELEASE===
+NAME=Synology DSM
+productversion="7.2"
+buildnumber="64570"
+===UNAME===
+Linux
+4.4.302+
+x86_64
+===UPTIME===
+1000.00 2000.00
+===LOADAVG===
+1.00 1.00 1.00 1/200 999
+===CPUINFO===
+model name	: Intel(R) Celeron(R) J4125 CPU @ 2.00GHz
+cores: 4
+===STAT1===
+cpu  10 0 10 80 0 0 0 0
+===STAT2===
+cpu  10 0 10 80 0 0 0 0
+===MEMINFO===
+MemTotal:        2000000 kB
+MemFree:          500000 kB
+Buffers:          100000 kB
+Cached:           400000 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+===DF===
+Filesystem     1024-blocks     Used Available Capacity Mounted on
+/dev/md0           2385528  1500000    766000      67% /
+/dev/mapper/vg1-volume_1 7000000000 3000000000 4000000000  43% /volume1
+===IPADDR===
+eth0 inet 198.51.100.72
+===THERMAL===
+x86_pkg_temp|52000
+===HWMON===
+===DOCKER===
+ERR not installed
+===END===

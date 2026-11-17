@@ -1,0 +1,63 @@
+===HOSTNAME===
+docker01
+===OSRELEASE===
+PRETTY_NAME="Ubuntu 24.04.1 LTS"
+NAME="Ubuntu"
+VERSION="24.04.1 LTS (Noble Numbat)"
+===UNAME===
+Linux
+6.8.0-45-generic
+x86_64
+===UPTIME===
+864000.55 3000000.10
+===LOADAVG===
+0.52 0.40 0.31 1/400 12345
+===CPUINFO===
+model name	: Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz
+cores: 4
+===STAT1===
+cpu  1000 0 1000 8000 0 0 0 0 0 0
+===STAT2===
+cpu  1150 0 1100 8750 0 0 0 0 0 0
+===MEMINFO===
+MemTotal:        8000000 kB
+MemFree:          500000 kB
+MemAvailable:    2000000 kB
+Buffers:          100000 kB
+Cached:          1200000 kB
+SwapTotal:       2000000 kB
+SwapFree:        1500000 kB
+===DF===
+Filesystem     1024-blocks     Used Available Capacity Mounted on
+tmpfs               800000     2000    798000       1% /run
+/dev/sda2         102000000 51000000  46000000      53% /
+tmpfs              4000000        0   4000000       0% /dev/shm
+/dev/sdb1         500000000 100000000 400000000     20% /data
+overlay           102000000 51000000  46000000      53% /var/lib/docker/overlay2/abc/merged
+===IPADDR===
+1: lo    inet 127.0.0.1/8 scope host lo\       valid_lft forever preferred_lft forever
+2: ens18    inet 192.0.2.6/24 brd 192.0.2.255 scope global ens18\       valid_lft forever preferred_lft forever
+3: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\       valid_lft forever preferred_lft forever
+2: ens18    inet6 fe80::1/64 scope link \       valid_lft forever preferred_lft forever
+9: veth1a2b@if8    inet6 fe80::2/64 scope link \       valid_lft forever preferred_lft forever
+===THERMAL===
+x86_pkg_temp|47000
+===HWMON===
+coretemp|temp1|Package id 0|47000
+coretemp|temp2|Core 0|45000
+nct6775|fan1||1200
+===LISTEN===
+Netid State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess
+tcp   LISTEN 0      128          0.0.0.0:22         0.0.0.0:*
+tcp   LISTEN 0      4096         0.0.0.0:8080       0.0.0.0:*
+tcp   LISTEN 0      4096            [::]:8080          [::]:*
+===DOCKER===
+RUNTIME Docker version 29.8.0, build 88096ef
+aaaaaaaaaaaa1111|web|nginx:1.27|running|Up 3 days|shop|/data/compose/47|/data/compose/47/docker-compose.yml|0.0.0.0:8080->80/tcp, [::]:8080->80/tcp
+cccccccccccc3333|portainer_agent|portainer/agent:latest|running|Up 9 days|portainer|/home/alice/docker/portainer-agent|/home/alice/docker/portainer-agent/compose.yaml|0.0.0.0:9001->9001/tcp, [::]:9001->9001/tcp
+bbbbbbbbbbbb2222|old-job|alpine:3.20|exited|Exited (0) 2 weeks ago||||
+===DOCKERNET===
+aaaaaaaaaaaa1111|bridge=172.17.0.2 |/home/alice/web/conf
+cccccccccccc3333|portainer-agent_default=172.30.0.2 |/var/run/docker.sock /var/lib/docker/volumes
+bbbbbbbbbbbb2222|bridge= |
+===END===

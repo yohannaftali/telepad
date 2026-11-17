@@ -1,0 +1,8 @@
+.env
+/target
+telepad.db
+telepad.db-*
+telepad.ssh_config
+telepad.ssh_config.tmp
+/dist
+/config
