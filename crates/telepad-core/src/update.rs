@@ -6,8 +6,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc::Sender;
-use std::thread;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -173,13 +171,6 @@ pub fn is_newer(remote: &str, current: &str) -> bool {
 }
 
 #[derive(Debug, Clone)]
-pub enum Msg {
-    Checked(Result<Check, String>),
-    /// Ok(version) once both executables were replaced.
-    Installed(Result<String, String>),
-}
-
-#[derive(Debug, Clone)]
 pub struct Updater {
     pub config: UpdateConfig,
 }
@@ -219,71 +210,55 @@ impl Updater {
             .map_err(|e| format!("reading GitHub answer: {e}"))?;
         parse_release(&text, &self.config)
     }
+}
 
-    /// Download, verify and install `check`'s release. The running app keeps
-    /// running the old code until it is restarted.
-    pub fn install(&self, check: &Check) -> Result<String, String> {
-        if !check.newer {
-            return Err(format!(
-                "{} is not newer than {CURRENT_VERSION}",
-                check.version
-            ));
-        }
-        let asset = check.asset.as_ref().ok_or_else(|| {
-            format!(
-                "release {} has no {} download",
-                check.version,
-                asset_name(&check.version)
-            )
-        })?;
-        if asset.size > MAX_DOWNLOAD {
-            return Err(format!(
-                "{} is too large ({} bytes)",
-                asset.name, asset.size
-            ));
-        }
-        let a = agent(Duration::from_secs(600));
-        let expected = a
-            .get(&asset.sha256_url)
-            .call()
-            .map_err(http_error)?
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| format!("downloading {}.sha256: {e}", asset.name))?;
-        let expected = parse_sha256_file(&expected)?;
-        let data = a
-            .get(&asset.url)
-            .call()
-            .map_err(http_error)?
-            .body_mut()
-            .with_config()
-            .limit(MAX_DOWNLOAD)
-            .read_to_vec()
-            .map_err(|e| format!("downloading {}: {e}", asset.name))?;
-        verify_sha256(&data, &expected)?;
-        let dir = work_dir()?;
-        let result = extract_executables(&data, &dir)
-            .and_then(|new| install_executables(&new))
-            .map(|()| check.version.clone());
-        let _ = std::fs::remove_dir_all(&dir);
-        result
+/// Download, verify and install `check`'s release. The running app keeps
+/// running the old code until it is restarted.
+pub fn install(check: &Check) -> Result<String, String> {
+    if !check.newer {
+        return Err(format!(
+            "{} is not newer than {CURRENT_VERSION}",
+            check.version
+        ));
     }
-
-    pub fn spawn_check(&self, tx: Sender<Msg>, notify: impl Fn() + Send + 'static) {
-        let me = self.clone();
-        thread::spawn(move || {
-            let _ = tx.send(Msg::Checked(me.check()));
-            notify();
-        });
+    let asset = check.asset.as_ref().ok_or_else(|| {
+        format!(
+            "release {} has no {} download",
+            check.version,
+            asset_name(&check.version)
+        )
+    })?;
+    if asset.size > MAX_DOWNLOAD {
+        return Err(format!(
+            "{} is too large ({} bytes)",
+            asset.name, asset.size
+        ));
     }
-
-    pub fn spawn_install(&self, check: Check, tx: Sender<Msg>, notify: impl Fn() + Send + 'static) {
-        let me = self.clone();
-        thread::spawn(move || {
-            let _ = tx.send(Msg::Installed(me.install(&check)));
-            notify();
-        });
-    }
+    let a = agent(Duration::from_secs(600));
+    let expected = a
+        .get(&asset.sha256_url)
+        .call()
+        .map_err(http_error)?
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| format!("downloading {}.sha256: {e}", asset.name))?;
+    let expected = parse_sha256_file(&expected)?;
+    let data = a
+        .get(&asset.url)
+        .call()
+        .map_err(http_error)?
+        .body_mut()
+        .with_config()
+        .limit(MAX_DOWNLOAD)
+        .read_to_vec()
+        .map_err(|e| format!("downloading {}: {e}", asset.name))?;
+    verify_sha256(&data, &expected)?;
+    let dir = work_dir()?;
+    let result = extract_executables(&data, &dir)
+        .and_then(|new| install_executables(&new))
+        .map(|()| check.version.clone());
+    let _ = std::fs::remove_dir_all(&dir);
+    result
 }
 
 fn work_dir() -> Result<PathBuf, String> {
