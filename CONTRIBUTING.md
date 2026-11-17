@@ -19,20 +19,23 @@ IP addresses and anything private before posting.** Security problems: see
 2. Read [`AGENTS.md`](AGENTS.md): architecture, data flow and the rules every change must
    keep (they apply to humans and coding agents alike). The most important ones:
    - nothing Telepad runs may change a remote host;
+   - views only read the model and send messages; `update()` in `telepad-app` is the only
+     place state changes (with a test), and the GUI runtime is the only place that does I/O;
    - the UI thread never runs ssh or network calls;
-   - OS-specific code only in `src/platform.rs`;
+   - OS-specific code only in `crates/telepad-core/src/platform.rs`;
    - no `unwrap()`/`expect()` on anything that depends on a host, the config or the network.
-3. A new metric is a new `===SECTION===` in `src/script.sh` (POSIX `sh`, BusyBox-safe,
-   every command guarded) + a parser in `src/parse.rs` + a fixture test in
-   `tests/fixtures/` + its place in the UI.
+3. A new metric is a new `===SECTION===` in `crates/telepad-core/src/script.sh` (POSIX `sh`,
+   BusyBox-safe, every command guarded) + a parser in `crates/telepad-core/src/parse.rs` + a
+   fixture test in `crates/telepad-core/tests/fixtures/` + its place in a view under
+   `crates/telepad-gui/src/views/`.
 4. Use documentation addresses (`192.0.2.0/24`, `198.51.100.0/24`) and made-up host
    names in tests and fixtures, never real inventory.
 5. Before you push:
 
    ```sh
-   cargo fmt
-   cargo clippy --all-targets -- -D warnings
-   cargo test
+   cargo fmt --all
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace
    ```
 
 6. Open a pull request against `main` describing what changed and how you tested it
@@ -59,11 +62,11 @@ CI runs the same checks on Windows, Linux and macOS for every pull request.
 git clone https://github.com/yohannaftali/telepad.git
 cd telepad
 cargo build --release                       # target/release/telepad and telepad-check
-cargo run --release                         # start the GUI
+cargo run --release --bin telepad           # start the GUI
 cargo run --release --bin telepad-check -- --json
 ```
 
-Debug builds (`cargo run`) keep a console window on Windows; release builds do not.
+Debug builds (`cargo run --bin telepad`) keep a console window on Windows; release builds do not.
 
 ### Package a Windows release zip
 

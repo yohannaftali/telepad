@@ -1,0 +1,15 @@
+[package]
+name = "telepad-check"
+description = "Headless Telepad: collect hosts once and print text or JSON; check for updates."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "telepad-check"
+path = "src/main.rs"
+
+[dependencies]
+telepad-core.workspace = true
+serde_json.workspace = true

@@ -25,12 +25,25 @@ default branch: `main`
 
 ## Architecture
 
-Single crate `telepad`, library + two binaries:
+Cargo workspace, four crates. Arrows are the only allowed dependencies:
+
+```
+telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
+     └──────────────────────────────►┘
+```
+
+| Crate | Role | May depend on |
+|---|---|---|
+| `crates/telepad-core` | Domain and I/O: inventory, ssh collection, parsers, platform, self-update | std + its own deps; **no GUI** |
+| `crates/telepad-app` | Model–View–Update: `State`, `Msg`, `Effect`, `update()` | `telepad-core` only; **no GUI, no I/O** |
+| `crates/telepad-gui` | egui views + runtime → binary `telepad` | core, app, eframe, rfd |
+| `crates/telepad-check` | Headless CLI → binary `telepad-check` | core only |
+
+### telepad-core
 
 | Path | Role |
 |---|---|
-| `src/main.rs` | GUI binary `telepad` (no console window in Windows release builds) |
-| `src/bin/telepad-check.rs` | Headless binary: collect once, print text or `--json`; `--check-update` |
+| `src/lib.rs` | Workspace: find `config` / `telepad.db`, first-run import, `.env` fallback key, `open_ssh_alias` |
 | `src/config.rs` | OpenSSH config import/export: hosts (alias, HostName, User, Port, IdentityFile, description, other options, not-monitored tag, RDP-only tag) + global `Host *`/`Match` text; renders the file `ssh -F` reads |
 | `src/store.rs` | SQLite inventory (`rusqlite`, bundled): `hosts` + `settings` tables, `PRAGMA user_version` schema version, transactional import (Merge/Replace), JSON + OpenSSH export, generated `telepad.ssh_config` (atomic write) |
 | `src/collector.rs` | Runs `ssh -F <config> -T -o BatchMode=yes ... <alias> sh -s` with `script.sh` on stdin; timeouts; bounded worker pool; sends `Update`s over a channel; RDP-only hosts get ping + TCP probe |
@@ -38,30 +51,70 @@ Single crate `telepad`, library + two binaries:
 | `src/bmc_setup.sh` | Interactive, user-started BMC (`ipmitool`) setup — see Conventions |
 | `src/parse.rs` | Pure parsers for each section, unit-tested against `tests/fixtures/` |
 | `src/model.rs` | Report data types (serde `Serialize`) and formatting helpers |
-| `src/icons.rs` | Phosphor icon font glyphs and OS logo detection |
 | `src/update.rs` | Self-update: GitHub `releases/latest` over HTTPS (`ureq`), SemVer check, SHA-256 from the release's `.sha256`, replace both exes (`self_replace`), relaunch |
-| `src/ui.rs` | eframe/egui 0.37 UI: overview table, host list, host detail, editor, import, update window |
 | `src/platform.rs` | Everything OS-specific: ssh binary lookup, hidden console, open terminal / RDP / URL, ping |
 
-Data flow: `telepad.db` → generated `telepad.ssh_config` + host list → `Collector`
-workers (threads) → `Update` channel → UI drains the channel each frame. The UI
-thread never runs ssh or network calls.
+### telepad-app (Model–View–Update)
+
+| Path | Role |
+|---|---|
+| `src/state.rs` | `State { model: Model, drafts: Drafts }`, `HostState`, `Editor`, `ImportDialog`, `UpdateState`, `matches_filter` |
+| `src/msg.rs` | `Msg` (user intents + results of effects) and `Effect` (work for the runtime) |
+| `src/update.rs` | `update(&mut State, Msg, now) -> Vec<Effect>` — the only place the model changes |
+| `src/tests.rs` | Behaviour tests for `update()` (no GUI, no database, no network) |
+
+### telepad-gui
+
+| Path | Role |
+|---|---|
+| `src/main.rs` | Arguments, `--open-ssh`; no console window in Windows release builds |
+| `src/app.rs` | eframe app: each frame `runtime.frame()`, `views::draw()`, dispatch the returned `Msg`s |
+| `src/runtime.rs` | Executes `Effect`s (database, ssh, collector, update threads, dialogs, clipboard, OS) and feeds results back as `Msg`s |
+| `src/views/` | One module per screen: `panels` (top bar, status bar, host list), `overview`, `detail`, `sensors`, `docker`, `ports`, `editor`, `import`, `confirm`, `update_window` |
+| `src/widgets.rs` | Shared drawing helpers and colours (bars, status dot, fan, thresholds) |
+| `src/icons.rs` | Phosphor icon font glyphs and OS logo detection; `assets/` holds the font and logos |
+
+### Data flow
+
+```
+          ┌──────── Msg (click, typing done, Tick) ────────┐
+          │                                                ▼
+ views::draw(&Model, &mut Drafts)            update(&mut State, Msg, now)
+          ▲                                                │ Vec<Effect>
+          │                                                ▼
+        State ◄──── Msg (HostsLoaded, Collected, …) ─── Runtime
+                                                   (db, ssh, collector, http, OS)
+```
+
+- **Views** read `&Model`, may edit `&mut Drafts` (form text, search filter, toggles —
+  never I/O), and return `Msg`s. They never call core I/O, `platform`, `rfd` or threads.
+- **`update()`** is the only code that changes the `Model`. It does no I/O, takes the time
+  as a parameter, and returns `Effect`s. Every behaviour change gets a test in `tests.rs`.
+- **The runtime** is the only GUI code that touches the database, ssh, network, files,
+  clipboard or OS. Quick effects run inline and return a `Msg` immediately; slow ones
+  (collection, update check/download) run on threads and report through channels that
+  `Runtime::frame` drains. The UI thread never waits on ssh or the network.
+
+New feature checklist: add the `Msg` (and `Effect` if it needs the outside world) → handle it
+in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in a view.
 
 ## Conventions
 
-- Rust edition 2024; `cargo fmt`; `cargo clippy --all-targets -- -D warnings` clean; `cargo test` green.
+- Rust edition 2024; `cargo fmt --all`; `cargo clippy --workspace --all-targets -- -D warnings` clean;
+  `cargo test --workspace` green.
 - No `unwrap()`/`expect()` on anything that depends on a host, the config or the network.
 - **Read-only**: nothing the app runs may change a remote host. `sudo` only as `sudo -n`.
-  One exception: `src/bmc_setup.sh` ("Set up BMC access…"), which only runs in an interactive
+  One exception: `telepad-core/src/bmc_setup.sh` ("Set up BMC access…"), which only runs in an interactive
   terminal the user opened, prints the exact sudo commands, waits for Enter, and lets sudo ask
   for the password. It installs ipmitool and a read-only sudoers rule, nothing else.
 - Remote script: POSIX `sh`, BusyBox-safe, every command guarded, `LC_ALL=C`.
-- New metric = new section in `script.sh` + parser + fixture test + UI.
-- OS-specific code only in `src/platform.rs` behind `#[cfg(target_os = ...)]`.
+- New metric = new section in `script.sh` + parser + fixture test (core) + view.
+- OS-specific code only in `telepad-core/src/platform.rs` behind `#[cfg(target_os = ...)]`.
 - Host fields are validated (`HostEntry::validate`) before saving or importing: single-line values,
   safe alias, no `Host`/`Match`/`Include` as per-host options — the DB is rendered into an ssh config.
 - Schema changes: bump `SCHEMA_VERSION` in `store.rs` and migrate from the old `user_version`.
-- Native file dialogs (`rfd`) are the one allowed blocking call on the UI thread (modal by nature).
+- Native file dialogs (`rfd`) are the one allowed blocking call on the UI thread (modal by nature);
+  they are opened by the runtime, never by a view.
 - Host values are passed to processes as separate arguments, never through a shell string.
 - SSH: `BatchMode=yes` (never prompts), `StrictHostKeyChecking=accept-new`
   (trust on first use; changed keys still rejected).
@@ -90,13 +143,13 @@ thread never runs ssh or network calls.
 ## Validate
 
 ```
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 cargo build --release
 cargo run --release --bin telepad-check -- <alias> [--json]
 cargo run --release --bin telepad-check -- --check-update
-cargo run --release            # GUI
+cargo run --release --bin telepad   # GUI
 ```
 
 ## Release

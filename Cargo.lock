@@ -155,12 +155,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7eb209b1518d6bb87b283c20095f5228ecda460da70b44f0802523dea6da04"
 
 [[package]]
-name = "anyhow"
-version = "1.0.104"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
-
-[[package]]
 name = "arboard"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3039,13 +3033,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "telepad"
+name = "telepad-app"
 version = "0.4.0"
 dependencies = [
- "anyhow",
- "eframe",
- "egui_extras",
- "rfd",
+ "telepad-core",
+]
+
+[[package]]
+name = "telepad-check"
+version = "0.4.0"
+dependencies = [
+ "serde_json",
+ "telepad-core",
+]
+
+[[package]]
+name = "telepad-core"
+version = "0.4.0"
+dependencies = [
  "rusqlite",
  "self-replace",
  "semver",
@@ -3055,6 +3060,17 @@ dependencies = [
  "thiserror 2.0.21",
  "ureq",
  "zip",
+]
+
+[[package]]
+name = "telepad-gui"
+version = "0.4.0"
+dependencies = [
+ "eframe",
+ "egui_extras",
+ "rfd",
+ "telepad-app",
+ "telepad-core",
 ]
 
 [[package]]

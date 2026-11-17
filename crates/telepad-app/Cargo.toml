@@ -1,0 +1,10 @@
+[package]
+name = "telepad-app"
+description = "Telepad application state and update logic (Model-View-Update, no GUI toolkit)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+telepad-core.workspace = true

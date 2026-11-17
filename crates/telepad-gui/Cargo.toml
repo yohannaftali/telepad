@@ -1,0 +1,21 @@
+[package]
+name = "telepad-gui"
+description = "Desktop infrastructure monitor over plain OpenSSH: OS, CPU, memory, disks, sensors, IPs and Docker per host, one-click SSH/RDP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["monitoring", "ssh", "docker", "infrastructure", "egui"]
+categories = ["gui", "network-programming"]
+
+[[bin]]
+name = "telepad"
+path = "src/main.rs"
+
+[dependencies]
+telepad-core.workspace = true
+telepad-app.workspace = true
+eframe.workspace = true
+egui_extras.workspace = true
+rfd.workspace = true

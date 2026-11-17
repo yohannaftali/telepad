@@ -42,7 +42,7 @@ choose **More info → Run anyway**.
 ### With Cargo (any platform)
 
 ```sh
-cargo install --git https://github.com/yohannaftali/telepad --locked
+cargo install --git https://github.com/yohannaftali/telepad --locked telepad-gui telepad-check
 ```
 
 This builds and installs `telepad` and `telepad-check` into `~/.cargo/bin`. See
@@ -103,5 +103,5 @@ Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 any contribution you submit for inclusion in this work, as defined in the Apache-2.0
 license, is dual licensed as above, without any additional terms or conditions.
 
-Bundled assets: [Phosphor icons](assets/fonts/LICENSE-Phosphor.txt) (MIT) and
-[Simple Icons](assets/os/ATTRIBUTION.md) OS logos (CC0).
+Bundled assets: [Phosphor icons](crates/telepad-gui/assets/fonts/LICENSE-Phosphor.txt) (MIT) and
+[Simple Icons](crates/telepad-gui/assets/os/ATTRIBUTION.md) OS logos (CC0).

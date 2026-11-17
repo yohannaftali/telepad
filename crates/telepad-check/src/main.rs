@@ -6,8 +6,8 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::thread;
 
-use telepad::model::{human_kb, human_uptime};
-use telepad::{collector, open_workspace, update};
+use telepad_core::model::{human_kb, human_uptime};
+use telepad_core::{collector, open_workspace, update};
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -214,7 +214,7 @@ fn main() -> ExitCode {
 }
 
 /// Exit 0 = up to date, 10 = newer release available, 2 = check failed.
-fn run_check_update(ws: &telepad::Workspace) -> ExitCode {
+fn run_check_update(ws: &telepad_core::Workspace) -> ExitCode {
     let cfg = match ws.store.update_config() {
         Ok(c) => c,
         Err(e) => {

@@ -4,6 +4,12 @@
     windows_subsystem = "windows"
 )]
 
+mod app;
+mod icons;
+mod runtime;
+mod views;
+mod widgets;
+
 fn main() -> eframe::Result<()> {
     let mut args = std::env::args().skip(1);
     let mut cfg = None;
@@ -19,8 +25,8 @@ fn main() -> eframe::Result<()> {
         }
     }
     if let Some(alias) = open_ssh {
-        let code = telepad::open_ssh_alias(cfg.as_deref(), db.as_deref(), &alias);
+        let code = telepad_core::open_ssh_alias(cfg.as_deref(), db.as_deref(), &alias);
         std::process::exit(if code.is_ok() { 0 } else { 1 });
     }
-    telepad::ui::run(cfg, db)
+    app::run(cfg, db)
 }

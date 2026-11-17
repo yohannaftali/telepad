@@ -25,8 +25,8 @@ New-Item -ItemType Directory -Force (Join-Path $stage 'licenses') | Out-Null
 
 Copy-Item target/release/telepad.exe, target/release/telepad-check.exe $stage
 Copy-Item LICENSE-MIT, LICENSE-APACHE (Join-Path $stage 'licenses')
-Copy-Item assets/fonts/LICENSE-Phosphor.txt (Join-Path $stage 'licenses/Phosphor-MIT.txt')
-Copy-Item assets/os/ATTRIBUTION.md (Join-Path $stage 'licenses/OS-logos.md')
+Copy-Item crates/telepad-gui/assets/fonts/LICENSE-Phosphor.txt (Join-Path $stage 'licenses/Phosphor-MIT.txt')
+Copy-Item crates/telepad-gui/assets/os/ATTRIBUTION.md (Join-Path $stage 'licenses/OS-logos.md')
 
 @'
 # Example OpenSSH client config. Rename to "config" next to telepad.exe
