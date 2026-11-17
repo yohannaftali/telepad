@@ -17,8 +17,9 @@ hosts with the **system OpenSSH client** and the keys you already use, runs a
 No agent is installed on the hosts and nothing on them is changed. There is no server
 and no web UI: it is one portable desktop app plus a headless `telepad-check`.
 
-Windows 10/11 is the first target. macOS and Linux build and are covered by CI, but
-the desktop parts (terminal launch, RDP) are less tested there.
+Releases are built for Windows (x86_64), macOS (Apple silicon and Intel) and Linux
+(x86_64 and ARM64). Windows is the first target; on macOS and Linux the desktop parts
+(terminal launch, RDP) are less tested.
 
 ## Install
 
@@ -38,6 +39,35 @@ and generated ssh config are created next to the exe, so the folder must be writ
 
 Windows may show a SmartScreen warning the first time because the exe is not code-signed:
 choose **More info → Run anyway**.
+
+### macOS
+
+1. Download `telepad-<version>-macos-aarch64.zip` (Apple silicon) or
+   `telepad-<version>-macos-x86_64.zip` (Intel) from
+   [Releases](https://github.com/yohannaftali/telepad/releases), and unzip it, e.g. to
+   `~/Applications/telepad/`.
+2. The programs are not notarized, so macOS blocks them the first time. In Terminal, once:
+
+   ```sh
+   cd ~/Applications/telepad-*/ && xattr -dr com.apple.quarantine .
+   ```
+
+3. Start `./telepad` (or double-click it in Finder). **Open SSH** uses Terminal.app.
+
+### Linux
+
+1. Download `telepad-<version>-linux-x86_64.zip` or `telepad-<version>-linux-aarch64.zip`
+   from [Releases](https://github.com/yohannaftali/telepad/releases) and unzip it somewhere
+   you can write to, e.g. `~/.local/opt/`.
+2. Start `./telepad`. It runs on X11 and Wayland; file dialogs use the XDG desktop portal
+   (`xdg-desktop-portal`, present on GNOME and KDE desktops). **Open SSH** uses the first
+   terminal it finds: `x-terminal-emulator`, `gnome-terminal`, `konsole`, `xfce4-terminal`,
+   `alacritty`, `kitty` or `xterm`.
+
+The Linux builds are made on Ubuntu 22.04 and need glibc 2.35 or newer.
+
+On every platform the folder must stay writable: `telepad.db` is created next to the
+program, and in-app updates replace the programs in place.
 
 ### With Cargo (any platform)
 

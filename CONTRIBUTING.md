@@ -68,13 +68,17 @@ cargo run --release --bin telepad-check -- --json
 
 Debug builds (`cargo run --bin telepad`) keep a console window on Windows; release builds do not.
 
-### Package a Windows release zip
+### Package a release zip
 
-```powershell
-pwsh scripts/package-windows.ps1     # dist/telepad-<version>-windows-x86_64.zip + .sha256
+```sh
+pwsh scripts/package-windows.ps1     # Windows: dist/telepad-<version>-windows-x86_64.zip + .sha256
+sh scripts/package-unix.sh           # macOS / Linux: dist/telepad-<version>-<os>-<arch>.zip + .sha256
+sh scripts/package-unix.sh x86_64-apple-darwin   # cross-build for another target
 ```
 
-The zip contains both exes, a `README.txt`, `config.example` and the licences.
+Each zip contains both programs, a `README.txt`, `config.example` and the licences. The
+`<os>-<arch>` part must match `std::env::consts::{OS, ARCH}` of the build: that is what the
+in-app updater looks for.
 
 ## Releasing (maintainers)
 
@@ -87,9 +91,10 @@ The zip contains both exes, a `README.txt`, `config.example` and the licences.
    git push origin v0.4.1
    ```
 
-The **Release** workflow runs the tests, builds the Windows zip and publishes it with its
-`.sha256`; running apps offer the update on their next check.
-`pwsh scripts/package-windows.ps1 -Publish` does the same from your PC with the GitHub CLI.
+The **Release** workflow tests and builds every platform (`windows-x86_64`, `linux-x86_64`,
+`linux-aarch64`, `macos-aarch64`, `macos-x86_64`), checks each zip, and publishes all of them
+with their `.sha256` files in one release; running apps offer the update on their next check.
+A pull request that changes the release files runs the same builds as a dry run.
 
 ## License of contributions
 

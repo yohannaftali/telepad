@@ -1,13 +1,7 @@
 # Build the portable Windows release zip.
-#   pwsh scripts/package-windows.ps1            # build dist/telepad-<version>-windows-x86_64.zip (+ .sha256)
-#   pwsh scripts/package-windows.ps1 -Publish   # also create GitHub release v<version> with both files
-# Publishing uses the GitHub CLI (`gh auth login` once). The tag must not exist
-# yet; it is created on the current commit, which must already be pushed.
-# The .github/workflows/release.yml workflow does the same on a pushed v* tag.
-param(
-    [switch]$Publish,
-    [string]$Notes = ''
-)
+#   pwsh scripts/package-windows.ps1     # dist/telepad-<version>-windows-x86_64.zip (+ .sha256)
+# Releases are published by .github/workflows/release.yml on a pushed v* tag,
+# for every platform at once (macOS / Linux use scripts/package-unix.sh).
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
@@ -84,11 +78,3 @@ $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
 Write-Output "zip:    $zip"
 Write-Output "sha256: $hash"
 Write-Output ("size:   {0:N1} MB" -f ((Get-Item $zip).Length / 1MB))
-
-if ($Publish) {
-    $tag = "v$version"
-    $notesArgs = if ($Notes) { @('--notes', $Notes) } else { @('--generate-notes') }
-    gh release create $tag $zip "$zip.sha256" --title "Telepad $version" --target (git rev-parse HEAD) @notesArgs
-    if ($LASTEXITCODE -ne 0) { throw "gh release create $tag failed" }
-    Write-Output "published: https://github.com/yohannaftali/telepad/releases/tag/$tag"
-}

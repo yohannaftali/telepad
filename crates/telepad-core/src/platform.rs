@@ -52,6 +52,20 @@ fn open_url_impl(url: &str) -> std::io::Result<()> {
     Command::new("xdg-open").arg(url).spawn().map(|_| ())
 }
 
+/// Add execute permission (rwxr-xr-x) on Unix; nothing to do on Windows.
+pub fn make_executable(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perm = std::fs::metadata(path)?.permissions();
+        perm.set_mode(perm.mode() | 0o755);
+        std::fs::set_permissions(path, perm)?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
 /// Stop background ssh processes from flashing a console window on Windows.
 pub fn hide_console(cmd: &mut Command) {
     #[cfg(target_os = "windows")]
@@ -314,5 +328,23 @@ mod tests {
             "'C:\\Users\\IT\\config'"
         );
         assert_eq!(shell_quote("a b'c"), "'a b'\\''c'");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn make_executable_sets_execute_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = std::env::temp_dir().join(format!("telepad-x-{}", std::process::id()));
+        std::fs::write(
+            &p,
+            b"#!/bin/sh
+",
+        )
+        .unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        make_executable(&p).unwrap();
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_file(&p).ok();
+        assert_eq!(mode, 0o755);
     }
 }

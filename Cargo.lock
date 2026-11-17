@@ -3034,14 +3034,14 @@ dependencies = [
 
 [[package]]
 name = "telepad-app"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "telepad-core",
 ]
 
 [[package]]
 name = "telepad-check"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "serde_json",
  "telepad-core",
@@ -3049,7 +3049,7 @@ dependencies = [
 
 [[package]]
 name = "telepad-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "rusqlite",
  "self-replace",
@@ -3064,7 +3064,7 @@ dependencies = [
 
 [[package]]
 name = "telepad-gui"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "eframe",
  "egui_extras",

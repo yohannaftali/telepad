@@ -2,6 +2,17 @@
 
 Newest first.
 
+## [2026-11-17] — Telepad 0.4.1: macOS and Linux releases
+- Release workflow builds and publishes windows-x86_64, linux-x86_64, linux-aarch64,
+  macos-aarch64 and macos-x86_64 zips (+ `.sha256`) in one release; each zip is unpacked and
+  checked (execute bits, `telepad-check --help`) before publishing. PRs touching release files
+  run it as a dry run.
+- `scripts/package-unix.sh` (macOS/Linux, optional cross target); `package-windows.ps1 -Publish`
+  removed so a release always contains every platform.
+- Fix: the self-updater now sets the execute bit on the new `telepad-check` on macOS/Linux
+  (`platform::make_executable`); before, it would have become non-executable after an update.
+- README: install steps for macOS (quarantine) and Linux (portal, terminals, glibc).
+
 ## [2026-11-17] — refactor: Cargo workspace + Model–View–Update (#1)
 - Workspace: `telepad-core` (inventory, ssh collection, parsers, platform, self-update; no GUI),
   `telepad-app` (State/Msg/Effect/`update()`; no GUI, no I/O), `telepad-gui` (egui views +

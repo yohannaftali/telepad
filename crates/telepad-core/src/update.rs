@@ -366,6 +366,11 @@ fn install_executables(new: &NewExecutables) -> Result<(), String> {
     let staged = dir.join(format!("{check_name}.new"));
     std::fs::copy(&new.check, &staged)
         .map_err(|e| format!("cannot write to {}: {e}", dir.display()))?;
+    // Files extracted from the zip have no execute bit on macOS/Linux.
+    if let Err(e) = crate::platform::make_executable(&staged) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(format!("cannot make {check_name} executable: {e}"));
+    }
     if let Err(e) = std::fs::rename(&staged, &check) {
         let _ = std::fs::remove_file(&staged);
         return Err(format!("cannot replace {check_name} (is it running?): {e}"));

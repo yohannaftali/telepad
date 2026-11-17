@@ -20,8 +20,8 @@ default branch: `main`
 | Platform | Status |
 |---|---|
 | Windows 10/11 x86_64 | **first target** — build, test and release here first |
-| macOS | must keep compiling (CI); terminal launch via Terminal.app (less tested) |
-| Linux | must keep compiling (CI); terminal launch via common emulators (less tested) |
+| macOS aarch64 / x86_64 | released; CI; terminal launch via Terminal.app (less tested) |
+| Linux x86_64 / aarch64 | released (built on Ubuntu 22.04, glibc 2.35+); CI; terminal launch via common emulators (less tested) |
 
 ## Architecture
 
@@ -155,9 +155,11 @@ cargo run --release --bin telepad   # GUI
 ## Release
 
 Bump `version` in `Cargo.toml`, add a `CHANGE_HISTORY.md` entry, commit, push, then
-push tag `v<version>`. `.github/workflows/release.yml` builds the Windows zip and
-publishes it with its `.sha256` (`scripts/package-windows.ps1 -Publish` is the local
-equivalent via `gh`).
+push tag `v<version>`. `.github/workflows/release.yml` builds `telepad-<version>-<os>-<arch>.zip`
+for windows-x86_64, linux-x86_64, linux-aarch64, macos-aarch64 and macos-x86_64
+(`scripts/package-windows.ps1`, `scripts/package-unix.sh`), checks each, and publishes them
+all with `.sha256` files in one release. Zip names must match `update::asset_name`; on Unix
+the updater sets the execute bit on `telepad-check` (`platform::make_executable`).
 
 ## Tracked Issues
 | ID | Title | Status | Last Checked |
