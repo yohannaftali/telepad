@@ -83,8 +83,17 @@ machine that is down looks different from one where only SSH is broken.
 
 ## Import and export
 
-- **☰ Hosts → Import…** reads an OpenSSH config file or a Telepad JSON export and
-  shows a preview first:
+- **☰ Hosts → Import ~/.ssh/config** imports your own OpenSSH client config in one click.
+- **☰ Hosts → Import…** reads any file you pick:
+  - an **OpenSSH client config** (any file that is not JSON);
+  - **JSON** with a list of hosts: a Telepad export from any version, `{"hosts": [...]}`
+    or a bare `[...]`. Common field names are understood, in any case and with or
+    without `_`/`-`: `alias`/`name`/`host`, `hostname`/`ip`/`address`, `user`/`username`,
+    `port`, `identity_file`/`key`, `description`/`note`/`comment`, `access` (`ssh`/`rdp`),
+    `monitored`/`unmonitored`, and `options` as `[["Keyword","value"]]` or `{"Keyword":"value"}`.
+    A host needs at least a name or an address.
+
+  Either way a preview comes first:
   - **Merge — add new, update same alias, keep others**
   - **Replace — hosts become exactly this file**
 

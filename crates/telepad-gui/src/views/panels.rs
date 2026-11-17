@@ -18,6 +18,7 @@ pub fn top_bar(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>)
             for (icon, text, msg) in [
                 (icons::PLUS, "Add host…", Msg::AddHost),
                 (icons::IMPORT, "Import…", Msg::Import),
+                (icons::IMPORT, "Import ~/.ssh/config", Msg::ImportSshConfig),
                 (icons::EXPORT, "Export…", Msg::Export),
             ] {
                 if ui.button(il(icon, text)).clicked() {

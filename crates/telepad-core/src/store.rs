@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::config::{self, Access, HostEntry, Inventory};
 use crate::update::UpdateConfig;
@@ -45,7 +45,7 @@ pub struct ImportSummary {
     pub removed: usize,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 struct JsonFile {
     format: String,
     version: i32,
@@ -400,28 +400,143 @@ pub fn options_text(o: &[(String, String)]) -> String {
     encode_options(o)
 }
 
-/// Parse an import file: JSON (our export) or OpenSSH config text.
+/// Parse an import file. JSON is anything with a list of hosts: a Telepad
+/// export of any version or app name, `{"hosts": [...]}`, or a bare `[...]`,
+/// with common field names (`alias`/`name`/`host`, `hostname`/`ip`/`address`,
+/// `user`/`username`, `identity_file`/`key`, `description`/`note`, ...).
+/// Everything else is read as an OpenSSH client config (e.g. `~/.ssh/config`).
+/// Hosts are validated later, before anything is saved.
 pub fn parse_import(text: &str) -> Result<Inventory, StoreError> {
     let t = text.trim_start_matches('\u{feff}').trim_start();
-    if t.starts_with('{') {
-        let f: JsonFile = serde_json::from_str(t)?;
-        if f.format != JSON_FORMAT {
-            return Err(StoreError::Invalid(format!(
-                "not a Telepad host export (format '{}')",
-                f.format
-            )));
-        }
-        let mut inv = f.inventory;
-        for h in &mut inv.hosts {
-            h.id = None;
-            if h.port == 0 {
-                h.port = 22;
-            }
-        }
-        Ok(inv)
+    if t.starts_with('{') || t.starts_with('[') {
+        parse_json_import(t)
     } else {
         Ok(config::parse_inventory(t))
     }
+}
+
+fn parse_json_import(t: &str) -> Result<Inventory, StoreError> {
+    let v: serde_json::Value = serde_json::from_str(t)?;
+    let (list, global) = match &v {
+        serde_json::Value::Array(a) => (a, String::new()),
+        serde_json::Value::Object(o) => {
+            let hosts = field(o, &["hosts", "servers", "machines", "items"])
+                .and_then(|h| h.as_array())
+                .ok_or_else(|| StoreError::Invalid("no list of hosts in this JSON".into()))?;
+            let global = field(o, &["global"])
+                .and_then(|g| g.as_str())
+                .unwrap_or_default()
+                .to_string();
+            (hosts, global)
+        }
+        _ => return Err(StoreError::Invalid("no list of hosts in this JSON".into())),
+    };
+    let hosts = list
+        .iter()
+        .enumerate()
+        .map(|(i, h)| {
+            host_from_json(h).ok_or_else(|| {
+                StoreError::Invalid(format!("host #{}: needs at least a name or address", i + 1))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Inventory { hosts, global })
+}
+
+/// Look up a key ignoring case, `_` and `-` (`IdentityFile` = `identity_file`).
+fn field<'a>(
+    o: &'a serde_json::Map<String, serde_json::Value>,
+    names: &[&str],
+) -> Option<&'a serde_json::Value> {
+    let norm = |k: &str| {
+        k.chars()
+            .filter(|c| *c != '_' && *c != '-')
+            .collect::<String>()
+            .to_ascii_lowercase()
+    };
+    names.iter().find_map(|n| {
+        let n = norm(n);
+        o.iter().find(|(k, _)| norm(k) == n).map(|(_, v)| v)
+    })
+}
+
+fn host_from_json(v: &serde_json::Value) -> Option<HostEntry> {
+    let o = v.as_object()?;
+    let text = |names: &[&str]| -> Option<String> {
+        field(o, names).and_then(|v| match v {
+            serde_json::Value::String(s) => Some(s.trim().to_string()).filter(|s| !s.is_empty()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        })
+    };
+    let alias = text(&["alias", "name", "hostalias"]);
+    let address = text(&[
+        "hostname",
+        "hostaddress",
+        "ip",
+        "ipaddress",
+        "address",
+        "addr",
+    ]);
+    // "host" is the alias in some exports and the address in others.
+    let host = text(&["host"]);
+    let (alias, hostname) = match (alias, address, host) {
+        (Some(a), Some(h), _) => (a, h),
+        (Some(a), None, h) => (a, h.unwrap_or_default()),
+        (None, Some(h), Some(a)) => (a, h),
+        (None, Some(h), None) => (h.clone(), h),
+        (None, None, Some(h)) => (h.clone(), h),
+        (None, None, None) => return None,
+    };
+    let access = text(&["access", "type", "protocol"])
+        .map(|a| Access::from_db(&a))
+        .unwrap_or_default();
+    let port = text(&["port"])
+        .and_then(|p| p.parse().ok())
+        .filter(|p| *p != 0)
+        .unwrap_or_else(|| access.default_port());
+    let flag = |names: &[&str]| field(o, names).and_then(|v| v.as_bool());
+    let unmonitored = flag(&["unmonitored", "disabled"])
+        .or_else(|| flag(&["monitored", "enabled"]).map(|m| !m))
+        .unwrap_or(false);
+    let options = match field(o, &["options", "sshoptions"]) {
+        // [["Keyword", "value"], ...] as Telepad exports them
+        Some(serde_json::Value::Array(a)) => a
+            .iter()
+            .filter_map(|kv| {
+                let kv = kv.as_array()?;
+                Some((
+                    kv.first()?.as_str()?.to_string(),
+                    kv.get(1)?.as_str()?.to_string(),
+                ))
+            })
+            .collect(),
+        // {"Keyword": "value", ...}
+        Some(serde_json::Value::Object(m)) => m
+            .iter()
+            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+            .collect(),
+        _ => Vec::new(),
+    };
+    Some(HostEntry {
+        id: None,
+        alias,
+        hostname,
+        user: text(&["user", "username", "login"]).unwrap_or_default(),
+        port,
+        identity_file: text(&[
+            "identityfile",
+            "identity",
+            "key",
+            "keyfile",
+            "privatekey",
+            "sshkey",
+        ]),
+        note: text(&["description", "note", "comment", "desc"]).unwrap_or_default(),
+        options,
+        unmonitored,
+        access,
+    })
 }
 
 pub fn export_json(inv: &Inventory) -> Result<String, StoreError> {
@@ -577,5 +692,60 @@ mod tests {
         assert_eq!(parse_import(&json).unwrap(), inv);
         assert!(parse_import("{\"format\":\"other\",\"version\":1}").is_err());
         assert_eq!(parse_import(&config::to_ssh_config(&inv)).unwrap(), inv);
+
+        // Labels do not matter: older versions or the app's previous name import too.
+        let relabelled = json
+            .replace("\"telepad/hosts\"", "\"old-monitor/hosts\"")
+            .replace(&format!("\"version\": {SCHEMA_VERSION}"), "\"version\": 99");
+        assert_ne!(relabelled, json);
+        assert_eq!(parse_import(&relabelled).unwrap(), inv);
+    }
+
+    #[test]
+    fn imports_foreign_json_with_common_field_names() {
+        let inv = parse_import(
+            r#"[
+              {"name": "web01", "ip": "192.0.2.10", "username": "admin", "Port": "2222",
+               "IdentityFile": "~/.ssh/id_web", "comment": "Web server"},
+              {"host": "192.0.2.20"},
+              {"host": "db01", "address": "192.0.2.30", "monitored": false,
+               "options": {"ProxyJump": "bastion"}},
+              {"alias": "win01", "hostname": "192.0.2.40", "access": "RDP"}
+            ]"#,
+        )
+        .unwrap();
+        let h = &inv.hosts;
+        assert_eq!(h.len(), 4);
+        assert_eq!(
+            (
+                h[0].alias.as_str(),
+                h[0].hostname.as_str(),
+                h[0].user.as_str(),
+                h[0].port
+            ),
+            ("web01", "192.0.2.10", "admin", 2222)
+        );
+        assert_eq!(h[0].identity_file.as_deref(), Some("~/.ssh/id_web"));
+        assert_eq!(h[0].note, "Web server");
+        assert_eq!(
+            (h[1].alias.as_str(), h[1].hostname.as_str(), h[1].port),
+            ("192.0.2.20", "192.0.2.20", 22)
+        );
+        assert!(h[2].unmonitored);
+        assert_eq!(
+            h[2].options,
+            vec![("ProxyJump".to_string(), "bastion".to_string())]
+        );
+        assert_eq!((h[3].access, h[3].port), (Access::Rdp, 3389));
+        assert!(h.iter().all(|h| h.validate().is_ok()));
+
+        let wrapped = parse_import(r#"{"servers": [{"name": "a", "ip": "192.0.2.1"}]}"#).unwrap();
+        assert_eq!(wrapped.hosts[0].alias, "a");
+        assert!(parse_import(r#"{"something": 1}"#).is_err());
+        assert!(
+            parse_import(r#"[{"port": 22}]"#).is_err(),
+            "no name or address"
+        );
+        assert!(parse_import("[1, 2]").is_err());
     }
 }

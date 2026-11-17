@@ -55,7 +55,7 @@ pub struct HostEntry {
     pub user: String,
     pub port: u16,
     pub identity_file: Option<String>,
-    /// Description, e.g. "Mail Server Wima - Witec - WTB - Arsanu".
+    /// Description shown under the alias, e.g. "Web server in rack 2".
     #[serde(rename = "description")]
     pub note: String,
     /// Other ssh options for this host, in order (`KexAlgorithms +x`, ...).

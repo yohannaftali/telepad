@@ -12,6 +12,10 @@ Newest first.
 - Fix: the self-updater now sets the execute bit on the new `telepad-check` on macOS/Linux
   (`platform::make_executable`); before, it would have become non-executable after an update.
 - README: install steps for macOS (quarantine) and Linux (portal, terminals, glibc).
+- Import is lenient: any JSON with a list of hosts (Telepad export of any version or app
+  name, `{"hosts": [...]}`, a bare `[...]`, common field names); everything else is read as
+  an OpenSSH config. New **Hosts → Import ~/.ssh/config** (no file dialog). Exports made
+  before the rename import again.
 
 ## [2026-11-17] — refactor: Cargo workspace + Model–View–Update (#1)
 - Workspace: `telepad-core` (inventory, ssh collection, parsers, platform, self-update; no GUI),

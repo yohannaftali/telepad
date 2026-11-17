@@ -136,6 +136,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             }
         }
         Msg::Import => fx.push(Effect::PickImportFile),
+        Msg::ImportSshConfig => fx.push(Effect::ReadUserSshConfig),
         Msg::ImportOpened(Ok((path, inventory))) => {
             if inventory.hosts.is_empty() {
                 say(m, now, format!("No hosts found in {}", path.display()));

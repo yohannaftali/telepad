@@ -138,17 +138,14 @@ impl Runtime {
             }
             Effect::PickImportFile => {
                 let path = rfd::FileDialog::new()
-                    .set_title("Import hosts (OpenSSH config or Telepad JSON)")
+                    .set_title("Import hosts (OpenSSH config or JSON host list)")
                     .add_filter("All files", &["*"])
-                    .add_filter("JSON export", &["json"])
+                    .add_filter("JSON", &["json"])
                     .pick_file()?;
-                let parsed = std::fs::read_to_string(&path)
-                    .map_err(|e| e.to_string())
-                    .and_then(|t| store::parse_import(&t).map_err(|e| e.to_string()));
-                Some(Msg::ImportOpened(match parsed {
-                    Ok(inv) => Ok((path, inv)),
-                    Err(e) => Err((path, e)),
-                }))
+                Some(read_import(path))
+            }
+            Effect::ReadUserSshConfig => {
+                Some(read_import(telepad_core::expand_home("~/.ssh/config")))
             }
             Effect::PreviewImport { inventory, mode } => Some(Msg::ImportPreviewed(
                 self.with_store(|s| s.preview_import(&inventory, mode)),
@@ -250,6 +247,17 @@ impl Runtime {
             ctx.request_repaint();
         });
     }
+}
+
+/// Read and parse an import file; errors keep the path for the message.
+fn read_import(path: std::path::PathBuf) -> Msg {
+    let parsed = std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|t| store::parse_import(&t).map_err(|e| e.to_string()));
+    Msg::ImportOpened(match parsed {
+        Ok(inv) => Ok((path, inv)),
+        Err(e) => Err((path, e)),
+    })
 }
 
 fn export(ws: &Workspace, path: &Path) -> Result<usize, String> {

@@ -402,6 +402,17 @@ fn import_previews_applies_and_keeps_dialog_on_failure() {
 }
 
 #[test]
+fn import_from_user_ssh_config_reads_it_without_a_dialog() {
+    let mut s = State::default();
+    let fx = update(&mut s, Msg::ImportSshConfig, Instant::now());
+    assert!(matches!(fx[..], [Effect::ReadUserSshConfig]));
+    assert!(matches!(
+        update(&mut s, Msg::Import, Instant::now())[..],
+        [Effect::PickImportFile]
+    ));
+}
+
+#[test]
 fn collection_results_update_host_state() {
     let t0 = Instant::now();
     let (mut s, _) = started(t0);

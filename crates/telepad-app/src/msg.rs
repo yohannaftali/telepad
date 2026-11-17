@@ -49,6 +49,8 @@ pub enum Msg {
     EditorClose,
     EditorBrowseKey,
     Import,
+    /// Import the user's own `~/.ssh/config` without a file dialog.
+    ImportSshConfig,
     ImportMode(ImportMode),
     ImportApply,
     ImportCancel,
@@ -109,6 +111,8 @@ pub enum Effect {
     },
     /// File dialog + parse → [`Msg::ImportOpened`] (nothing if cancelled).
     PickImportFile,
+    /// Read `~/.ssh/config` → [`Msg::ImportOpened`].
+    ReadUserSshConfig,
     /// → [`Msg::ImportPreviewed`]
     PreviewImport {
         inventory: Inventory,
