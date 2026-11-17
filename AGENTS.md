@@ -70,6 +70,9 @@ thread never runs ssh or network calls.
 - Test data uses documentation addresses (`192.0.2.0/24`, `198.51.100.0/24`) and made-up
   host names — never real inventory.
 - Conventional commits: `feat(collector): ...`, `fix(ui): ...`, referencing the issue (`#12`).
+- Docs live in `README.md` (overview, install, quick start), `docs/USER_MANUAL.md` (every screen,
+  button and message), `CONTRIBUTING.md` (build, workflow, releasing) and `SECURITY.md`. A change
+  to the UI or behaviour updates the manual in the same PR.
 
 ## Configuration
 

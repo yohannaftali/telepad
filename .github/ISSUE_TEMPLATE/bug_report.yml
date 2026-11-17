@@ -1,0 +1,43 @@
+name: Bug report
+description: Something shows a wrong value, fails or crashes
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Remove host names, IP addresses and anything private** from what you paste.
+        Security problems: please use [private reporting](https://github.com/yohannaftali/telepad/security/advisories/new) instead.
+  - type: input
+    id: version
+    attributes:
+      label: Telepad version
+      description: Shown at the bottom of the window, or `telepad-check --check-update`.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Your OS
+      placeholder: "Windows 11 23H2"
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Monitored host type
+      description: OS / distribution of the host the problem is about, if any.
+      placeholder: "Ubuntu 24.04 with Docker, Synology DSM 7.2, ..."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Steps, what you expected, what you saw. Screenshots welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output (optional)
+      description: "`telepad-check <alias> --json`, and the matching command on the host (`df -Pk`, `cat /proc/meminfo`, `docker ps`, ...)."
+      render: text
