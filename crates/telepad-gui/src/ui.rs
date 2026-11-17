@@ -7,15 +7,15 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText};
 
-use crate::collector::{self, Collector, SshSettings, Update};
-use crate::config::{Access, HostEntry, Inventory};
 use crate::icons::{self, label as il};
-use crate::model::{
+use telepad_core::collector::{self, Collector, SshSettings, Update};
+use telepad_core::config::{Access, HostEntry, Inventory};
+use telepad_core::model::{
     Container, HostReport, Manager, PortainerRole, SensorKind, human_kb, human_uptime,
 };
-use crate::store::{self, ImportMode, ImportSummary};
-use crate::update::{self, Check, UpdateConfig, Updater};
-use crate::{Workspace, open_workspace, platform};
+use telepad_core::store::{self, ImportMode, ImportSummary};
+use telepad_core::update::{self, Check, UpdateConfig, Updater};
+use telepad_core::{Workspace, open_workspace, platform};
 
 const WORKERS: usize = 12;
 
@@ -792,7 +792,7 @@ impl MonitorApp {
                 let text = if json {
                     store::export_json(&inv).map_err(|e| e.to_string())?
                 } else {
-                    crate::config::to_ssh_config(&inv)
+                    telepad_core::config::to_ssh_config(&inv)
                 };
                 std::fs::write(&path, text).map_err(|e| e.to_string())?;
                 Ok(inv.hosts.len())
@@ -2432,7 +2432,7 @@ mod tests {
 
         ed.entry.alias = "senar2".into();
         ed.entry.hostname = "192.0.2.34".into();
-        let store = crate::store::Store::open(std::path::Path::new(":memory:")).unwrap();
+        let store = telepad_core::store::Store::open(std::path::Path::new(":memory:")).unwrap();
         store.save_host(&src.clone()).ok();
         let first = store.hosts().unwrap().len();
         store.save_host(&ed.build().unwrap()).unwrap();

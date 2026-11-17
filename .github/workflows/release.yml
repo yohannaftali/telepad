@@ -20,7 +20,7 @@ jobs:
         run: |
           $v = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
           if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "tag $env:GITHUB_REF_NAME does not match Cargo.toml version $v" }
-      - run: cargo test --locked
+      - run: cargo test --workspace --locked
       - name: Build zip
         shell: pwsh
         run: ./scripts/package-windows.ps1

@@ -30,12 +30,10 @@ pub const SAVE: &str = "\u{e248}";
 pub const INFO: &str = "\u{e2ce}";
 pub const PLUGS: &str = "\u{eb5a}";
 pub const DATABASE: &str = "\u{e1de}";
-pub const HIDDEN: &str = "\u{e224}";
 pub const CARET_DOWN: &str = "\u{e136}";
 pub const CARET_RIGHT: &str = "\u{e13a}";
 pub const DOT: &str = "\u{e18a}";
 pub const WINDOWS: &str = "\u{e692}";
-pub const LINUX: &str = "\u{eb02}";
 
 /// Add Phosphor as a fallback font so icon codepoints render in any text.
 pub fn install(ctx: &egui::Context) {

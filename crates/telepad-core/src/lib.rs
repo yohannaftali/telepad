@@ -1,11 +1,9 @@
 pub mod collector;
 pub mod config;
-pub mod icons;
 pub mod model;
 pub mod parse;
 pub mod platform;
 pub mod store;
-pub mod ui;
 pub mod update;
 
 use std::path::{Path, PathBuf};
