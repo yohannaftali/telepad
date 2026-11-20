@@ -2,6 +2,19 @@
 
 Newest first.
 
+## [2026-11-20] — fix(ui): copy and paste do not reach the system clipboard in text fields (#71)
+- Issue #71 addressed on GitHub (branch `71-clipboard`).
+- Cause: the workspace built `eframe` with `default-features = false` and without its
+  `clipboard` feature, so egui text fields never read or wrote the OS clipboard (the reason
+  #42 has its own "Paste from clipboard" button).
+- Fix: `clipboard` added to eframe's features in `Cargo.toml` (adds `arboard` /
+  `smithay-clipboard` to egui-winit; version unchanged). USER_MANUAL: copy and paste note,
+  Public keys step 1.
+- Verified on Windows 11 (throwaway workspace, made-up text on the clipboard, the user's
+  clipboard restored, never printed): Ctrl+V into the Public keys box and Ctrl+A / Ctrl+C back
+  out (same text), the same in the file window's path bar (extra window); fmt, clippy, tests.
+  Not verified here: Linux (X11 / Wayland) and macOS clipboard at run time (CI builds them).
+
 ## [2026-11-20] — Telepad 0.8.4
 - New: **file operations** in the file window (#63) — new folder (F7) / new file, rename
   (F2), delete (Del, one confirmation listing every item with its size), properties,
