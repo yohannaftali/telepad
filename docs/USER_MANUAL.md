@@ -18,6 +18,10 @@ Status dot: green = last check succeeded, red = it failed, blue = first check ru
 grey = no result yet (or not monitored). Usage bars turn yellow and red as they fill; temperatures are blue
 below 70 °C, yellow from 70 °C and red from 85 °C.
 
+**Copy and paste**: every text field (forms, filters, the Public keys box, database
+queries, the file window's path bars, the editor) works with the system clipboard:
+Ctrl+C / Ctrl+X / Ctrl+V (Cmd on macOS), in the main window and in the extra windows.
+
 ## Theme
 
 **Theme** in the top bar switches between **System** (follows the Windows / macOS / desktop
@@ -500,7 +504,7 @@ full path). Opening a file that already has a tab switches to it.
 takes it away, using the access Telepad already has. It changes only the
 `~/.ssh/authorized_keys` file of the user Telepad logs in as on each host (no `sudo`).
 
-1. Paste one public key: the single line from a `.pub` file, for example
+1. Paste one public key (Ctrl+V): the single line from a `.pub` file, for example
    `ssh-ed25519 AAAAC3Nza… alice@example.com`. Telepad shows its type, its SHA256
    fingerprint (the same as `ssh-keygen -lf`) and its comment, or why it is not a valid
    key. Private keys, several lines and keys with options (`from=`, `command=`) are refused.
