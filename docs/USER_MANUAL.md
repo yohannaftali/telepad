@@ -68,7 +68,9 @@ Ctrl+C / Ctrl+X / Ctrl+V (Cmd on macOS), in every window.
 ## Theme
 
 **Theme** in the top bar switches between **System** (follows the Windows / macOS / desktop
-setting, the default), **Light** and **Dark**. The choice is saved in the database.
+setting, the default), **Light** and **Dark**. The choice is saved in the database. The light
+theme uses a grey background behind white windows with a border, and buttons and input
+boxes with a visible fill and border, so every layer stands apart.
 
 ## Hosts
 

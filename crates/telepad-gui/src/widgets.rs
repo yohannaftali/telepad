@@ -91,6 +91,38 @@ pub const LIGHT: Palette = Palette {
     ],
 };
 
+/// Telepad's light theme (#86). egui's own light colours put panels, windows
+/// and buttons on nearly the same white (panel and window gray 248, buttons
+/// gray 230 without a border), so nothing stood apart. Here: a grey app
+/// background, white windows with a border, and buttons / inputs with a
+/// visible fill and border.
+pub fn light_visuals() -> egui::Visuals {
+    let c = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
+    let mut v = egui::Visuals::light();
+    v.panel_fill = c(0xe6e9ef);
+    v.window_fill = c(0xffffff);
+    v.window_stroke = egui::Stroke::new(1.0, c(0xaeb6c2));
+    v.window_shadow.color = Color32::from_black_alpha(40);
+    v.faint_bg_color = c(0xf1f3f6);
+    v.extreme_bg_color = c(0xffffff);
+    v.code_bg_color = c(0xeef1f5);
+    let w = &mut v.widgets;
+    w.noninteractive.bg_stroke = egui::Stroke::new(1.0, c(0xc9cfd8));
+    w.noninteractive.fg_stroke = egui::Stroke::new(1.0, c(0x2b3440));
+    for (st, fill, border, text) in [
+        (&mut w.inactive, 0xe2e6ec, 0xa9b2bf, 0x1f2733),
+        (&mut w.hovered, 0xd3d9e2, 0x7c8796, 0x111820),
+        (&mut w.active, 0xc3cbd6, 0x5d6878, 0x000000),
+        (&mut w.open, 0xd3d9e2, 0x7c8796, 0x111820),
+    ] {
+        st.weak_bg_fill = c(fill);
+        st.bg_fill = c(fill);
+        st.bg_stroke = egui::Stroke::new(1.0, c(border));
+        st.fg_stroke.color = c(text);
+    }
+    v
+}
+
 static DARK_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// Set once per frame from the active egui theme.
@@ -480,8 +512,12 @@ mod tests {
     #[test]
     fn palette_text_is_readable_on_both_themes() {
         let dark_bg = egui::Visuals::dark().panel_fill;
-        let light_bg = egui::Visuals::light().panel_fill;
-        for (theme, p, bg) in [("dark", &DARK, dark_bg), ("light", &LIGHT, light_bg)] {
+        let light = light_visuals();
+        for (theme, p, bg) in [
+            ("dark", &DARK, dark_bg),
+            ("light panel", &LIGHT, light.panel_fill),
+            ("light window", &LIGHT, light.window_fill),
+        ] {
             for (name, c) in [
                 ("red", p.red),
                 ("amber", p.amber),
@@ -498,13 +534,28 @@ mod tests {
         // Bar text (egui draws it in the selection stroke colour) on each bar fill.
         for (theme, p, v) in [
             ("dark", &DARK, egui::Visuals::dark()),
-            ("light", &LIGHT, egui::Visuals::light()),
+            ("light", &LIGHT, light_visuals()),
         ] {
             for (i, fill) in p.bar.iter().enumerate() {
                 let r = contrast(v.selection.stroke.color, *fill);
                 assert!(r >= 4.5, "{theme} bar {i}: contrast {r:.2} < 4.5");
             }
         }
+    }
+
+    #[test]
+    fn light_theme_layers_stand_apart() {
+        let v = light_visuals();
+        // Window vs workspace background, button vs window, text on buttons.
+        assert!(contrast(v.window_fill, v.panel_fill) > 1.15);
+        assert!(contrast(v.widgets.inactive.bg_stroke.color, v.window_fill) >= 2.0);
+        assert!(contrast(v.window_stroke.color, v.panel_fill) >= 1.6);
+        for st in [&v.widgets.inactive, &v.widgets.hovered, &v.widgets.active] {
+            let r = contrast(st.fg_stroke.color, st.weak_bg_fill);
+            assert!(r >= 4.5, "button text contrast {r:.2}");
+        }
+        assert!(contrast(v.widgets.noninteractive.fg_stroke.color, v.panel_fill) >= 4.5);
+        assert!(contrast(v.weak_text_color(), v.window_fill) >= 3.0);
     }
 
     #[test]
