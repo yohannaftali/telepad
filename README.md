@@ -22,7 +22,8 @@ minimized, maximized and tabbed):
   over SFTP (scp when the host has no SFTP server, rsync when both sides have it); new
   folder / file, rename, delete, properties and permissions on both sides; a VS Code-like
   editor (tabs, syntax colours, find / replace, line endings kept, changed-on-host check)
-- **Public keys…**: add or revoke one SSH public key on many hosts at once
+- **Authorized keys**: the keys in each host's `authorized_keys`, by server or by key,
+  and add or revoke one SSH public key on many hosts at once
 - **Host Management…**: Telepad's hosts next to `~/.ssh/config` (or another config
   file); copy, edit or delete per host, merge / replace / sync, with a preview and a
   backup before the file is written
@@ -32,7 +33,7 @@ minimized, maximized and tabbed):
 
 No agent is installed on the hosts, and monitoring never changes anything on them. The
 only changes are actions you start and confirm yourself (Docker actions, BMC setup,
-Public keys, database edits, file copies). There is no server
+Authorized keys, database edits, file copies). There is no server
 and no web UI: it is one portable desktop app plus a headless `telepad-check`.
 
 Releases are built for Windows (x86_64), macOS (Apple silicon and Intel) and Linux

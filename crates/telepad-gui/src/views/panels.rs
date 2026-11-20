@@ -62,7 +62,11 @@ fn hosts_menu(ui: &mut egui::Ui, out: &mut Vec<Msg>) {
             ),
             (
                 "Access",
-                vec![(icons::KEY, "Public keys… (add / revoke)", Msg::KeysOpen)],
+                vec![(
+                    icons::KEY,
+                    "Authorized keys… (list, add, revoke)",
+                    Msg::KeysOpen,
+                )],
             ),
         ] {
             ui.label(RichText::new(group).weak().small());
@@ -81,7 +85,9 @@ fn hosts_menu(ui: &mut egui::Ui, out: &mut Vec<Msg>) {
         }
     })
     .response
-    .on_hover_text("Hosts: add, import, export, Host Management · Public keys · Software update");
+    .on_hover_text(
+        "Hosts: add, import, export, Host Management · Authorized keys · Software update",
+    );
 }
 
 fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {

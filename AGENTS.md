@@ -50,7 +50,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/script.sh` | Remote read-only collection script, `===SECTION===` markers; tiers `TP_STATIC` (daily) / `TP_SLOW` (6 h) switched by `collector::Scope`, live sections every round |
 | `src/bmc_setup.sh` | Interactive, user-started BMC (`ipmitool`) setup — see Conventions |
 | `src/parse.rs` | Pure parsers for each section, unit-tested against `tests/fixtures/` |
-| `src/authorized_keys.rs` | Public keys window backend: validate a pasted key (type, base64, embedded type), SHA256 fingerprint, add/revoke script for `~/.ssh/authorized_keys`, lockout guard (`login_keys`), parallel `apply_all` |
+| `src/authorized_keys.rs` | Authorized keys page backend: read-only `list` / `list_all` of `~/.ssh/authorized_keys` → `HostKeys` (`AuthKey`: line, options, key, supported; login fingerprints), `parse_authorized_keys`, validate a pasted key (type, base64, embedded type), SHA256 fingerprint, add/revoke script for `~/.ssh/authorized_keys`, lockout guard (`login_keys`), parallel `apply_all` |
 | `src/db/` | Database browser (#52–#54): `detect` (DB containers / host listeners → `DbTarget`, user from container env), `tunnel` (`ssh -N -L`, closed on drop and by `close_all` on exit), `client` (`Session`: MySQL `mysql` / PostgreSQL `postgres` drivers, metadata, pages, queries, transactional row edits, DDL, cancel; live tests via `TELEPAD_TEST_MYSQL` / `TELEPAD_TEST_PG`), `sql` (quoting, statement split, danger / read-only checks, row SQL), `ddl` (structure editor SQL), `secret` (OS password store) |
 | `src/files/` | File window (#62): `sftp` (own SFTP v3 client over `ssh -s <alias> sftp`: list, stat, pipelined download / upload, mkdir, rename, remove, setstat), `fallback` (hosts without SFTP: `sh` listing + `scp -O`), `rsync` (availability check, `-e ssh` args with `--protect-args`, dry run), `transfer` (`plan`: recursive walk + existing files, `run`: copy via `.telepad-part`, keep mtime), `ops` (#63: `Fs` trait for `LocalFs` / `Sftp`, `check_name`, new folder / file, rename, recursive delete / chmod / measure, `dir_mode` / `file_mode`), `edit` (#64: read / save with `Stamp` check, `.telepad-part`, links followed), `text` (#64: decode / encode keeping CRLF / BOM, find / replace incl. regex, go to line, indent), `syntax` (#64: language by name / `#!`, line lexer → `Tok` spans), local listing helpers; live tests via `TELEPAD_TEST_SSH` (`tests/sshd/` lab image) |
 | `src/docker_actions.rs` | Docker/compose action commands + terminal script (show, confirm, run), read-only "How it runs" (`docker inspect` → `docker run`, compose files, secrets masked) |
@@ -65,7 +65,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 
 | Path | Role |
 |---|---|
-| `src/state.rs` | `State { model: Model, drafts: Drafts }` (drafts include the overview `Sort` and the `KeysDraft` of the Public keys window, model the `KeyRun` results and the `Workspace` `ws`), `OverviewPage`, `HostState` (+ `scope_at`: which tiers are due), `Editor`, `ImportDialog`, `UpdateState`, `matches_filter` |
+| `src/state.rs` | `State { model: Model, drafts: Drafts }` (drafts include the overview `Sort` and the `KeysDraft` of the Authorized keys page (tab, server, open key), model the `KeyRun` results, `auth_keys` (`AkHost` per alias), `key_holders` and the `Workspace` `ws`), `OverviewPage`, `HostState` (+ `scope_at`: which tiers are due), `Editor`, `ImportDialog`, `UpdateState`, `matches_filter` |
 | `src/msg.rs` | `Msg` (user intents + results of effects) and `Effect` (work for the runtime) |
 | `src/table.rs` | Overview order: `Sort`/`SortKey`, `overview_rows` (filter + stable sort); `drop_index` / `can_reorder` (drag to reorder); `docker_stacks` (Docker overview by stack); host list `host_list_groups`, `worst_usage`; `fullest_disk`, `hottest` |
 | `src/update.rs` | `update(&mut State, Msg, now) -> Vec<Effect>` — the only place the model changes |
@@ -80,6 +80,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_db.rs` | Behaviour tests for the database windows |
 | `src/workspace.rs` | Main window workspace (#77, WinBox style): `Win` (page), `Group` (one inner window: tabs, rect, minimized / maximized), `Workspace` (`open` / `close`, `sync` with the sessions, `update(WsMsg)`, `save` / `restore` of the `ui_workspace` layout) |
 | `src/tests_workspace.rs` | Behaviour tests for the workspace |
+| `src/tests_keys.rs` | Behaviour tests for the Authorized keys page |
 
 ### telepad-gui
 
@@ -131,7 +132,8 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
   prints the exact command and runs it only after Enter (`yes` for kill / remove / compose down).
   Container IDs, project names and paths from labels are validated and single-quoted.
   Portainer-managed stacks are never changed from Telepad (Open in Portainer only).
-  Third exception, in-app (owner decision on #49): **Public keys…** (`authorized_keys.rs`) adds or
+  Third exception, in-app (owner decision on #49): **Authorized keys** (`authorized_keys.rs`; #78
+  lists each host's `~/.ssh/authorized_keys` read-only, `cat` only) adds or
   removes one validated public key in the login user's `~/.ssh/authorized_keys` on the chosen
   hosts, only after the user typed `add` / `revoke`; never from a refresh. It refuses to revoke
   the key Telepad logs in with, touches no other line, and rewrites the file via a temp copy.
@@ -247,6 +249,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #63 | feat(files): file operations — new, rename, delete, permissions | closed | 2026-11-20 |
 | #64 | feat(files): built-in VS Code-like editor for local and remote files | closed | 2026-11-20 |
 | #71 | fix(ui): copy and paste do not reach the system clipboard in text fields | closed | 2026-11-20 |
-| #76 | feat(ui): colour action buttons by risk — red delete / revoke, yellow edit, green add | ready-for-review | 2026-11-20 |
-| #77 | feat(ui): WinBox-style single window — page sidebar, inner windows (move, resize, minimize, maximize, tabs), in-window dialogs | ready-for-review | 2026-11-20 |
-| #78 | feat(keys): Authorized keys page — list keys by server and by public key, add / revoke | open | 2026-11-20 |
+| #76 | feat(ui): colour action buttons by risk — red delete / revoke, yellow edit, green add | closed | 2026-11-20 |
+| #77 | feat(ui): WinBox-style single window — page sidebar, inner windows (move, resize, minimize, maximize, tabs), in-window dialogs | closed | 2026-11-20 |
+| #78 | feat(keys): Authorized keys page — list keys by server and by public key, add / revoke | ready-for-review | 2026-11-20 |

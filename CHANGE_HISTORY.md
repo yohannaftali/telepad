@@ -2,6 +2,30 @@
 
 Newest first.
 
+## [2026-11-20] — feat(keys): Authorized keys page (#78)
+- Issue #78 addressed on GitHub (branch `78-authorized-keys`).
+- Core: `authorized_keys::list_script` (read-only `cat` of `~/.ssh/authorized_keys` between
+  markers), `parse_list`, `parse_authorized_keys` (options with quoted spaces, comments,
+  blank / `#` lines, older types listed as not managed, other lines counted), `list` (adds
+  the fingerprints Telepad logs in with), `list_all`; tests incl. "the list script only reads".
+- App: `Model::auth_keys` (`AkHost` Loading / Ready / Failed per alias), `key_holders`
+  (grouped by fingerprint), `KeysDraft` tab / server / open key / list filter; `AkLoad`,
+  `AkListed`, `AkTab`, `AkPrepare` (shortcuts fill key + hosts and ask for the word);
+  `Effect::ListKeys`; lists read on open, after hosts load when the page was reopened from
+  the saved layout, and for the changed hosts when a run finishes; 4 tests.
+- GUI: the page (By server / By public key / Add / revoke, Refresh), red Revoke (disabled
+  for Telepad's login key and unmanaged types), green Add key / Add to server…, Revoke on all
+  N servers; renamed Public keys → Authorized keys in the sidebar, window title and ☰ menu.
+- Docs: USER_MANUAL (Authorized keys section), README, SECURITY, AGENTS.
+- Verified on Windows 11 against the lab containers (throwaway workspace `fmws`): lists
+  read, lab login key marked and not revocable, Add key from By server with the made-up
+  alice@example.com key on both containers (added), By public key shows it on 2 servers,
+  Revoke on all 2 servers with `revoke` (removed, lists back to one key each); your
+  clipboard saved and restored around the paste; fmt, clippy, tests.
+
+## [2026-11-20] — Tested and merged: #76 (PR #79) and #77 (PR #80)
+- Both merged after CI green on Windows, macOS, Linux; issues closed. See their entries.
+
 ## [2026-11-20] — feat(ui): WinBox-style single window (#77)
 - Issue #77 addressed on GitHub (branch `77-workspace`).
 - App: `workspace.rs` — `Win` (Overview, Docker, Host, HostSync, Keys, Files(id), Db(id),

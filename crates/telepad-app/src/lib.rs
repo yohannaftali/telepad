@@ -21,8 +21,9 @@ pub mod workspace;
 
 pub use msg::{Effect, Msg};
 pub use state::{
-    Drafts, Editor, HostState, ImportDialog, KeyRun, KeysDraft, MESSAGE_TTL, Model, OverviewPage,
-    PasteImport, RunInfoView, State, UpdatePhase, UpdateState, key_selectable, matches_filter,
+    AkHost, Drafts, Editor, HostState, ImportDialog, KeyHolders, KeyRun, KeysDraft, KeysTab,
+    MESSAGE_TTL, Model, OverviewPage, PasteImport, RunInfoView, State, UpdatePhase, UpdateState,
+    key_holders, key_selectable, matches_filter,
 };
 pub use table::{
     Flag, FlagKind, HostGroup, Severity, Sort, SortKey, StackRow, can_reorder, cluster_shown_by,
@@ -41,5 +42,7 @@ mod tests_editor;
 mod tests_files;
 #[cfg(test)]
 mod tests_hostsync;
+#[cfg(test)]
+mod tests_keys;
 #[cfg(test)]
 mod tests_workspace;
