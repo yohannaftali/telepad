@@ -36,6 +36,10 @@ only changes are actions you start and confirm yourself (Docker actions, BMC set
 Authorized keys, database edits, file copies). There is no server
 and no web UI: it is one portable desktop app plus a headless `telepad-check`.
 
+![Telepad: the Hosts page with the page sidebar](docs/images/hosts-dark.png)
+
+<sub>Screenshots use made-up host names and documentation addresses.</sub>
+
 Releases are built for Windows (x86_64), macOS (Apple silicon and Intel) and Linux
 (x86_64 and ARM64). Windows is the first target; on macOS and Linux the desktop parts
 (terminal launch, RDP) are less tested.
@@ -147,9 +151,39 @@ systems and NAS devices work and missing tools only hide that section.
    ```
 
 2. Start Telepad. On the first start the hosts from `config` are imported into
-   `telepad.db`, and every host is checked once.
-3. Click a host on the left for details, or keep the **Overview** for all hosts at once.
-4. Click **SSH** on a host to open a terminal logged in to it.
+   `telepad.db`, and every host is checked once. No config? Use **☰ → Add one host…** or
+   **☰ → Import ~/.ssh/config**.
+3. The **Hosts** page shows every host: status, OS, CPU, memory, disks, Docker. Click a
+   row for the host's own window (details, sensors, ports, containers).
+4. **Right-click** a host for its menu: **Open SSH** (a terminal logged in to it),
+   **Files** (copy files to and from it, edit them), its databases, Edit, Clone, Delete.
+
+![Right-click menu of a host](docs/images/host-menu.png)
+
+## Using Telepad
+
+Telepad is one window. The **sidebar** on the left opens pages; each page opens as a window
+**inside** Telepad that you can move (drag its title), resize (drag its right or bottom
+edge), minimize (**_**, it waits in a strip at the bottom), maximize (**□**, or double-click
+the title) and close (**×**). Put two pages in one window as tabs with the **⧉** button.
+**Open windows** under the sidebar lists everything that is open; the **▯ ‹** button folds
+the sidebar to icons. Telepad remembers the layout.
+
+| Page | What you do there |
+|---|---|
+| **Hosts** | All hosts as a table or cards. Search box at the top; click a header to sort, drag a border to resize, double-click a border to fit the column. Click a row to open the host, right-click for its menu |
+| **Docker / Podman** | Every container of every host, grouped by compose stack, with start / stop / logs / shell actions (each one shown and confirmed in a terminal) |
+| **Kubernetes**, **Docker Swarm** | The clusters found on your hosts: nodes, workloads, services, problems |
+| **Authorized keys** | Who can log in with which SSH key: by server or by key, grouped by the `#` comment lines in `authorized_keys`. Add or revoke a key on many servers at once (you type `add` / `revoke` to confirm), or edit the file |
+| **Host Management** | Compare Telepad's hosts with `~/.ssh/config` and copy, edit or delete hosts on either side |
+
+![Authorized keys, by server](docs/images/authorized-keys.png)
+
+**Buttons tell you what they do by colour:** red deletes or revokes, yellow edits, green
+adds, amber opens a session (SSH / RDP). **Theme** in the top bar switches System / Light /
+Dark:
+
+![The Hosts page in the light theme](docs/images/hosts-light.png)
 
 Make sure `ssh web01` works in a terminal first: Telepad uses exactly the same client,
 keys and options.

@@ -252,7 +252,7 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #76 | feat(ui): colour action buttons by risk — red delete / revoke, yellow edit, green add | closed | 2026-11-20 |
 | #77 | feat(ui): WinBox-style single window — page sidebar, inner windows (move, resize, minimize, maximize, tabs), in-window dialogs | closed | 2026-11-20 |
 | #78 | feat(keys): Authorized keys page — list keys by server and by public key, add / revoke | closed | 2026-11-20 |
-| #83 | feat(ui): Hosts page polish — full-width table, auto-fit columns, search in page, hover, SSH / Files buttons, sidebar cleanup | ready-for-review | 2026-11-20 |
-| #84 | feat(docker): Docker / Podman page name and Kubernetes / Docker Swarm pages | ready-for-review | 2026-11-20 |
-| #85 | feat(keys): key groups from authorized_keys comments, add into a group, edit the file in the editor | ready-for-review | 2026-11-20 |
-| #86 | fix(ui): light theme too light — clearer backgrounds, window borders and buttons | ready-for-review | 2026-11-20 |
+| #83 | feat(ui): Hosts page polish — full-width table, auto-fit columns, search in page, hover, SSH / Files buttons, sidebar cleanup | closed | 2026-11-20 |
+| #84 | feat(docker): Docker / Podman page name and Kubernetes / Docker Swarm pages | closed | 2026-11-20 |
+| #85 | feat(keys): key groups from authorized_keys comments, add into a group, edit the file in the editor | closed | 2026-11-20 |
+| #86 | fix(ui): light theme too light — clearer backgrounds, window borders and buttons | closed | 2026-11-20 |
