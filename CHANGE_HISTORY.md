@@ -2,6 +2,24 @@
 
 Newest first.
 
+## [2026-11-20] — feat(keys): key groups, add into a group, edit the file (#85)
+- Issue #85 addressed on GitHub (branch `85-key-groups`, on top of #84).
+- Core: `AuthKey::group` from the `#` line above (blank lines ignored, last comment line of a
+  block names it, none = No group); add script inserts via awk (`INSERT_AWK`, key and group
+  passed in the environment from quoted here-documents): end of the group's block, or a new
+  `# group` block at the end, or — no group — before the first comment line; `check_group`;
+  `apply` / `apply_all` / `script` take the group. Tests: parsing groups, adding into a
+  group / a new group / no group with the local `sh`.
+- App: `KeysDraft::group`, `KeyHolders::groups`, `key_groups`; `Effect::ApplyKey { group }`;
+  `FmMsg::OpenFile` + `FileSession::pending_edit` + `EdMsg::OpenPath` (opens
+  `~/.ssh/authorized_keys` once the file window is connected); the list is read again after
+  saving that file. Tests.
+- GUI: group headings (By server), groups per key (By public key), Group field with existing
+  groups (Add / revoke), yellow **Edit file** button; editor warning bar for authorized_keys.
+- Docs: USER_MANUAL (groups, Edit file, Group field), AGENTS.
+- Verified on Windows 11 (lab containers): Edit file connects and opens the file with the
+  warning (nothing saved); fmt, clippy, tests (95 app; core group tests run with Git Bash `sh`).
+
 ## [2026-11-20] — feat(docker): Docker / Podman name, Kubernetes and Docker Swarm pages (#84)
 - Issue #84 addressed on GitHub (branch `84-clusters`, on top of #83).
 - App: `Win::Kube` / `Win::Swarm` (layout keys `kube`, `swarm`), `table::cluster_rows` +

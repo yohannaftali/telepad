@@ -516,6 +516,18 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 return fx;
             };
             let hosts: Vec<HostEntry> = k.chosen(m).into_iter().cloned().collect();
+            let group = match telepad_core::authorized_keys::check_group(&k.group) {
+                Ok(g)
+                    if g.is_empty() || action != telepad_core::authorized_keys::KeyAction::Add =>
+                {
+                    None
+                }
+                Ok(g) => Some(g),
+                Err(e) => {
+                    say(m, now, e);
+                    return fx;
+                }
+            };
             k.confirm = None;
             k.typed.clear();
             if hosts.is_empty() {
@@ -527,7 +539,12 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 comment: key.comment.clone(),
                 results: hosts.iter().map(|h| (h.alias.clone(), None)).collect(),
             });
-            fx.push(Effect::ApplyKey { action, key, hosts });
+            fx.push(Effect::ApplyKey {
+                action,
+                key,
+                hosts,
+                group,
+            });
         }
         Msg::KeyResult { alias, outcome } => {
             let was_running = m.key_run.as_ref().is_some_and(KeyRun::running);
@@ -790,6 +807,26 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             );
         }
         Msg::Files(fm) => {
+            // Saving ~/.ssh/authorized_keys in the editor: read that host's
+            // list again (#85).
+            let reload = match &fm {
+                crate::files::FmMsg::Editor {
+                    id,
+                    msg: crate::editor::EdMsg::Saved { tab, result: Ok(_) },
+                } => m.files.iter().find(|s| s.id == *id).and_then(|s| {
+                    s.editor
+                        .tab(*tab)
+                        .filter(|t| {
+                            t.side == crate::files::Side::Remote
+                                && t.path.ends_with("/.ssh/authorized_keys")
+                        })
+                        .map(|_| s.host.alias.clone())
+                }),
+                _ => None,
+            };
+            if let Some(alias) = reload {
+                fx.extend(load_keys(m, Some(vec![alias])));
+            }
             let hosts = &m.hosts;
             let entry = |alias: &str| {
                 hosts

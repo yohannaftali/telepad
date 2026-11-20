@@ -257,6 +257,9 @@ pub struct FileSession {
     pub op_errors: Vec<String>,
     /// The editor window's tabs (#64).
     pub editor: FileEditor,
+    /// A remote file (relative to the home folder) to open in the editor once
+    /// connected (#85: Edit file of Authorized keys).
+    pub pending_edit: Option<String>,
     next_transfer: u64,
 }
 
@@ -335,6 +338,12 @@ pub type Connection = (Mode, String, Option<(String, String)>);
 pub enum FmMsg {
     /// "Open files…" of a host.
     Open(String),
+    /// Open a remote file (path relative to the login's home) of a host in the
+    /// editor, connecting its file window first when needed (#85).
+    OpenFile {
+        alias: String,
+        rel: String,
+    },
     Connected {
         id: FmId,
         /// (mode, remote home, remembered (local, remote) folders).
@@ -697,6 +706,42 @@ pub fn update(
     now: Instant,
 ) -> Vec<FmEffect> {
     let mut fx = Vec::new();
+    if let FmMsg::OpenFile { alias, rel } = msg {
+        if let Some(pos) = sessions.iter().position(|s| s.host.alias == alias) {
+            let s = &mut sessions[pos];
+            if s.status == Status::Ready {
+                let path = sftp::join(&s.remote_home, &rel);
+                let d = drafts.entry(s.id).or_default();
+                let close = crate::editor::update(
+                    s,
+                    d,
+                    crate::editor::EdMsg::OpenPath {
+                        side: Side::Remote,
+                        path,
+                    },
+                    &mut fx,
+                );
+                debug_assert!(!close);
+            } else {
+                s.pending_edit = Some(rel);
+            }
+            return fx;
+        }
+        let Some(host) = host_entry(&alias) else {
+            return fx;
+        };
+        *next_id += 1;
+        let id = *next_id;
+        sessions.push(FileSession {
+            id,
+            host: host.clone(),
+            pending_edit: Some(rel),
+            ..Default::default()
+        });
+        drafts.insert(id, FileDraft::default());
+        fx.push(FmEffect::Connect { id, host });
+        return fx;
+    }
     if let FmMsg::Open(alias) = msg {
         if sessions.iter().any(|s| s.host.alias == alias) {
             return fx;
@@ -740,7 +785,7 @@ pub fn update(
     let s = &mut sessions[pos];
     let d = drafts.entry(id).or_default();
     match msg {
-        FmMsg::Open(_) | FmMsg::Close(_) | FmMsg::Editor { .. } => {}
+        FmMsg::Open(_) | FmMsg::OpenFile { .. } | FmMsg::Close(_) | FmMsg::Editor { .. } => {}
         FmMsg::Connected {
             result, local_home, ..
         } => match result {
@@ -752,6 +797,18 @@ pub fn update(
                 let (l, r) = remembered.unwrap_or((local_home, home));
                 list(&mut fx, s, d, Side::Local, l);
                 list(&mut fx, s, d, Side::Remote, r);
+                if let Some(rel) = s.pending_edit.take() {
+                    let path = sftp::join(&s.remote_home, &rel);
+                    crate::editor::update(
+                        s,
+                        d,
+                        crate::editor::EdMsg::OpenPath {
+                            side: Side::Remote,
+                            path,
+                        },
+                        &mut fx,
+                    );
+                }
             }
             Err(e) => s.error = Some(e),
         },
@@ -1320,7 +1377,7 @@ fn confirm(s: &mut FileSession, d: &FileDraft, fx: &mut Vec<FmEffect>) {
 fn msg_id(m: &FmMsg) -> FmId {
     use FmMsg::*;
     match m {
-        Open(_) => 0,
+        Open(_) | OpenFile { .. } => 0,
         Connected { id, .. }
         | Navigate { id, .. }
         | Enter { id, .. }

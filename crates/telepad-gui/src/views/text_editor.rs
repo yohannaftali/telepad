@@ -197,6 +197,16 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
             });
     });
     egui::Panel::top(("ed-head", id)).show(ui, |ui| {
+        // Editing who may log in (#85): the lockout risk is said up front.
+        if t.side == Side::Remote && t.path.ends_with("/.ssh/authorized_keys") {
+            ui.colored_label(
+                usage_color(80.0),
+                format!(
+                    "{} authorized_keys: removing or breaking the key Telepad logs in with locks                      Telepad (and you) out of this host. Saved only when you click Save.",
+                    icons::WARNING
+                ),
+            );
+        }
         ui.horizontal(|ui| {
             let icon = match t.side {
                 Side::Local => icons::DESKTOP,

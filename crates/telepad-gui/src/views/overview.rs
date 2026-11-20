@@ -121,7 +121,7 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
                             n: 0,
                             used: &mut used,
                         };
-                        host_row(&mut cells, i, &m.hosts[i], reorder, out);
+                        host_row(&mut cells, i, &m.hosts[i], reorder);
                         let resp = row.response();
                         if resp.clicked() {
                             out.push(Msg::Select(Some(i)));
@@ -185,20 +185,17 @@ impl Cells<'_, '_, '_> {
     }
 }
 
-fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, grip: bool, out: &mut Vec<Msg>) {
+fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, grip: bool) {
     row.col(|ui| {
         if grip {
             grip_handle(ui, i);
         }
         status_dot(ui, h);
     });
+    // Plain text: the whole row opens the host on click and its menu on
+    // right-click, also over the name.
     row.col(|ui| {
-        if ui
-            .add(egui::Link::new(RichText::new(&h.entry.alias).strong()))
-            .clicked()
-        {
-            out.push(Msg::Select(Some(i)));
-        }
+        ui.label(RichText::new(&h.entry.alias).strong());
     });
     row.col(|ui| clipped(ui, RichText::new(&h.entry.note).italics()));
     row.col(|ui| clipped(ui, RichText::new(&h.entry.hostname)));

@@ -126,8 +126,10 @@ pub struct KeysDraft {
     pub server: Option<String>,
     /// By public key: the key (fingerprint) whose servers are shown.
     pub open_key: Option<String>,
-    /// Narrows the server and key lists (alias, comment, fingerprint).
+    /// Narrows the server and key lists (alias, comment, fingerprint, group).
     pub list_filter: String,
+    /// Add into this group (#85): the `#` line that names it; empty = no group.
+    pub group: String,
     pub text: String,
     /// Narrows the host list (alias, address, description, OS).
     pub filter: String,
@@ -187,6 +189,8 @@ pub struct KeyHolders {
     pub supported: bool,
     /// Comments seen for it on any host.
     pub comments: Vec<String>,
+    /// Groups it is in on any host (#85); empty = no group anywhere.
+    pub groups: Vec<String>,
     /// Aliases, in host order; `true` = Telepad logs in to that host with it.
     pub hosts: Vec<(String, bool)>,
 }
@@ -210,6 +214,7 @@ pub fn key_holders(m: &Model) -> Vec<KeyHolders> {
                         key: ak.key.clone(),
                         supported: ak.supported,
                         comments: Vec::new(),
+                        groups: Vec::new(),
                         hosts: Vec::new(),
                     });
                     out.len() - 1
@@ -219,12 +224,33 @@ pub fn key_holders(m: &Model) -> Vec<KeyHolders> {
             if !ak.key.comment.is_empty() && !k.comments.contains(&ak.key.comment) {
                 k.comments.push(ak.key.comment.clone());
             }
+            if let Some(g) = &ak.group
+                && !k.groups.contains(g)
+            {
+                k.groups.push(g.clone());
+            }
             if !k.hosts.iter().any(|(a, _)| *a == h.entry.alias) {
                 k.hosts.push((h.entry.alias.clone(), login));
             }
         }
     }
     out
+}
+
+/// Every group name found on the loaded hosts, A–Z (#85).
+pub fn key_groups(m: &Model) -> Vec<String> {
+    let mut g: Vec<String> = m
+        .auth_keys
+        .values()
+        .filter_map(|v| match v {
+            AkHost::Ready(h) => Some(h.keys.iter().filter_map(|k| k.group.clone())),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    g.sort_by_key(|s| s.to_lowercase());
+    g.dedup();
+    g
 }
 
 /// A host the key window can change: saved, with SSH (not RDP-only).
