@@ -21,11 +21,13 @@ mod run_info;
 mod sensors;
 mod text_editor;
 mod update_window;
+mod workspace;
 
 use std::time::Instant;
 
 use eframe::egui;
-use telepad_app::{Drafts, Model, Msg, OverviewPage};
+use telepad_app::workspace::Win;
+use telepad_app::{Drafts, Model, Msg};
 
 use crate::icons::{self, label as il};
 use crate::widgets::usage_color;
@@ -45,51 +47,71 @@ pub fn draw(root: &mut egui::Ui, m: &Model, d: &mut Drafts, now: Instant) -> Vec
         return out;
     }
 
-    egui::Panel::left("hosts")
-        .resizable(true)
-        .default_size(290.0)
-        .show(root, |ui| panels::host_list(ui, m, d, &mut out));
+    let width = if m.ws.sidebar_collapsed { 64.0 } else { 236.0 };
+    egui::Panel::left("pages")
+        .resizable(false)
+        .exact_size(width)
+        .show(root, |ui| workspace::sidebar(ui, m, &mut out));
 
-    egui::CentralPanel::default().show(root, |ui| match m.selected {
-        None if m.overview == OverviewPage::Docker => {
-            docker_overview::docker_overview(ui, m, &d.filter, &mut out);
-        }
-        None => {
-            overview_toolbar(ui, d, &mut out);
-            if d.overview_cards {
-                cards::cards(ui, m, &d.filter, d.sort, &mut out);
-            } else {
-                overview::overview(ui, m, &d.filter, d.sort, &mut out);
-            }
-        }
-        Some(i) => {
-            if let Some(h) = m.hosts.get(i) {
-                let shown_by = telepad_app::cluster_shown_by(m, i)
-                    .and_then(|j| m.hosts.get(j))
-                    .map(|o| o.entry.alias.clone());
-                detail::detail(
-                    ui,
-                    h,
-                    i,
-                    shown_by.as_deref(),
-                    &mut d.ports_nginx_only,
-                    &mut out,
-                );
-            }
-        }
-    });
+    egui::CentralPanel::default()
+        .frame(egui::Frame::central_panel(&ctx.global_style()).inner_margin(0.0))
+        .show(root, |ui| {
+            workspace::workspace(
+                ui,
+                m,
+                d,
+                &mut out,
+                now,
+                &mut |ui, m, d, win, focused, out| page(ui, m, d, win, focused, out, now),
+            );
+        });
 
+    files::close_guard(&ctx, m, d, &mut out);
+    text_editor::raise_on_question(&ctx, m, &mut out);
     editor::editor_window(&ctx, d, &mut out);
     import::import_window(&ctx, m, &mut out);
     import::paste_window(&ctx, d, &mut out);
-    keys::keys_window(&ctx, m, d, &mut out);
     run_info::run_info_window(&ctx, d, &mut out);
     confirm::delete_confirm(&ctx, m, &mut out);
     update_window::update_window(&ctx, m, d, &mut out);
-    database::db_windows(&ctx, m, d, &mut out);
-    host_sync::host_sync_window(&ctx, m, d, &mut out);
-    files::file_windows(&ctx, m, d, &mut out, now);
+    host_sync::host_sync_dialogs(&ctx, m, d, &mut out);
     out
+}
+
+/// The content of one page's inner window.
+fn page(
+    ui: &mut egui::Ui,
+    m: &Model,
+    d: &mut Drafts,
+    win: Win,
+    focused: bool,
+    out: &mut Vec<Msg>,
+    now: Instant,
+) {
+    match win {
+        Win::Overview => {
+            overview_toolbar(ui, d, out);
+            if d.overview_cards {
+                cards::cards(ui, m, &d.filter, d.sort, out);
+            } else {
+                overview::overview(ui, m, &d.filter, d.sort, out);
+            }
+        }
+        Win::Docker => docker_overview::docker_overview(ui, m, &d.filter, out),
+        Win::Host => {
+            let Some(i) = m.selected else { return };
+            let Some(h) = m.hosts.get(i) else { return };
+            let shown_by = telepad_app::cluster_shown_by(m, i)
+                .and_then(|j| m.hosts.get(j))
+                .map(|o| o.entry.alias.clone());
+            detail::detail(ui, h, i, shown_by.as_deref(), &mut d.ports_nginx_only, out);
+        }
+        Win::HostSync => host_sync::host_sync_page(ui, m, d, out),
+        Win::Keys => keys::keys_page(ui, m, d, out),
+        Win::Files(id) => files::files_page(ui, m, d, id, focused, out, now),
+        Win::Db(id) => database::db_page(ui, m, d, id, out),
+        Win::Editor(id) => text_editor::editor_page(ui, m, d, id, focused, out),
+    }
 }
 
 /// Table | Cards switch; in card view also "Sort by" (the table sorts by its headers).

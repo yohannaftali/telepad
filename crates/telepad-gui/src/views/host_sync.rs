@@ -40,21 +40,19 @@ fn summary(h: &HostEntry) -> String {
     s
 }
 
-pub fn host_sync_window(ctx: &egui::Context, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
+/// The Host Management page (an inner window of the workspace).
+pub fn host_sync_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
     let Some(hs) = &m.host_sync else {
         return;
     };
-    let mut open = true;
-    egui::Window::new(il(icons::SYNC, "Host Management"))
-        .id(egui::Id::unique("host-sync"))
-        .default_size([1150.0, 680.0])
-        .resizable(true)
-        .collapsible(false)
-        .open(&mut open)
-        .show(ctx, |ui| body(ui, m, hs, &mut d.host_sync, out));
-    if !open {
-        send(out, HsMsg::Close);
-    }
+    body(ui, m, hs, &mut d.host_sync, out);
+}
+
+/// Its host form and apply preview, over the workspace.
+pub fn host_sync_dialogs(ctx: &egui::Context, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
+    let Some(hs) = &m.host_sync else {
+        return;
+    };
     form_window(ctx, &mut d.host_sync, out);
     preview_window(ctx, hs, out);
 }

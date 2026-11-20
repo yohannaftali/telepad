@@ -4,7 +4,9 @@
 
 A small desktop infrastructure monitor written in Rust. Telepad logs in to your
 hosts with the **system OpenSSH client** and the keys you already use, runs a
-**read-only** POSIX shell script, and shows per host:
+**read-only** POSIX shell script, and shows per host (everything in one window: a page
+sidebar on the left, pages as windows inside Telepad that can be moved, resized,
+minimized, maximized and tabbed):
 
 - OS name and logo, kernel, architecture, uptime
 - CPU model, cores, usage %, load average
@@ -15,7 +17,7 @@ hosts with the **system OpenSSH client** and the keys you already use, runs a
 - Docker containers and compose stacks: image, state, container IP per network, published ports
 - **Open SSH** (a terminal logged in to the host), **Copy ssh command**, and **Open RDP**
   for Windows hosts without SSH
-- **Open files…**: a WinSCP-style window per host, this computer on the left and the host
+- **Open files…**: a WinSCP-style file window per host, this computer on the left and the host
   on the right; upload / download with drag and drop, overwrite questions and progress,
   over SFTP (scp when the host has no SFTP server, rsync when both sides have it); new
   folder / file, rename, delete, properties and permissions on both sides; a VS Code-like

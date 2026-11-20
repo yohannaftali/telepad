@@ -371,28 +371,30 @@ fn act_widget(
     text: &str,
     small: bool,
 ) -> egui::Response {
-    ui.scope(|ui| {
-        let c = kind.colors();
-        let w = &mut ui.visuals_mut().widgets;
-        for (state, fill) in [
-            (&mut w.inactive, c.fill),
-            (&mut w.hovered, c.hover),
-            (&mut w.active, c.press),
-        ] {
-            state.weak_bg_fill = fill;
-            state.bg_fill = fill;
-            state.fg_stroke.color = c.text;
-            state.bg_stroke = egui::Stroke::new(1.0, fill);
-            state.corner_radius = egui::CornerRadius::same(5);
-        }
-        let mut b = egui::Button::new(RichText::new(text).color(c.text))
-            .wrap_mode(egui::TextWrapMode::Extend);
-        if small {
-            b = b.small();
-        }
-        ui.add_enabled(enabled, b)
-    })
-    .inner
+    // Colours set on this Ui and put back right after: a child Ui (scope)
+    // would keep a wrapping row from moving the button to the next line.
+    let c = kind.colors();
+    let saved = ui.visuals().widgets.clone();
+    let w = &mut ui.visuals_mut().widgets;
+    for (state, fill) in [
+        (&mut w.inactive, c.fill),
+        (&mut w.hovered, c.hover),
+        (&mut w.active, c.press),
+    ] {
+        state.weak_bg_fill = fill;
+        state.bg_fill = fill;
+        state.fg_stroke.color = c.text;
+        state.bg_stroke = egui::Stroke::new(1.0, fill);
+        state.corner_radius = egui::CornerRadius::same(5);
+    }
+    let mut b =
+        egui::Button::new(RichText::new(text).color(c.text)).wrap_mode(egui::TextWrapMode::Extend);
+    if small {
+        b = b.small();
+    }
+    let r = ui.add_enabled(enabled, b);
+    ui.visuals_mut().widgets = saved;
+    r
 }
 
 /// Text in the action colour for menu entries and headings, where a filled

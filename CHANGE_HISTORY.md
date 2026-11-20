@@ -2,6 +2,38 @@
 
 Newest first.
 
+## [2026-11-20] — feat(ui): WinBox-style single window (#77)
+- Issue #77 addressed on GitHub (branch `77-workspace`).
+- App: `workspace.rs` — `Win` (Overview, Docker, Host, HostSync, Keys, Files(id), Db(id),
+  Editor(id)), `Group` (inner window: tabs, active, rect, minimized, maximized, raise),
+  `Workspace` (`open`, `close`, `sync` = session windows follow their session, `update(WsMsg)`:
+  Open / Close / Focus / Minimize / ToggleMaximize / ActivateTab / Merge / Detach / Geometry /
+  SetSidebarCollapsed, `save` / `restore`); `Msg::Ws`; `Model::ws`; `Select` opens the host
+  window, `ShowOverview` opens Overview / Docker; the layout is saved with the view settings
+  when it changes (`UiPrefs` + `sidebar_collapsed`, `workspace`; settings `ui_sidebar_collapsed`,
+  `ui_workspace`). Overview, Docker, Host Management and Public keys reopen on start; host,
+  files, database and editor windows do not (sessions). First start: Overview maximized.
+- GUI: `views/workspace.rs` — page sidebar (Overview — all hosts, Overview — Docker, Public
+  keys, Host Management, Files → host menu, Databases → open connections; open-window list;
+  fold to icons), inner windows as framed areas clipped to the workspace (title bar drag,
+  right / bottom / corner resize, minimize strip, maximize / double-click, close, tab menu
+  "Show as a tab in" / "Own window", middle-click closes a tab), keys only in the front window.
+  The host list is gone. Files, databases and the editor are no longer OS windows
+  (`show_viewport_immediate` removed); Host Management and Public keys are pages; their
+  dialogs stay over the workspace. Closing Telepad with unsaved editor tabs still asks.
+  Coloured action buttons no longer use a child Ui (a wrapping row now wraps them); file
+  panes clip to their half; the transfer queue keeps ≤ 40 % of a small window.
+- Icons: `X`, `SQUARE`, `SIDEBAR`, `APP_WINDOW` (glyph test list).
+- Docs: USER_MANUAL (Window layout with wireframe, windows inside Telepad, Hosts section
+  replaces Host list), README, AGENTS.
+- Verified on Windows 11 (throwaway workspaces `hm/ws` and `fmws`, lab containers
+  `telepad-fm-sftp`): sidebar pages, host window from the overview, drag, minimize / restore,
+  maximize, Docker merged as a tab into Overview, Host Management page (toolbar wraps),
+  layout restored after restart, Files window with both panes, editor window from a
+  double-click and its unsaved question (Don't save; file unchanged), folded sidebar,
+  Public keys page; fmt, clippy, tests (8 new workspace tests). Not verified here: a
+  database window (no database lab running; same code path as the others), macOS / Linux.
+
 ## [2026-11-20] — feat(ui): colour action buttons by risk — red delete / revoke, yellow edit, green add (#76)
 - Issue #76 addressed on GitHub (branch `76-button-colours`).
 - `widgets.rs`: `Act` (Danger / Edit / Add), `act_button` / `act_small` (filled, hover and

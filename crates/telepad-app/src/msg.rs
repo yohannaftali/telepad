@@ -90,6 +90,8 @@ pub enum Msg {
     /// Host list buttons: "Overview — all hosts" / "Overview — Docker".
     ShowOverview(crate::state::OverviewPage),
     SelectAlias(String),
+    /// Workspace: open, close, move, minimize, maximize, tab inner windows (#77).
+    Ws(crate::workspace::WsMsg),
     /// Host list: compact (true) or detailed rows.
     SetCompactHostList(bool),
     /// Host list grouped by status.

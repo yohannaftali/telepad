@@ -1,8 +1,8 @@
 //! Editor window of a file window (#64), VS Code-like: tabs with an unsaved
 //! dot, line numbers, current line, syntax colours, find / replace / go to
 //! line, status bar (line:column, indentation, language, line endings,
-//! encoding). One native window per host; its tabs hold files of this
-//! computer and of the host together.
+//! encoding). One inner window of the workspace per host (#77); its tabs hold
+//! files of this computer and of the host together.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
@@ -12,9 +12,10 @@ use eframe::egui::{
     self, Color32, Key, KeyboardShortcut, Modifiers, RichText,
     text::{CCursor, CCursorRange, LayoutJob, TextFormat},
 };
-use telepad_app::Msg;
-use telepad_app::editor::{Answer, Bar, EdDraft, EdMsg, EdTab, TabState, Unsaved, has_unsaved};
-use telepad_app::files::{FileDraft, FileSession, FmMsg, Side};
+use telepad_app::editor::{Answer, Bar, EdDraft, EdMsg, EdTab, TabState, Unsaved};
+use telepad_app::files::{FileSession, FmMsg, Side};
+use telepad_app::workspace::{Win, WsMsg};
+use telepad_app::{Drafts, Model, Msg};
 use telepad_core::db::human_size;
 use telepad_core::files::syntax::{self, Lang, Tok};
 use telepad_core::files::text::{self, FindOpts};
@@ -83,43 +84,46 @@ fn cursor_of(ctx: &egui::Context, win: u64, tab: u64) -> Option<Range<usize>> {
     Some(a.min(b)..a.max(b))
 }
 
-pub fn editor_window(ctx: &egui::Context, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>) {
-    let e = &s.editor;
-    if e.tabs.is_empty() {
-        return;
-    }
-    let vid = egui::ViewportId::from_hash_of(("telepad-editor", s.id));
-    let mut builder = egui::ViewportBuilder::default()
-        .with_title(format!("Editor — {} — Telepad", s.host.alias))
-        .with_inner_size([1100.0, 760.0])
-        .with_min_inner_size([600.0, 360.0]);
-    if let Some(icon) = super::files::window_icon() {
-        builder = builder.with_icon(icon);
-    }
-    // The question about unsaved files: bring the editor to the front once.
-    let asked = egui::Id::unique(("telepad-ed-asked", s.id));
-    if e.ask.is_some() {
-        if !ctx.data(|m| m.get_temp::<bool>(asked).unwrap_or(false)) {
-            ctx.send_viewport_cmd_to(vid, egui::ViewportCommand::Focus);
-            ctx.data_mut(|m| m.insert_temp(asked, true));
-        }
-    } else {
-        ctx.data_mut(|m| m.remove::<bool>(asked));
-    }
-    ctx.show_viewport_immediate(vid, builder, |ui, _| {
-        if ui.input(|i| i.viewport().close_requested()) {
-            if has_unsaved(e, &d.editor) {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+/// The question about unsaved files brings the editor window to the front
+/// once (it may be minimized or behind others).
+pub fn raise_on_question(ctx: &egui::Context, m: &Model, out: &mut Vec<Msg>) {
+    for s in &m.files {
+        let asked = egui::Id::unique(("telepad-ed-asked", s.id));
+        if s.editor.ask.is_some() {
+            if !ctx.data(|m| m.get_temp::<bool>(asked).unwrap_or(false)) {
+                out.push(Msg::Ws(WsMsg::Open(Win::Editor(s.id))));
+                ctx.data_mut(|m| m.insert_temp(asked, true));
             }
-            send(out, s.id, EdMsg::CloseWindow);
+        } else {
+            ctx.data_mut(|m| m.remove::<bool>(asked));
         }
-        window(ui, s, &mut d.editor, out);
-        question(ui, s, &d.editor, out);
-    });
+    }
 }
 
-fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, out: &mut Vec<Msg>) {
+/// One host's editor: an inner window of the workspace. Its shortcuts work
+/// only while it is the top window (`focused`).
+pub fn editor_page(
+    ui: &mut egui::Ui,
+    m: &Model,
+    d: &mut Drafts,
+    id: u64,
+    focused: bool,
+    out: &mut Vec<Msg>,
+) {
+    let Some(s) = m.files.iter().find(|s| s.id == id) else {
+        return;
+    };
+    let Some(dr) = d.files.get_mut(&s.id) else {
+        return;
+    };
+    if s.editor.tabs.is_empty() {
+        return;
+    }
+    window(ui, s, &mut dr.editor, focused, out);
+    question(ui, s, &dr.editor, out);
+}
+
+fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, out: &mut Vec<Msg>) {
     let id = s.id;
     let e = &s.editor;
     let Some(t) = e.active.and_then(|a| e.tab(a)).or(e.tabs.first()) else {
@@ -128,7 +132,7 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, out: &mut Vec<Ms
     let tid = t.id;
     let ready = t.state == TabState::Ready;
     // Shortcuts first: the text field would take Ctrl+H / Ctrl+W as edits.
-    if e.ask.is_none() {
+    if focused && e.ask.is_none() {
         let sc = |m: Modifiers, k: Key| {
             ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)))
         };

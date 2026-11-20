@@ -83,7 +83,7 @@ impl ThemePref {
 }
 
 /// View settings kept in the database so they survive restarts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiPrefs {
     /// One line per host in the host list (default), or the detailed three-line rows.
     pub compact_host_list: bool,
@@ -92,6 +92,11 @@ pub struct UiPrefs {
     /// Overview as cards instead of the table.
     pub overview_cards: bool,
     pub theme: ThemePref,
+    /// Page sidebar shows icons only (#77).
+    pub sidebar_collapsed: bool,
+    /// Inner windows of the workspace (#77), as written by the app's
+    /// `Workspace::save`; empty = default layout.
+    pub workspace: String,
 }
 
 impl Default for UiPrefs {
@@ -101,6 +106,8 @@ impl Default for UiPrefs {
             group_by_status: false,
             overview_cards: false,
             theme: ThemePref::System,
+            sidebar_collapsed: false,
+            workspace: String::new(),
         }
     }
 }
@@ -349,6 +356,8 @@ PRAGMA user_version = {SCHEMA_VERSION};"
             theme: self
                 .setting("ui_theme")?
                 .map_or(d.theme, |v| ThemePref::parse(&v)),
+            sidebar_collapsed: flag("ui_sidebar_collapsed", d.sidebar_collapsed)?,
+            workspace: self.setting("ui_workspace")?.unwrap_or_default(),
         })
     }
 
@@ -359,6 +368,8 @@ PRAGMA user_version = {SCHEMA_VERSION};"
             ("ui_group_by_status", flag(p.group_by_status)),
             ("ui_overview_cards", flag(p.overview_cards)),
             ("ui_theme", p.theme.as_str()),
+            ("ui_sidebar_collapsed", flag(p.sidebar_collapsed)),
+            ("ui_workspace", p.workspace.as_str()),
         ];
         let tx = self.conn.unchecked_transaction()?;
         for (k, v) in rows {
@@ -1134,6 +1145,8 @@ mod tests {
             group_by_status: true,
             overview_cards: true,
             theme: ThemePref::Light,
+            sidebar_collapsed: true,
+            workspace: "0,0,700,500|0|0|overview|overview;docker".into(),
         };
         s.set_ui_prefs(&p).unwrap();
         assert_eq!(s.ui_prefs().unwrap(), p);

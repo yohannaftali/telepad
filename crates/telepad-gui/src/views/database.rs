@@ -1,12 +1,13 @@
 //! Database windows (#52–#54), HeidiSQL style: connect dialog, then a tree of
 //! databases / schemas / tables on the left and Host / Database / Table /
-//! Data / Query tabs on the right. Each connection is its own native window.
-
-use std::sync::{Arc, OnceLock};
+//! Data / Query tabs on the right. Each connection is an inner window of the
+//! workspace (#77).
 
 use eframe::egui::{self, Color32, RichText};
 use egui_extras::{Column as TCol, TableBuilder};
-use telepad_app::db::{DbConfirm, DbDraft, DbMsg, DbSession, DbStatus, DbTab, PAGE_SIZES, RowRef};
+use telepad_app::db::{
+    DbConfirm, DbDraft, DbId, DbMsg, DbSession, DbStatus, DbTab, PAGE_SIZES, RowRef,
+};
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::db::ddl::{FkEdit, IndexEdit, TableEdit};
 use telepad_core::db::{
@@ -32,43 +33,21 @@ fn green() -> Color32 {
     usage_color(10.0)
 }
 
-fn window_icon() -> Option<Arc<egui::IconData>> {
-    static ICON: OnceLock<Option<Arc<egui::IconData>>> = OnceLock::new();
-    ICON.get_or_init(|| {
-        eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon/telepad.png"))
-            .ok()
-            .map(Arc::new)
-    })
-    .clone()
-}
-
-/// One native window per open database connection.
-pub fn db_windows(ctx: &egui::Context, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
-    for s in &m.db {
-        let Some(dr) = d.db.get_mut(&s.id) else {
-            continue;
-        };
-        let mut builder = egui::ViewportBuilder::default()
-            .with_title(format!("{} — Telepad", s.target.title()))
-            .with_inner_size([1180.0, 740.0])
-            .with_min_inner_size([760.0, 440.0]);
-        if let Some(icon) = window_icon() {
-            builder = builder.with_icon(icon);
-        }
-        let vid = egui::ViewportId::from_hash_of(("telepad-db", s.id));
-        ctx.show_viewport_immediate(vid, builder, |ui, _class| {
-            if ui.input(|i| i.viewport().close_requested()) {
-                send(out, DbMsg::Close(s.id));
-            }
-            if s.status == DbStatus::Ready {
-                browser(ui, s, dr, out);
-            } else {
-                egui::CentralPanel::default().show(ui, |ui| login(ui, s, dr, out));
-            }
-            confirm(ui, s, dr, out);
-            viewer(ui, dr);
-        });
+/// One database connection: an inner window of the workspace.
+pub fn db_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, id: DbId, out: &mut Vec<Msg>) {
+    let Some(s) = m.db.iter().find(|s| s.id == id) else {
+        return;
+    };
+    let Some(dr) = d.db.get_mut(&s.id) else {
+        return;
+    };
+    if s.status == DbStatus::Ready {
+        browser(ui, s, dr, out);
+    } else {
+        egui::CentralPanel::default().show(ui, |ui| login(ui, s, dr, out));
     }
+    confirm(ui, s, dr, out);
+    viewer(ui, dr);
 }
 
 fn login(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) {
