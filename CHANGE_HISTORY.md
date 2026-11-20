@@ -2,6 +2,11 @@
 
 Newest first.
 
+## [2026-11-20] — Telepad 0.8.5
+- Fixed: copy and paste (Ctrl+C / Ctrl+X / Ctrl+V, Cmd on macOS) now work with the system
+  clipboard in every text field — for example pasting a public key into Public keys…
+  (#71).
+
 ## [2026-11-20] — Tested and merged: copy and paste in text fields (#71)
 - PR #74 merged (CI green on Windows, macOS, Linux builds and checks, `db-live`,
   `files-live`); issue closed.
