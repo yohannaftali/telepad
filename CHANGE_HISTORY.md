@@ -2,6 +2,22 @@
 
 Newest first.
 
+## [2026-11-20] — Telepad 0.9.0
+- New: **one window, WinBox style** (#77) — a page sidebar on the left (Overview — all
+  hosts, Overview — Docker, Authorized keys, Host Management, Files, Databases; folds to
+  icons) and pages as windows inside Telepad that move, resize, minimize, maximize and
+  group as tabs. The host list is gone (hosts are in the overview); files, databases and
+  the editor no longer open separate windows; the layout is remembered.
+- New: **Authorized keys** page (#78) — the keys in each host's `~/.ssh/authorized_keys`,
+  by server or by public key, with Revoke and Add shortcuts (still confirmed by typing
+  `revoke` / `add`; Telepad's own login key is never revoked).
+- Changed: **button colours** (#76) — red for delete / revoke / drop, yellow for edit,
+  green for add, with separate shades for the dark and light themes.
+
+## [2026-11-20] — Tested and merged: Authorized keys page (#78)
+- PR #81 merged (CI green on Windows, macOS, Linux, `db-live`, `files-live`); issue closed.
+- Tested on Windows 11 against the lab containers (see the #78 entry).
+
 ## [2026-11-20] — feat(keys): Authorized keys page (#78)
 - Issue #78 addressed on GitHub (branch `78-authorized-keys`).
 - Core: `authorized_keys::list_script` (read-only `cat` of `~/.ssh/authorized_keys` between
