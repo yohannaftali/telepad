@@ -2,6 +2,20 @@
 
 Newest first.
 
+## [2026-11-20] — fix(ui): copy and paste do not reach the system clipboard in text fields
+- Issue #71 created on GitHub (found while testing #64)
+- Scope: workspace `Cargo.toml` (eframe built without its `clipboard` feature) / gui
+- Labels: bug
+
+## [2026-11-20] — Tested and merged: built-in editor (#64)
+- PR #70 merged (CI green on Windows, macOS, Linux, `db-live`, `files-live`); issue closed.
+- Tested on Windows 11 against the lab containers, a throwaway database and a scratch
+  folder (see the #64 entry below for the walk-through).
+- Fixed while testing: the text field drops its selection without focus, so find / replace
+  keep their own current match; `$2_` in a regex replacement is group 2 then `_`; Enter in
+  Go to line no longer also adds a newline; diff box height; long paths no longer push
+  Save / Find out of the window; current line visible in the light theme.
+
 ## [2026-11-20] — feat(files): built-in VS Code-like editor for local and remote files (#64)
 - Issue #64 addressed on GitHub (branch `64-editor`).
 - Core: `files/text.rs` (decode / encode keeping CRLF, BOM and the final newline; binary,
