@@ -2,6 +2,38 @@
 
 Newest first.
 
+## [2026-11-20] — fix(ui): light theme too light (#86)
+- Issue #86 addressed on GitHub (branch `86-light-theme`).
+- Cause: egui's light visuals put panels and windows on the same gray 248 and buttons on
+  gray 230 without a border, so windows, buttons and the background did not stand apart.
+- Fix: `widgets::light_visuals()` (set with `set_visuals_of(Theme::Light, …)` at start):
+  panel / workspace #e6e9ef, windows white with a #aeb6c2 border and a stronger shadow,
+  buttons #e2e6ec with a #a9b2bf border (hover / pressed darker), inputs white with a border,
+  faint rows #f1f3f6. Contrast tests run on the new panel and window colours, plus a test that
+  the layers stand apart. Dark theme unchanged.
+- Verified on Windows 11 (throwaway workspace, light theme): sidebar, Overview and Authorized
+  keys windows; fmt, clippy, tests.
+
+## [2026-11-20] — fix(ui): light theme too light — clearer backgrounds, window borders and buttons
+- Issue #86 created on GitHub (user findings on 0.9.0)
+- Scope: gui (theme visuals, widgets palette, workspace frames)
+- Labels: bug
+
+## [2026-11-20] — feat(keys): key groups from authorized_keys comments, add into a group, edit the file in the editor
+- Issue #85 created on GitHub (user findings on 0.9.0)
+- Scope: core (authorized_keys parser, add script) / app / gui (keys)
+- Labels: enhancement
+
+## [2026-11-20] — feat(docker): Docker / Podman page name and Kubernetes / Docker Swarm pages
+- Issue #84 created on GitHub (user findings on 0.9.0)
+- Scope: gui (docker_overview, new cluster pages) / app (workspace, table)
+- Labels: enhancement
+
+## [2026-11-20] — feat(ui): Hosts page polish — full-width table, auto-fit columns, search in page, hover, SSH / Files buttons, sidebar cleanup
+- Issue #83 created on GitHub (user findings on 0.9.0)
+- Scope: gui (overview, cards, workspace sidebar, panels, widgets) / app
+- Labels: enhancement
+
 ## [2026-11-20] — Telepad 0.9.0
 - New: **one window, WinBox style** (#77) — a page sidebar on the left (Overview — all
   hosts, Overview — Docker, Authorized keys, Host Management, Files, Databases; folds to
