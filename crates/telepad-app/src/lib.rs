@@ -17,6 +17,7 @@ mod msg;
 mod state;
 mod table;
 mod update;
+pub mod workspace;
 
 pub use msg::{Effect, Msg};
 pub use state::{
@@ -40,3 +41,5 @@ mod tests_editor;
 mod tests_files;
 #[cfg(test)]
 mod tests_hostsync;
+#[cfg(test)]
+mod tests_workspace;

@@ -1,10 +1,9 @@
 //! File windows (#62–#64): WinSCP-style, this computer on the left and the
 //! host on the right, transfer queue at the bottom; edit / new / rename /
 //! delete / permissions / properties from each pane's toolbar, right-click
-//! menu and keys (F4, F7, F2, Del). One native window per host, plus its
-//! editor window ([`super::text_editor`]).
+//! menu and keys (F4, F7, F2, Del). One inner window of the workspace per
+//! host (#77), plus its editor window ([`super::text_editor`]).
 
-use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use eframe::egui::{self, Color32, RichText};
@@ -44,68 +43,55 @@ struct DragFiles {
     names: Vec<String>,
 }
 
-pub(super) fn window_icon() -> Option<Arc<egui::IconData>> {
-    static ICON: OnceLock<Option<Arc<egui::IconData>>> = OnceLock::new();
-    ICON.get_or_init(|| {
-        eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon/telepad.png"))
-            .ok()
-            .map(Arc::new)
-    })
-    .clone()
+/// Telepad itself closing with unsaved editor tabs: ask in each editor first.
+pub fn close_guard(ctx: &egui::Context, m: &Model, d: &Drafts, out: &mut Vec<Msg>) {
+    if !ctx.input(|i| i.viewport().close_requested()) {
+        return;
+    }
+    let mut ask = false;
+    for s in &m.files {
+        if let Some(dr) = d.files.get(&s.id)
+            && has_unsaved(&s.editor, &dr.editor)
+        {
+            ask = true;
+            send(out, FmMsg::Close(s.id));
+        }
+    }
+    if ask {
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+    }
 }
 
-pub fn file_windows(
-    ctx: &egui::Context,
+/// One host's file window: an inner window of the workspace. `focused` =
+/// it is the top window, so its keys (F2, F4, F5, F7, Del) are live.
+pub fn files_page(
+    ui: &mut egui::Ui,
     m: &Model,
     d: &mut Drafts,
+    id: u64,
+    focused: bool,
     out: &mut Vec<Msg>,
     now: Instant,
 ) {
-    // Telepad itself closing with unsaved editor tabs: ask in each editor first.
-    if ctx.input(|i| i.viewport().close_requested()) {
-        let mut ask = false;
-        for s in &m.files {
-            if let Some(dr) = d.files.get(&s.id)
-                && has_unsaved(&s.editor, &dr.editor)
-            {
-                ask = true;
-                send(out, FmMsg::Close(s.id));
-            }
-        }
-        if ask {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        }
-    }
-    for s in &m.files {
-        let Some(dr) = d.files.get_mut(&s.id) else {
-            continue;
-        };
-        let mut builder = egui::ViewportBuilder::default()
-            .with_title(format!("Files — {} — Telepad", s.host.alias))
-            .with_inner_size([1250.0, 760.0])
-            .with_min_inner_size([760.0, 420.0]);
-        if let Some(icon) = window_icon() {
-            builder = builder.with_icon(icon);
-        }
-        let vid = egui::ViewportId::from_hash_of(("telepad-files", s.id));
-        ctx.show_viewport_immediate(vid, builder, |ui, _| {
-            if ui.input(|i| i.viewport().close_requested()) {
-                // Unsaved editor tabs: the question opens in the editor first.
-                if has_unsaved(&s.editor, &dr.editor) {
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                }
-                send(out, FmMsg::Close(s.id));
-            }
-            window(ui, s, dr, out, now);
-            ask(ui, s, dr, out);
-            dialog(ui, s, dr, out);
-        });
-        super::text_editor::editor_window(ctx, s, dr, out);
-    }
+    let Some(s) = m.files.iter().find(|s| s.id == id) else {
+        return;
+    };
+    let Some(dr) = d.files.get_mut(&s.id) else {
+        return;
+    };
+    window(ui, s, dr, focused, out, now);
+    ask(ui, s, dr, out);
+    dialog(ui, s, dr, out);
 }
 
-fn window(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>, now: Instant) {
+fn window(
+    ui: &mut egui::Ui,
+    s: &FileSession,
+    d: &mut FileDraft,
+    focused: bool,
+    out: &mut Vec<Msg>,
+    now: Instant,
+) {
     let id = s.id;
     egui::Panel::top(("files-top", id)).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -148,9 +134,12 @@ fn window(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<M
             }
         });
     });
+    // In a small window the file lists keep most of the height.
+    let max_queue = (ui.available_height() * 0.4).max(90.0);
     egui::Panel::bottom(("files-queue", id))
         .resizable(true)
-        .default_size(190.0)
+        .default_size(190.0f32.min(max_queue))
+        .max_size(max_queue)
         .show(ui, |ui| queue(ui, s, d, out, now));
     egui::CentralPanel::default().show(ui, |ui| {
         if let Some(e) = &s.error {
@@ -167,7 +156,8 @@ fn window(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<M
         // Keys act on the pane clicked last, never while typing in a field
         // or while a dialog is open.
         let typing = ui.ctx().egui_wants_keyboard_input();
-        if !typing
+        if focused
+            && !typing
             && s.dialog.is_none()
             && s.ask.is_none()
             && let Some(side) = d.active
@@ -211,7 +201,8 @@ fn window(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<M
                     }
                 });
         }
-        if ui.input(|i| i.key_pressed(egui::Key::F5))
+        if focused
+            && ui.input(|i| i.key_pressed(egui::Key::F5))
             && let Some(side) = d.active
         {
             let names: Vec<String> = d.selected(side).iter().cloned().collect();
@@ -232,6 +223,9 @@ fn window(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<M
 }
 
 fn pane(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, side: Side, out: &mut Vec<Msg>) {
+    // A narrow window: the table scrolls inside its own half, never over the other.
+    let half = ui.max_rect().intersect(ui.clip_rect());
+    ui.set_clip_rect(half);
     let id = s.id;
     let p: &Pane = s.pane(side);
     ui.horizontal(|ui| {

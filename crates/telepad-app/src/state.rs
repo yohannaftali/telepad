@@ -53,6 +53,10 @@ pub struct Model {
     /// File windows (#62), one per host.
     pub files: Vec<crate::files::FileSession>,
     pub files_next: crate::files::FmId,
+    /// Inner windows of the main window (#77).
+    pub ws: crate::workspace::Workspace,
+    /// The layout last sent to the database (saved again only when it changes).
+    pub ws_saved: (String, bool),
 }
 
 /// A key added to / revoked from several hosts.
@@ -388,12 +392,15 @@ impl UpdateState {
 }
 
 impl Drafts {
-    pub fn ui_prefs(&self) -> UiPrefs {
+    /// View settings to save; the workspace layout comes from the model.
+    pub fn ui_prefs(&self, ws: &crate::workspace::Workspace) -> UiPrefs {
         UiPrefs {
             compact_host_list: self.compact_host_list,
             group_by_status: self.group_by_status,
             overview_cards: self.overview_cards,
             theme: self.theme,
+            sidebar_collapsed: ws.sidebar_collapsed,
+            workspace: ws.save(),
         }
     }
 }

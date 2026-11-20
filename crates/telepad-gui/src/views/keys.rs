@@ -9,25 +9,13 @@ use telepad_core::config::Access;
 use crate::icons::{self, label as il};
 use crate::widgets::{Act, act_button, usage_color};
 
-pub fn keys_window(ctx: &egui::Context, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
+/// The Public keys page (an inner window of the workspace).
+pub fn keys_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
     let Some(k) = &mut d.keys else { return };
-    let mut open = true;
-    // Key, hosts, confirmation and results can be taller than the app window:
-    // keep the window on screen and scroll its content.
-    let max_height = (ctx.content_rect().height() - 120.0).max(200.0);
-    egui::Window::new("Public keys")
-        .collapsible(false)
-        .default_width(640.0)
-        .open(&mut open)
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("keys-window")
-                .max_height(max_height)
-                .show(ui, |ui| body(ui, m, k, out));
-        });
-    if !open {
-        out.push(Msg::KeysClose);
-    }
+    egui::ScrollArea::vertical()
+        .id_salt("keys-window")
+        .auto_shrink(false)
+        .show(ui, |ui| body(ui, m, k, out));
 }
 
 fn body(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {

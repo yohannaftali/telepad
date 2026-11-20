@@ -103,6 +103,7 @@ fn fatal_and_bad_update_settings_are_reported() {
                 group_by_status: true,
                 overview_cards: true,
                 theme: telepad_core::store::ThemePref::Dark,
+                ..Default::default()
             },
         },
         Instant::now(),
@@ -365,13 +366,15 @@ fn docker_overview_groups_containers_of_all_hosts_by_stack() {
     assert_eq!(names("docker01"), ["shop", ""]);
     assert!(names("nothing").is_empty());
 
-    // The overview button switches pages and leaves the host page.
+    // The overview buttons open their page as a window; the host window stays.
     update(&mut s, Msg::Select(Some(2)), t0);
     update(&mut s, Msg::ShowOverview(OverviewPage::Docker), t0);
     assert_eq!(
         (s.model.selected, s.model.overview),
-        (None, OverviewPage::Docker)
+        (Some(2), OverviewPage::Docker)
     );
+    assert!(s.model.ws.is_open(crate::workspace::Win::Docker));
+    assert!(s.model.ws.is_open(crate::workspace::Win::Host));
     update(&mut s, Msg::ShowOverview(OverviewPage::Hosts), t0);
     assert_eq!(s.model.overview, OverviewPage::Hosts);
 

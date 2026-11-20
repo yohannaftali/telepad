@@ -64,6 +64,11 @@ pub const FOLDER: &str = "\u{e24a}";
 pub const CHECK: &str = "\u{e182}";
 pub const MINUS: &str = "\u{e32a}";
 pub const ROW_PLUS: &str = "\u{e59e}";
+/// Workspace windows (#77): close, maximize, sidebar toggle, window list.
+pub const X: &str = "\u{e4f6}";
+pub const SQUARE: &str = "\u{e45e}";
+pub const SIDEBAR: &str = "\u{ec24}";
+pub const APP_WINDOW: &str = "\u{e5da}";
 
 /// Add Phosphor as a fallback font so icon codepoints render in any text.
 pub fn install(ctx: &egui::Context) {
@@ -430,6 +435,10 @@ mod tests {
             CHECK,
             MINUS,
             ROW_PLUS,
+            X,
+            SQUARE,
+            SIDEBAR,
+            APP_WINDOW,
         ] {
             for c in icon.chars() {
                 used.entry(c).or_insert_with(|| "icons.rs".to_string());

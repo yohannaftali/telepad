@@ -7,12 +7,49 @@ How to use Telepad once it is [installed](../README.md#install). For a first run
 
 ## Window layout
 
+Telepad is one window (like MikroTik WinBox): pages open as windows **inside** it.
+
+```
+------------------------------------------------------------------
+Telepad | Refresh all | Theme | search | 2 up 1 down          ☰ |
+------------------------------------------------------------------
+Pages            | +-[Overview — all hosts]-[Overview — Docker]-+ |
+ Overview — all  | | table / cards                     _ □ × ⧉  | |
+ Overview — Dock |  +---------------------------------------------+ |
+ Public keys     |        +-[Files — web1]---------- _ □ × ⧉ +     |
+ Host Management |        | this computer | web1              |     |
+ Files           |        +----------------------------------+     |
+ Databases       | [Host — db01]  (minimized)                      |
+------------------------------------------------------------------
+```
+
 | Area | What it shows |
 |---|---|
-| **Top bar** | **Refresh all**, **Auto every _N_ s**, theme, the search box, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (add, import, export, software update) |
-| **Host list** (left) | The large **Overview — all hosts** and **Overview — Docker** buttons (the one for the page on screen is filled), the **View** switch, then every host (see [Host list](#host-list)) |
-| **Main area** | The overview table, or the detail page of the selected host |
+| **Top bar** | **Refresh all**, **Auto every _N_ s**, theme, the search box, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (settings: add, import, export, Host Management, Public keys, software update) |
+| **Pages** (left sidebar) | One button per page: **Overview — all hosts**, **Overview — Docker**, **Public keys**, **Host Management**, **Files** (pick a host), **Databases** (open connections). Below them, **Open windows** lists every open window (click one to bring it back). The **▯ ‹** button at the top folds the sidebar to icons only; Telepad remembers it |
+| **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
+
+**Windows inside Telepad.** A page button opens its page in a window, or brings the window
+back to the front if it is already open. Each window has a title bar:
+
+- **Move**: drag the title bar. **Resize**: drag the right edge, the bottom edge or the
+  bottom-right corner. Windows stay inside the workspace.
+- **_ (Minimize)** puts it in the strip at the bottom; click it there (or in **Open
+  windows**) to bring it back. **□ (Maximize)** fills the workspace; click again, or
+  double-click the title bar, to get the old size back. **×** closes it (a file window
+  with unsaved editor tabs asks first).
+- **⧉ (Tabs)**: **Show as a tab in** → another window puts this page in that window as a
+  tab; click a tab to show it, middle-click to close it; **Own window** takes it out again.
+- Keys (F2, F4, F5, F7, Del in a file window, Ctrl+S and the others in the editor) go to the
+  window in front; click a window to bring it to the front.
+- Clicking a host in the overview opens its **Host — _name_** window; Files, the editor and
+  each database open as windows too. Dialogs (edit host, import, delete, update, file
+  questions) open over the workspace, never as a separate window of the system.
+- Telepad remembers the windows of Overview, Docker, Host Management and Public keys (place,
+  size, tabs, minimized / maximized) and opens them again on the next start. Host, file,
+  editor and database windows are not reopened (they belong to a session). The first start
+  shows the overview, maximized.
 
 Status dot: green = last check succeeded, red = it failed, blue = first check running,
 grey = no result yet (or not monitored). Usage bars turn yellow and red as they fill; temperatures are blue
@@ -26,38 +63,27 @@ and in menus the same meaning shows as red / yellow / green text.
 
 **Copy and paste**: every text field (forms, filters, the Public keys box, database
 queries, the file window's path bars, the editor) works with the system clipboard:
-Ctrl+C / Ctrl+X / Ctrl+V (Cmd on macOS), in the main window and in the extra windows.
+Ctrl+C / Ctrl+X / Ctrl+V (Cmd on macOS), in every window.
 
 ## Theme
 
 **Theme** in the top bar switches between **System** (follows the Windows / macOS / desktop
 setting, the default), **Light** and **Dark**. The choice is saved in the database.
 
-## Host list
+## Hosts
 
-The list on the left has two views, switched with **View: Compact / Detailed** at its top:
+Telepad 0.9 has no host list on the left any more: the hosts are in **Overview — all
+hosts** (table or cards). Click a host there to open its window; right-click for Edit /
+Clone / Delete.
 
-- **Compact** (default): one line per host — status dot, OS logo, alias, and on the right the
-  highest of CPU, RAM and fullest-disk usage (e.g. `Disk 87%`, coloured like the bars).
-  Hover over the bar for all three values, over a red warning sign for the error, and over
-  the name for the description and address.
-- **Detailed**: three lines per host — alias and address, description, and CPU / RAM / disk
-  bars (or the error).
-
-Tick **Group by status** to split the list into **Down**, **Up** and **Not checked yet**
-(down hosts first, each group collapsible, with its count). Click a host to open it;
-right-click for Edit / Clone / Delete. Both choices are saved in `telepad.db` and come back
-the next time Telepad starts.
-
-**Reorder hosts:** drag a host by its **⋮⋮** handle (left of the status dot) and drop it on
-the upper or lower half of another host; a line shows where it will land. The order is
-saved in `telepad.db` at once, used by the list, the table, cards and the generated ssh
-config, and kept after a restart. The handles are hidden while the search box has text or
-**Group by status** is ticked (a hint says so), because the position would be ambiguous.
+**Reorder hosts:** drag a host by its **⋮⋮** handle in the overview table and drop it on the
+upper or lower half of another host; a line shows where it will land. The order is saved in
+`telepad.db` at once, used by the table, cards and the generated ssh config, and kept after a
+restart. The handles are hidden while the search box has text or a column is sorted.
 
 ## Overview
 
-Click **Overview — all hosts** at the top of the host list to see every host at once. The
+Click **Overview — all hosts** in the sidebar to see every host at once. The
 **View** switch above the overview chooses **Table** or **Cards**; the choice is remembered.
 
 ### Docker overview
@@ -79,7 +105,7 @@ One row per host: **Host**, **Description**, **Address**, **OS**, **Flags**, **C
 the end of a row opens SSH/RDP.
 
 In inventory order (no column sorted, no search) each row has a **⋮⋮** handle in the first
-column: drag it to reorder hosts, as in the host list. While a column is sorted or the
+column: drag it to reorder hosts. While a column is sorted or the
 search box has text, the handles are hidden and a hint above the table says what to clear.
 
 - **Sort:** click a column header. Numbers start with the highest (busiest CPU, fullest
@@ -93,7 +119,7 @@ search box has text, the handles are hidden and a hint above the table says what
 - The header row stays in place while you scroll; when the columns are wider than the
   window, scroll sideways.
 
-The search box filters both the host list and the overview by host name, address, OS
+The search box filters the overview and the Docker overview by host name, address, OS
 or container name.
 
 ### Cards
@@ -107,7 +133,7 @@ arrow button next to it reverses it.
 
 ### Maintenance flags
 
-The **Flags** column, the cards, the compact host list and the host's **Maintenance**
+The **Flags** column, the cards and the host's **Maintenance**
 section show what needs doing on a host (hover for details):
 
 | Flag | Meaning | Source on the host (read-only, offline) |
@@ -356,7 +382,7 @@ Changed hosts are marked **pending** and counted at the bottom. **Discard** drop
 
 ## Files (upload / download / manage / edit)
 
-**Open files…** in a host's header opens a separate window, WinSCP style: **This computer**
+**Open files…** in a host's window (or **Files** in the sidebar) opens a file window, WinSCP style: **This computer**
 on the left, the host on the right. It logs in as the host's normal SSH login (the same
 user and key as **Open SSH**); nothing has to be installed on the host. Several file
 windows can be open at once, one per host.
@@ -550,7 +576,7 @@ be set up by hand.
   publishes): the host detail header shows **Open MariaDB / MySQL :3306** or
   **Open PostgreSQL :5432**.
 
-Each database opens in its own window. Opening the same one again does nothing while
+Each database opens in its own window inside Telepad. Opening the same one again does nothing while
 its window is open.
 
 **Connect**

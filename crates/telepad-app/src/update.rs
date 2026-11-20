@@ -37,6 +37,22 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             d.group_by_status = ui_prefs.group_by_status;
             d.overview_cards = ui_prefs.overview_cards;
             d.theme = ui_prefs.theme;
+            m.ws.restore(&ui_prefs.workspace);
+            m.ws.sidebar_collapsed = ui_prefs.sidebar_collapsed;
+            m.ws_saved = (m.ws.save(), m.ws.sidebar_collapsed);
+            // Pages of the saved layout that hold a session start it again.
+            if m.ws.is_open(crate::workspace::Win::Keys) {
+                d.keys = Some(KeysDraft::default());
+            }
+            if m.ws.is_open(crate::workspace::Win::HostSync) {
+                let (effects, _) = crate::hostsync::update(
+                    &mut m.host_sync,
+                    &mut d.host_sync,
+                    &[],
+                    crate::hostsync::HsMsg::Open,
+                );
+                fx.extend(effects.into_iter().map(Effect::HostSync));
+            }
             if let Some(src) = imported_from {
                 say(
                     m,
@@ -241,7 +257,12 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 d.run_info = Some(RunInfoView::Ready(info));
             }
         }
-        Msg::Select(i) => m.selected = i.filter(|&i| i < m.hosts.len()),
+        Msg::Select(i) => {
+            m.selected = i.filter(|&i| i < m.hosts.len());
+            if m.selected.is_some() {
+                m.ws.open(crate::workspace::Win::Host);
+            }
+        }
         Msg::MoveHost { from, to } => {
             if from != to && from < m.hosts.len() && to < m.hosts.len() {
                 let selected = selected_id(m);
@@ -261,39 +282,48 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             fx.push(Effect::LoadHosts);
         }
         Msg::ShowOverview(page) => {
-            m.selected = None;
             m.overview = page;
+            m.ws.open(match page {
+                crate::state::OverviewPage::Hosts => crate::workspace::Win::Overview,
+                crate::state::OverviewPage::Docker => crate::workspace::Win::Docker,
+            });
+        }
+        Msg::Ws(w) => {
+            m.ws.update(w);
         }
         Msg::SortBy(key) => d.sort = d.sort.clicked(key),
         Msg::SetCompactHostList(compact) => {
             if d.compact_host_list != compact {
                 d.compact_host_list = compact;
-                fx.push(Effect::SaveUiPrefs(d.ui_prefs()));
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
             }
         }
         Msg::SetGroupByStatus(group) => {
             if d.group_by_status != group {
                 d.group_by_status = group;
-                fx.push(Effect::SaveUiPrefs(d.ui_prefs()));
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
             }
         }
         Msg::SetOverviewCards(cards) => {
             if d.overview_cards != cards {
                 d.overview_cards = cards;
-                fx.push(Effect::SaveUiPrefs(d.ui_prefs()));
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
             }
         }
         Msg::SetSort(sort) => d.sort = sort,
         Msg::SetTheme(theme) => {
             if d.theme != theme {
                 d.theme = theme;
-                fx.push(Effect::SaveUiPrefs(d.ui_prefs()));
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
             }
         }
         Msg::UiPrefsSaved(Ok(())) => {}
         Msg::UiPrefsSaved(Err(e)) => say(m, now, format!("Cannot save view settings: {e}")),
         Msg::SelectAlias(alias) => {
             m.selected = m.hosts.iter().position(|h| h.entry.alias == alias);
+            if m.selected.is_some() {
+                m.ws.open(crate::workspace::Win::Host);
+            }
         }
         Msg::AddHost => {
             d.editor = Some(Editor::new(HostEntry::new("")));
@@ -743,6 +773,18 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
     if hosts_changed && let Some(hs) = m.host_sync.as_mut() {
         let db: Vec<_> = m.hosts.iter().map(|h| h.entry.clone()).collect();
         crate::hostsync::refresh(hs, &db);
+    }
+    // Session windows follow their sessions; save the layout when it changed.
+    let mut ws = std::mem::take(&mut m.ws);
+    ws.sync(m);
+    ws.sync_keys(d.keys.is_some());
+    m.ws = ws;
+    if m.db_path.is_some() {
+        let now_saved = (m.ws.save(), m.ws.sidebar_collapsed);
+        if now_saved != m.ws_saved {
+            m.ws_saved = now_saved;
+            fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
+        }
     }
     fx
 }
