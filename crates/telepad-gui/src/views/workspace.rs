@@ -9,7 +9,6 @@ use std::time::Instant;
 use eframe::egui::{self, Id, LayerId, Order, Rect, RichText, Sense, Vec2};
 use telepad_app::workspace::{Group, Win, WsMsg};
 use telepad_app::{Drafts, Model, Msg};
-use telepad_core::config::Access;
 
 use crate::icons::{self, label as il};
 use crate::widgets::nav_button;
@@ -31,7 +30,7 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
             .unwrap_or_default()
     };
     match w {
-        Win::Overview => (icons::OVERVIEW, "Overview — all hosts".into()),
+        Win::Overview => (icons::OVERVIEW, "Hosts".into()),
         Win::Docker => (icons::CONTAINER, "Overview — Docker".into()),
         Win::Host => (
             icons::DESKTOP,
@@ -94,7 +93,7 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
     } else {
         (icons::CARET_LEFT, "Icons only")
     };
-    ui.horizontal(|ui| {
+    let toggle = |ui: &mut egui::Ui, out: &mut Vec<Msg>| {
         if ui
             .button(format!("{} {icon}", icons::SIDEBAR))
             .on_hover_text(tip)
@@ -102,10 +101,15 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
         {
             ws(out, WsMsg::SetSidebarCollapsed(!collapsed));
         }
-        if !collapsed {
+    };
+    if collapsed {
+        ui.vertical_centered(|ui| toggle(ui, out));
+    } else {
+        ui.horizontal(|ui| {
+            toggle(ui, out);
             ui.label(RichText::new("Pages").weak());
-        }
-    });
+        });
+    }
     ui.add_space(6.0);
     let text = |t: &'static str| if collapsed { "" } else { t };
     let focused = m.ws.focused;
@@ -115,8 +119,8 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
         (
             Win::Overview,
             icons::OVERVIEW,
-            "Overview — all hosts",
-            "All hosts as a table or cards",
+            "Hosts",
+            "All hosts as a table or cards; SSH and Files per host",
         ),
         (
             Win::Docker,
@@ -161,51 +165,6 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
             out.push(Msg::HostSync(telepad_app::hostsync::HsMsg::Open));
         }
     }
-    ui.add_space(3.0);
-    let files_shown = matches!(focused, Some(Win::Files(_) | Win::Editor(_)));
-    let r = nav_button(ui, files_shown, icons::FOLDER, text("Files"))
-        .on_hover_text("Files: open the file window of a host");
-    egui::Popup::menu(&r).show(|ui| {
-        ui.label(RichText::new("Open the files of").weak().small());
-        let mut any = false;
-        for h in m.hosts.iter().filter(|h| h.entry.access == Access::Ssh) {
-            any = true;
-            if ui.button(il(icons::FOLDER, &h.entry.alias)).clicked() {
-                out.push(Msg::Files(telepad_app::files::FmMsg::Open(
-                    h.entry.alias.clone(),
-                )));
-                ui.close();
-            }
-        }
-        if !any {
-            ui.label(RichText::new("No SSH hosts").weak());
-        }
-    });
-    ui.add_space(3.0);
-    let db_shown = matches!(focused, Some(Win::Db(_)));
-    let r = nav_button(ui, db_shown, icons::DATABASE, text("Databases"))
-        .on_hover_text("Databases: open connections");
-    egui::Popup::menu(&r).show(|ui| {
-        if m.db.is_empty() {
-            ui.label(RichText::new("No database open.").weak());
-        }
-        for s in &m.db {
-            if ui.button(il(icons::DATABASE, &s.target.title())).clicked() {
-                ws(out, WsMsg::Open(Win::Db(s.id)));
-                ui.close();
-            }
-        }
-        ui.separator();
-        ui.label(
-            RichText::new(
-                "Open a database from a host's window (Databases) \
-                 or a container's menu.",
-            )
-            .weak()
-            .small(),
-        );
-    });
-
     // Every open window, to bring one back (also the minimized ones).
     let wins: Vec<Win> = m.ws.groups.iter().flat_map(|g| g.tabs.clone()).collect();
     if wins.is_empty() {
@@ -226,11 +185,13 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
                 } else {
                     il(icon, &name)
                 };
-                if ui
-                    .selectable_label(focused == Some(w), label)
-                    .on_hover_text(&name)
-                    .clicked()
-                {
+                let r = if collapsed {
+                    ui.vertical_centered(|ui| ui.selectable_label(focused == Some(w), label))
+                        .inner
+                } else {
+                    ui.selectable_label(focused == Some(w), label)
+                };
+                if r.on_hover_text(&name).clicked() {
                     ws(out, WsMsg::Open(w));
                 }
             }

@@ -9,10 +9,9 @@ use telepad_app::{
     HostState, Model, Msg, Sort, SortKey, can_reorder, fullest_disk, host_flags, hottest,
     overview_rows,
 };
-use telepad_core::config::Access;
 use telepad_core::model::{HostReport, PortainerRole, human_kb};
 
-use crate::icons::{self, label as il};
+use crate::icons;
 use crate::widgets::*;
 
 const ROW_HEIGHT: f32 = 24.0;
@@ -31,36 +30,60 @@ const COLUMNS: [(&str, Option<SortKey>, f32, f32); 13] = [
     ("Temp", Some(SortKey::Temp), 60.0, 40.0),
     ("Docker", Some(SortKey::Docker), 160.0, 50.0),
     ("Updated", Some(SortKey::Updated), 75.0, 50.0),
-    ("", None, 70.0, 70.0),
+    ("", None, 72.0, 72.0),
 ];
+
+/// Column widths after a double-click fit (#83): `round` renames the table so
+/// egui_extras starts from these widths.
+#[derive(Clone, Default)]
+struct Fit {
+    round: u32,
+    widths: Option<Vec<f32>>,
+}
 
 pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mut Vec<Msg>) {
     let rows = overview_rows(m, filter, sort);
     let reorder = can_reorder(filter, false, sort);
     let accent = ui.visuals().selection.bg_fill;
+    let fit_id = egui::Id::unique("overview-fit");
+    let fit: Fit = ui.data(|d| d.get_temp(fit_id)).unwrap_or_default();
+    let mut header_rects = vec![egui::Rect::NOTHING; COLUMNS.len()];
+    let mut used = vec![0.0f32; COLUMNS.len()];
     // The table scrolls vertically itself; this adds horizontal scrolling
     // when the columns are wider than the window.
     egui::ScrollArea::horizontal()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let mut table = TableBuilder::new(ui)
-                .id_salt("overview")
+                .id_salt(("overview", fit.round))
                 .striped(true)
                 .resizable(true)
+                // Rows highlight on hover and open the host on click (#83).
+                .sense(egui::Sense::click())
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .auto_shrink([false, false]);
+            let last = COLUMNS.len() - 1;
             for (i, (_, _, width, min)) in COLUMNS.iter().enumerate() {
-                let col = if i == 0 || i == COLUMNS.len() - 1 {
-                    Column::exact(*width)
+                let width = fit
+                    .widths
+                    .as_ref()
+                    .and_then(|w| w.get(i).copied())
+                    .unwrap_or(*width);
+                let col = if i == 0 {
+                    Column::exact(width.max(*min))
+                } else if i == last {
+                    // SSH / Files, last; it also takes the width the others
+                    // leave, so the table always fills the window (#83).
+                    Column::remainder().at_least(*min)
                 } else {
-                    Column::initial(*width).at_least(*min).clip(true)
+                    Column::initial(width).at_least(*min).clip(true)
                 };
                 table = table.column(col);
             }
             table
                 .header(ROW_HEIGHT, |mut header| {
-                    for (title, key, _, _) in COLUMNS {
-                        header.col(|ui| {
+                    for (c, (title, key, _, _)) in COLUMNS.into_iter().enumerate() {
+                        let (u, r) = header.col(|ui| {
                             let Some(key) = key else { return };
                             let arrow = match sort.direction(key) {
                                 Some(true) => format!(" {}", icons::CARET_DOWN),
@@ -75,29 +98,89 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
                             let name = if title.is_empty() { "status" } else { title };
                             if ui
                                 .add(egui::Button::new(RichText::new(text).strong()).frame(false))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .on_hover_text(format!(
-                                    "Sort by {name} (click again to reverse, a third time for inventory order)"
+                                    "Click to sort by {name} (again to reverse, a third time for inventory order). Double-click a column border to fit it."
                                 ))
                                 .clicked()
                             {
                                 out.push(Msg::SortBy(key));
                             }
                         });
+                        header_rects[c] = r.rect;
+                        used[c] = used[c].max(u.width());
                     }
                 })
                 .body(|body| {
                     body.rows(ROW_HEIGHT, rows.len(), |mut row| {
                         let i = rows[row.index()];
-                        host_row(&mut row, i, &m.hosts[i], reorder, out);
+                        let mut cells = Cells {
+                            row: &mut row,
+                            n: 0,
+                            used: &mut used,
+                        };
+                        host_row(&mut cells, i, &m.hosts[i], reorder, out);
+                        if row.response().clicked() {
+                            out.push(Msg::Select(Some(i)));
+                        }
                         if reorder {
                             drop_target(&row.response(), i, accent, out);
                         }
                     });
                 });
         });
+    // Double-click on a header border: fit that column to its longest value.
+    let dbl = ui.input(|i| {
+        i.pointer
+            .button_double_clicked(egui::PointerButton::Primary)
+            .then(|| i.pointer.latest_pos())
+            .flatten()
+    });
+    if let Some(p) = dbl {
+        // A column's border sits half a gap before the next column's left edge
+        // (the header responses are wider than their columns).
+        let gap = ui.spacing().item_spacing.x;
+        let left: Vec<f32> = header_rects.iter().map(|r| r.left()).collect();
+        let (top, bottom) = (header_rects[0].top(), header_rects[0].bottom());
+        let n = COLUMNS.len();
+        let hit = (1..n - 1).find(|&c| {
+            (top..=bottom).contains(&p.y) && (p.x - (left[c + 1] - gap / 2.0)).abs() <= 6.0
+        });
+        if let Some(c) = hit {
+            let mut widths: Vec<f32> = (0..n)
+                .map(|k| match left.get(k + 1) {
+                    Some(next) => next - left[k] - gap,
+                    None => COLUMNS[k].2,
+                })
+                .collect();
+            widths[c] = (used[c] + 8.0).max(COLUMNS[c].3);
+            let next = Fit {
+                round: fit.round.wrapping_add(1),
+                widths: Some(widths),
+            };
+            ui.data_mut(|d| d.insert_temp(fit_id, next));
+        }
+    }
 }
 
-fn host_row(row: &mut TableRow<'_, '_>, i: usize, h: &HostState, grip: bool, out: &mut Vec<Msg>) {
+/// One row's cells, recording how wide each one's content really is.
+struct Cells<'r, 'a, 'b> {
+    row: &'r mut TableRow<'a, 'b>,
+    n: usize,
+    used: &'r mut [f32],
+}
+
+impl Cells<'_, '_, '_> {
+    fn col(&mut self, add: impl FnOnce(&mut egui::Ui)) {
+        let (r, _) = self.row.col(add);
+        if let Some(u) = self.used.get_mut(self.n) {
+            *u = u.max(r.width());
+        }
+        self.n += 1;
+    }
+}
+
+fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, grip: bool, out: &mut Vec<Msg>) {
     row.col(|ui| {
         if grip {
             grip_handle(ui, i);
@@ -135,22 +218,10 @@ fn host_row(row: &mut TableRow<'_, '_>, i: usize, h: &HostState, grip: bool, out
     row.col(|ui| {
         ui.label(RichText::new(ago(h.updated)).weak());
     });
-    row.col(|ui| {
-        let (label, tip) = match h.entry.access {
-            Access::Ssh => ("SSH", "Open an SSH session in a terminal"),
-            Access::Rdp => ("RDP", "Open Remote Desktop"),
-        };
-        if ui
-            .small_button(il(connect_icon(&h.entry), label))
-            .on_hover_text(tip)
-            .clicked()
-        {
-            out.push(Msg::Ssh(i));
-        }
-    });
+    row.col(|ui| connect_buttons(ui, h, i, false, out));
 }
 
-fn report_cells(row: &mut TableRow<'_, '_>, h: &HostState, r: &HostReport) {
+fn report_cells(row: &mut Cells<'_, '_, '_>, h: &HostState, r: &HostReport) {
     row.col(|ui| {
         icons::os_logo(ui, host_os(h), 16.0);
         clipped(ui, RichText::new(&r.os_pretty));
@@ -214,8 +285,28 @@ pub fn docker_text(r: &HostReport) -> Option<String> {
 }
 
 /// One line, cut with "…" at the cell edge; the full text shows on hover.
+/// The cell still reports the text's natural width, so a double-click on the
+/// column border fits the column to its longest value (#83).
 fn clipped(ui: &mut egui::Ui, text: RichText) {
+    let natural = egui::WidgetText::from(text.clone())
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::FontSelection::Default,
+        )
+        .size()
+        .x;
+    let start = ui.cursor().min.x;
     ui.add(egui::Label::new(text).truncate());
+    let used = ui.min_rect().max.x - start;
+    if natural > used {
+        let r = egui::Rect::from_min_size(
+            ui.min_rect().min,
+            egui::vec2(natural + (start - ui.min_rect().min.x), 1.0),
+        );
+        ui.expand_to_include_rect(r);
+    }
 }
 
 fn dash(ui: &mut egui::Ui) {

@@ -97,7 +97,11 @@ fn page(
                 overview::overview(ui, m, &d.filter, d.sort, out);
             }
         }
-        Win::Docker => docker_overview::docker_overview(ui, m, &d.filter, out),
+        Win::Docker => {
+            ui.horizontal(|ui| search_box(ui, d));
+            ui.add_space(4.0);
+            docker_overview::docker_overview(ui, m, &d.filter, out);
+        }
         Win::Host => {
             let Some(i) = m.selected else { return };
             let Some(h) = m.hosts.get(i) else { return };
@@ -114,10 +118,21 @@ fn page(
     }
 }
 
+/// The search box of the Hosts and Docker pages (#83; was in the top bar).
+fn search_box(ui: &mut egui::Ui, d: &mut Drafts) {
+    ui.add(
+        egui::TextEdit::singleline(&mut d.filter)
+            .desired_width(200.0)
+            .hint_text(format!("{} host, IP, OS, container", icons::SEARCH)),
+    );
+}
+
 /// Table | Cards switch; in card view also "Sort by" (the table sorts by its headers).
-fn overview_toolbar(ui: &mut egui::Ui, d: &Drafts, out: &mut Vec<Msg>) {
+fn overview_toolbar(ui: &mut egui::Ui, d: &mut Drafts, out: &mut Vec<Msg>) {
     use telepad_app::{Sort, SortKey};
     ui.horizontal_wrapped(|ui| {
+        search_box(ui, d);
+        ui.separator();
         ui.label(egui::RichText::new("View").weak());
         if ui
             .selectable_label(!d.overview_cards, il(icons::OVERVIEW, "Table"))

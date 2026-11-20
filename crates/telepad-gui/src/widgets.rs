@@ -22,8 +22,8 @@ pub struct Palette {
     pub grey: Color32,
     /// Usage-bar fills (red, amber, green, blue) under the theme's own bar text colour.
     pub bar: [Color32; 4],
-    /// Action buttons (#76), indexed by `Act`: danger, edit, add.
-    pub act: [ActColors; 3],
+    /// Action buttons (#76, #83), indexed by `Act`: danger, edit, add, caution.
+    pub act: [ActColors; 4],
 }
 
 /// Filled action-button colours: rest / hover / pressed fill and the text on them.
@@ -66,6 +66,7 @@ pub const DARK: Palette = Palette {
         act(0x8f1d1d, 0xa82424, 0x731616, 0xffe4e4),
         act(0xca8a04, 0xdb9a10, 0xa87203, 0x1a1000),
         act(0x166534, 0x1b7a3f, 0x11522a, 0xe6ffee),
+        act(0xb45309, 0xbd5410, 0x92400e, 0xffffff),
     ],
 };
 
@@ -88,6 +89,7 @@ pub const LIGHT: Palette = Palette {
         act(0xdc2626, 0xc81e1e, 0xb21a1a, 0xffffff),
         act(0xfacc15, 0xf0bf0a, 0xd9ab06, 0x422006),
         act(0x15803d, 0x13703a, 0x0f5e30, 0xffffff),
+        act(0xc2410c, 0xb23c0b, 0x9a3412, 0xffffff),
     ],
 };
 
@@ -357,13 +359,23 @@ pub fn nav_button(ui: &mut egui::Ui, shown: bool, icon: &str, text: &str) -> egu
         }
         w.hovered.weak_bg_fill = accent.gamma_multiply(0.35);
         w.active.weak_bg_fill = accent.gamma_multiply(0.6);
-        let label = RichText::new(icons::label(icon, text)).strong().size(16.0);
+        // Icon only (folded sidebar, #83): a square button in the middle.
+        let label = if text.is_empty() {
+            RichText::new(icon).strong().size(18.0)
+        } else {
+            RichText::new(icons::label(icon, text)).strong().size(16.0)
+        };
         let button = if shown {
             egui::Button::new(label.color(on_accent)).fill(accent)
         } else {
             egui::Button::new(label.color(strong))
         };
-        ui.add(button.min_size(egui::vec2(ui.available_width(), 36.0)))
+        if text.is_empty() {
+            ui.vertical_centered(|ui| ui.add(button.min_size(egui::vec2(40.0, 36.0))))
+                .inner
+        } else {
+            ui.add(button.min_size(egui::vec2(ui.available_width(), 36.0)))
+        }
     })
     .inner
 }
@@ -377,6 +389,8 @@ pub enum Act {
     Edit,
     /// Adds or creates: green.
     Add,
+    /// Opens a session that can change things (SSH, RDP): amber / orange.
+    Caution,
 }
 
 impl Act {
@@ -429,6 +443,41 @@ fn act_widget(
     r
 }
 
+/// The row buttons of a host (#83), icons only: amber SSH / RDP, then for SSH
+/// hosts a yellow Files. `rtl`: the caller lays out right to left (cards).
+pub fn connect_buttons(ui: &mut egui::Ui, h: &HostState, i: usize, rtl: bool, out: &mut Vec<Msg>) {
+    let ssh = |ui: &mut egui::Ui, out: &mut Vec<Msg>| {
+        let tip = match h.entry.access {
+            Access::Ssh => "SSH: open an SSH session in a terminal",
+            Access::Rdp => "RDP: open Remote Desktop",
+        };
+        if act_small(ui, true, Act::Caution, connect_icon(&h.entry))
+            .on_hover_text(tip)
+            .clicked()
+        {
+            out.push(Msg::Ssh(i));
+        }
+    };
+    let files = |ui: &mut egui::Ui, out: &mut Vec<Msg>| {
+        if h.entry.access == Access::Ssh
+            && act_small(ui, true, Act::Edit, icons::FOLDER)
+                .on_hover_text("Files: open the file window of this host")
+                .clicked()
+        {
+            out.push(Msg::Files(telepad_app::files::FmMsg::Open(
+                h.entry.alias.clone(),
+            )));
+        }
+    };
+    if rtl {
+        files(ui, out);
+        ssh(ui, out);
+    } else {
+        ssh(ui, out);
+        files(ui, out);
+    }
+}
+
 /// Text in the action colour for menu entries and headings, where a filled
 /// button would look out of place (readable on the panel background).
 pub fn act_text(kind: Act, text: &str) -> RichText {
@@ -437,6 +486,7 @@ pub fn act_text(kind: Act, text: &str) -> RichText {
         Act::Danger => p.red,
         Act::Edit => p.amber,
         Act::Add => p.green,
+        Act::Caution => p.amber,
     })
 }
 
@@ -569,7 +619,7 @@ mod tests {
             }
         }
         // A different red (and fills) per theme, not one shared colour.
-        for i in 0..3 {
+        for i in 0..4 {
             assert_ne!(DARK.act[i].fill, LIGHT.act[i].fill);
         }
         let d = DARK.act[Act::Danger as usize].fill;
