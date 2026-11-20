@@ -2,6 +2,26 @@
 
 Newest first.
 
+## [2026-11-20] — feat(docker): Docker / Podman name, Kubernetes and Docker Swarm pages (#84)
+- Issue #84 addressed on GitHub (branch `84-clusters`, on top of #83).
+- App: `Win::Kube` / `Win::Swarm` (layout keys `kube`, `swarm`), `table::cluster_rows` +
+  `ClusterKind` / `ClusterRow` (one row per cluster id, several managers → one cluster, Swarm
+  workers skipped); test.
+- GUI: `cluster::cluster_page` (hosts it was reached from, problems, the existing Swarm /
+  Kubernetes panels with their confirmed actions; empty note when none — owner: buttons are
+  always shown); sidebar **Docker / Podman**, **Kubernetes**, **Docker Swarm**; Docker page
+  marks Podman hosts.
+- Also (#83 follow-up, owner idea): the SSH / Files icon buttons became a **right-click host
+  menu** on table rows and cards: Open SSH / RDP (amber), Files (yellow), detected databases
+  (host and containers), Open host window, Edit, Clone, Delete…. Table labels are no longer
+  selectable, otherwise each label took the row's clicks and hover (found with egui's
+  interaction snapshot).
+- Docs: USER_MANUAL (Kubernetes and Docker Swarm, Docker / Podman, host menu).
+- Verified on Windows 11 (throwaway workspace, lab containers): right-click menu → Files opens
+  the file window, row highlight, Kubernetes page empty note, Docker / Podman page; fmt,
+  clippy, tests (93 app). Not verified here: a real Kubernetes / Swarm cluster (none in the
+  lab; grouping covered by the test).
+
 ## [2026-11-20] — feat(ui): Hosts page polish (#83)
 - Issue #83 addressed on GitHub (branch `83-hosts-page`).
 - Hosts table: the last column (icon buttons) is a remainder column, so the table fills the

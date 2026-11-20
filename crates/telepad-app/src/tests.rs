@@ -1580,3 +1580,58 @@ fn key_run_needs_a_valid_key_hosts_and_the_typed_word() {
     update(&mut s, Msg::KeysClose, t0);
     assert!(s.drafts.keys.is_none() && s.model.key_run.is_none());
 }
+
+#[test]
+fn cluster_pages_group_hosts_by_cluster() {
+    use telepad_core::cluster::{Cluster, Kube, Swarm};
+    let t0 = Instant::now();
+    let (mut s, _) = started(t0);
+    loaded(
+        &mut s,
+        vec![
+            host(1, "mgr1"),
+            host(2, "mgr2"),
+            host(3, "worker"),
+            host(4, "k3s1"),
+        ],
+        t0,
+    );
+    let swarm = |manager: bool| Cluster {
+        swarm: Some(Swarm {
+            manager,
+            cluster_id: if manager {
+                "swarm-a".into()
+            } else {
+                String::new()
+            },
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let report = |c: Cluster| {
+        Some(HostReport {
+            cluster: c,
+            ..Default::default()
+        })
+    };
+    s.model.hosts[0].report = report(swarm(true));
+    s.model.hosts[1].report = report(swarm(true));
+    s.model.hosts[2].report = report(swarm(false));
+    s.model.hosts[3].report = report(Cluster {
+        kube: Some(Kube {
+            tool: "k3s".into(),
+            cluster_id: "kube-b".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let sw = cluster_rows(&s.model, ClusterKind::Swarm);
+    assert_eq!(sw.len(), 1, "two managers, one swarm; the worker is a node");
+    assert_eq!((sw[0].host, sw[0].hosts.clone()), (0, vec![0, 1]));
+    let k = cluster_rows(&s.model, ClusterKind::Kube);
+    assert_eq!(k.len(), 1);
+    assert_eq!(k[0].key, "k8s:kube-b");
+    // No cluster at all: the page is empty.
+    s.model.hosts[3].report = report(Cluster::default());
+    assert!(cluster_rows(&s.model, ClusterKind::Kube).is_empty());
+}

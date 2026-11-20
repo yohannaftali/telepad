@@ -17,7 +17,7 @@ use crate::widgets::*;
 const ROW_HEIGHT: f32 = 24.0;
 
 /// (title, sort key, initial width, minimum width)
-const COLUMNS: [(&str, Option<SortKey>, f32, f32); 13] = [
+const COLUMNS: [(&str, Option<SortKey>, f32, f32); 12] = [
     ("", Some(SortKey::Status), 36.0, 36.0),
     ("Host", Some(SortKey::Host), 130.0, 60.0),
     ("Description", Some(SortKey::Description), 170.0, 40.0),
@@ -30,7 +30,6 @@ const COLUMNS: [(&str, Option<SortKey>, f32, f32); 13] = [
     ("Temp", Some(SortKey::Temp), 60.0, 40.0),
     ("Docker", Some(SortKey::Docker), 160.0, 50.0),
     ("Updated", Some(SortKey::Updated), 75.0, 50.0),
-    ("", None, 72.0, 72.0),
 ];
 
 /// Column widths after a double-click fit (#83): `round` renames the table so
@@ -51,6 +50,9 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
     let mut used = vec![0.0f32; COLUMNS.len()];
     // The table scrolls vertically itself; this adds horizontal scrolling
     // when the columns are wider than the window.
+    // Labels in the table must not take clicks: the whole row opens the host
+    // (left) and its menu (right), and highlights on hover (#83).
+    ui.style_mut().interaction.selectable_labels = false;
     egui::ScrollArea::horizontal()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -72,9 +74,9 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
                 let col = if i == 0 {
                     Column::exact(width.max(*min))
                 } else if i == last {
-                    // SSH / Files, last; it also takes the width the others
-                    // leave, so the table always fills the window (#83).
-                    Column::remainder().at_least(*min)
+                    // The last column takes the width the others leave, so
+                    // the table always fills the window (#83).
+                    Column::remainder().at_least(*min).clip(true)
                 } else {
                     Column::initial(width).at_least(*min).clip(true)
                 };
@@ -120,9 +122,12 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
                             used: &mut used,
                         };
                         host_row(&mut cells, i, &m.hosts[i], reorder, out);
-                        if row.response().clicked() {
+                        let resp = row.response();
+                        if resp.clicked() {
                             out.push(Msg::Select(Some(i)));
                         }
+                        // SSH, Files, databases, edit… on right-click (#83).
+                        resp.context_menu(|ui| host_menu(ui, &m.hosts[i], i, out));
                         if reorder {
                             drop_target(&row.response(), i, accent, out);
                         }
@@ -218,7 +223,6 @@ fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, grip: bool, ou
     row.col(|ui| {
         ui.label(RichText::new(ago(h.updated)).weak());
     });
-    row.col(|ui| connect_buttons(ui, h, i, false, out));
 }
 
 fn report_cells(row: &mut Cells<'_, '_, '_>, h: &HostState, r: &HostReport) {

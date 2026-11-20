@@ -110,6 +110,8 @@ fn page(
                 .map(|o| o.entry.alias.clone());
             detail::detail(ui, h, i, shown_by.as_deref(), &mut d.ports_nginx_only, out);
         }
+        Win::Kube => cluster::cluster_page(ui, m, telepad_app::ClusterKind::Kube, out),
+        Win::Swarm => cluster::cluster_page(ui, m, telepad_app::ClusterKind::Swarm, out),
         Win::HostSync => host_sync::host_sync_page(ui, m, d, out),
         Win::Keys => keys::keys_page(ui, m, d, out),
         Win::Files(id) => files::files_page(ui, m, d, id, focused, out, now),

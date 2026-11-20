@@ -28,7 +28,7 @@ pub fn docker_overview(ui: &mut egui::Ui, m: &Model, filter: &str, out: &mut Vec
         ui.label(
             RichText::new(format!(
                 "{stacks} stack(s) · {containers} container(s), {running} running · \
-                 {with_docker} host(s) with Docker"
+                 {with_docker} host(s) with Docker / Podman"
             ))
             .strong(),
         );
@@ -150,6 +150,9 @@ fn host_link(ui: &mut egui::Ui, m: &Model, i: usize, out: &mut Vec<Msg>) {
         .clicked()
     {
         out.push(Msg::Select(Some(i)));
+    }
+    if h.report.as_ref().is_some_and(|r| r.docker.is_podman()) {
+        ui.label(RichText::new("(podman)").weak().small());
     }
 }
 

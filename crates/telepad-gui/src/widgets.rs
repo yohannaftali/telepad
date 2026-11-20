@@ -443,39 +443,86 @@ fn act_widget(
     r
 }
 
-/// The row buttons of a host (#83), icons only: amber SSH / RDP, then for SSH
-/// hosts a yellow Files. `rtl`: the caller lays out right to left (cards).
-pub fn connect_buttons(ui: &mut egui::Ui, h: &HostState, i: usize, rtl: bool, out: &mut Vec<Msg>) {
-    let ssh = |ui: &mut egui::Ui, out: &mut Vec<Msg>| {
-        let tip = match h.entry.access {
-            Access::Ssh => "SSH: open an SSH session in a terminal",
-            Access::Rdp => "RDP: open Remote Desktop",
-        };
-        if act_small(ui, true, Act::Caution, connect_icon(&h.entry))
-            .on_hover_text(tip)
-            .clicked()
-        {
-            out.push(Msg::Ssh(i));
+/// Right-click menu of a host row or card (#83): SSH / RDP, Files, the
+/// databases Telepad detected on it (host and containers), then open, edit,
+/// clone and delete. Coloured like the buttons they replace.
+pub fn host_menu(ui: &mut egui::Ui, h: &HostState, i: usize, out: &mut Vec<Msg>) {
+    let item = |ui: &mut egui::Ui, text: RichText, msg: Msg, out: &mut Vec<Msg>| {
+        if ui.button(text).clicked() {
+            out.push(msg);
+            ui.close();
         }
     };
-    let files = |ui: &mut egui::Ui, out: &mut Vec<Msg>| {
-        if h.entry.access == Access::Ssh
-            && act_small(ui, true, Act::Edit, icons::FOLDER)
-                .on_hover_text("Files: open the file window of this host")
-                .clicked()
-        {
-            out.push(Msg::Files(telepad_app::files::FmMsg::Open(
-                h.entry.alias.clone(),
-            )));
-        }
+    ui.label(RichText::new(&h.entry.alias).strong());
+    ui.separator();
+    let open = match h.entry.access {
+        Access::Ssh => "Open SSH",
+        Access::Rdp => "Open RDP",
     };
-    if rtl {
-        files(ui, out);
-        ssh(ui, out);
-    } else {
-        ssh(ui, out);
-        files(ui, out);
+    item(
+        ui,
+        act_text(Act::Caution, &icons::label(connect_icon(&h.entry), open)),
+        Msg::Ssh(i),
+        out,
+    );
+    if h.entry.access == Access::Ssh {
+        item(
+            ui,
+            act_text(Act::Edit, &icons::label(icons::FOLDER, "Files")),
+            Msg::Files(telepad_app::files::FmMsg::Open(h.entry.alias.clone())),
+            out,
+        );
     }
+    if let Some(r) = &h.report {
+        let mut dbs = telepad_core::db::detect::host_targets(&h.entry.alias, r);
+        dbs.extend(
+            r.docker
+                .containers
+                .iter()
+                .filter_map(|c| telepad_core::db::detect::container_target(&h.entry.alias, c)),
+        );
+        if !dbs.is_empty() {
+            ui.separator();
+            ui.label(RichText::new("Databases").weak().small());
+            for t in dbs {
+                let label = icons::label(icons::DATABASE, &t.title());
+                item(
+                    ui,
+                    RichText::new(label),
+                    Msg::Db(telepad_app::db::DbMsg::Open(t)),
+                    out,
+                );
+            }
+        }
+    }
+    ui.separator();
+    item(
+        ui,
+        RichText::new(icons::label(icons::DESKTOP, "Open host window")),
+        Msg::Select(Some(i)),
+        out,
+    );
+    item(
+        ui,
+        act_text(Act::Edit, &icons::label(icons::EDIT, "Edit")),
+        Msg::Edit(i),
+        out,
+    );
+    item(
+        ui,
+        RichText::new(icons::label(
+            icons::CLONE,
+            "Clone (User, Port, IdentityFile)",
+        )),
+        Msg::Clone(i),
+        out,
+    );
+    item(
+        ui,
+        act_text(Act::Danger, &icons::label(icons::TRASH, "Delete…")),
+        Msg::Delete(i),
+        out,
+    );
 }
 
 /// Text in the action colour for menu entries and headings, where a filled
