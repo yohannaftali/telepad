@@ -5,7 +5,7 @@ use telepad_app::{Drafts, Msg};
 use telepad_core::config::Access;
 
 use crate::icons::{self, label as il};
-use crate::widgets::usage_color;
+use crate::widgets::{Act, act_button, usage_color};
 
 pub fn editor_window(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
     let Some(ed) = &mut d.editor else { return };
@@ -131,8 +131,7 @@ pub fn editor_window(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
                 if ed.entry.id.is_some() {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ed.confirm_delete {
-                            if ui
-                                .button(RichText::new("Really delete").color(usage_color(95.0)))
+                            if act_button(ui, true, Act::Danger, &il(icons::TRASH, "Really delete"))
                                 .clicked()
                             {
                                 out.push(Msg::EditorDelete);
@@ -140,7 +139,7 @@ pub fn editor_window(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
                             if ui.button("Keep").clicked() {
                                 ed.confirm_delete = false;
                             }
-                        } else if ui.button(il(icons::TRASH, "Delete")).clicked() {
+                        } else if act_button(ui, true, Act::Danger, &il(icons::TRASH, "Delete")).clicked() {
                             ed.confirm_delete = true;
                         }
                     });

@@ -4,7 +4,7 @@ use eframe::egui::{self, RichText};
 use telepad_app::{Model, Msg};
 
 use crate::icons::{self, label as il};
-use crate::widgets::usage_color;
+use crate::widgets::{Act, act_button};
 
 pub fn delete_confirm(ctx: &egui::Context, m: &Model, out: &mut Vec<Msg>) {
     let Some((_, alias)) = &m.pending_delete else {
@@ -24,10 +24,7 @@ pub fn delete_confirm(ctx: &egui::Context, m: &Model, out: &mut Vec<Msg>) {
             );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui
-                    .button(RichText::new(il(icons::TRASH, "Delete")).color(usage_color(95.0)))
-                    .clicked()
-                {
+                if act_button(ui, true, Act::Danger, &il(icons::TRASH, "Delete")).clicked() {
                     out.push(Msg::ConfirmDelete);
                 }
                 if ui.button("Cancel").clicked() {

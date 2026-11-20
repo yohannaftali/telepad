@@ -22,6 +22,29 @@ pub struct Palette {
     pub grey: Color32,
     /// Usage-bar fills (red, amber, green, blue) under the theme's own bar text colour.
     pub bar: [Color32; 4],
+    /// Action buttons (#76), indexed by `Act`: danger, edit, add.
+    pub act: [ActColors; 3],
+}
+
+/// Filled action-button colours: rest / hover / pressed fill and the text on them.
+#[derive(Clone, Copy)]
+pub struct ActColors {
+    pub fill: Color32,
+    pub hover: Color32,
+    pub press: Color32,
+    pub text: Color32,
+}
+
+const fn act(fill: u32, hover: u32, press: u32, text: u32) -> ActColors {
+    const fn c(v: u32) -> Color32 {
+        Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
+    }
+    ActColors {
+        fill: c(fill),
+        hover: c(hover),
+        press: c(press),
+        text: c(text),
+    }
 }
 
 pub const DARK: Palette = Palette {
@@ -38,6 +61,12 @@ pub const DARK: Palette = Palette {
         Color32::from_rgb(0x1b, 0x6b, 0x3c),
         Color32::from_rgb(0x1c, 0x5a, 0x9c),
     ],
+    // Deep, muted fills with light text: they sit calmly on the dark panels.
+    act: [
+        act(0x8f1d1d, 0xa82424, 0x731616, 0xffe4e4),
+        act(0xca8a04, 0xdb9a10, 0xa87203, 0x1a1000),
+        act(0x166534, 0x1b7a3f, 0x11522a, 0xe6ffee),
+    ],
 };
 
 pub const LIGHT: Palette = Palette {
@@ -53,6 +82,12 @@ pub const LIGHT: Palette = Palette {
         Color32::from_rgb(0xfc, 0xd3, 0x4d),
         Color32::from_rgb(0x86, 0xef, 0xac),
         Color32::from_rgb(0x93, 0xc5, 0xfd),
+    ],
+    // Brighter fills for the light panels (a clear red, not the dark theme's maroon).
+    act: [
+        act(0xdc2626, 0xc81e1e, 0xb21a1a, 0xffffff),
+        act(0xfacc15, 0xf0bf0a, 0xd9ab06, 0x422006),
+        act(0x15803d, 0x13703a, 0x0f5e30, 0xffffff),
     ],
 };
 
@@ -301,6 +336,76 @@ pub fn nav_button(ui: &mut egui::Ui, shown: bool, icon: &str, text: &str) -> egu
     .inner
 }
 
+/// What an action button does, which sets its colour (#76).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Act {
+    /// Deletes, removes, drops or revokes: red.
+    Danger,
+    /// Changes something in place: yellow.
+    Edit,
+    /// Adds or creates: green.
+    Add,
+}
+
+impl Act {
+    pub fn colors(self) -> ActColors {
+        pal().act[self as usize]
+    }
+}
+
+/// A filled action button (red / yellow / green by `kind`), with hover and
+/// pressed shades; disabled it is drawn faded like any disabled widget.
+pub fn act_button(ui: &mut egui::Ui, enabled: bool, kind: Act, text: &str) -> egui::Response {
+    act_widget(ui, enabled, kind, text, false)
+}
+
+/// Small icon-only (or short) variant of `act_button` for table rows.
+pub fn act_small(ui: &mut egui::Ui, enabled: bool, kind: Act, text: &str) -> egui::Response {
+    act_widget(ui, enabled, kind, text, true)
+}
+
+fn act_widget(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    kind: Act,
+    text: &str,
+    small: bool,
+) -> egui::Response {
+    ui.scope(|ui| {
+        let c = kind.colors();
+        let w = &mut ui.visuals_mut().widgets;
+        for (state, fill) in [
+            (&mut w.inactive, c.fill),
+            (&mut w.hovered, c.hover),
+            (&mut w.active, c.press),
+        ] {
+            state.weak_bg_fill = fill;
+            state.bg_fill = fill;
+            state.fg_stroke.color = c.text;
+            state.bg_stroke = egui::Stroke::new(1.0, fill);
+            state.corner_radius = egui::CornerRadius::same(5);
+        }
+        let mut b = egui::Button::new(RichText::new(text).color(c.text))
+            .wrap_mode(egui::TextWrapMode::Extend);
+        if small {
+            b = b.small();
+        }
+        ui.add_enabled(enabled, b)
+    })
+    .inner
+}
+
+/// Text in the action colour for menu entries and headings, where a filled
+/// button would look out of place (readable on the panel background).
+pub fn act_text(kind: Act, text: &str) -> RichText {
+    let p = pal();
+    RichText::new(text).color(match kind {
+        Act::Danger => p.red,
+        Act::Edit => p.amber,
+        Act::Add => p.green,
+    })
+}
+
 pub fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(10.0);
     ui.label(RichText::new(title).heading().size(17.0));
@@ -398,5 +503,25 @@ mod tests {
                 assert!(r >= 4.5, "{theme} bar {i}: contrast {r:.2} < 4.5");
             }
         }
+    }
+
+    #[test]
+    fn action_buttons_are_readable_and_differ_per_theme() {
+        for (theme, p) in [("dark", &DARK), ("light", &LIGHT)] {
+            for (i, a) in p.act.iter().enumerate() {
+                for (state, fill) in [("rest", a.fill), ("hover", a.hover), ("pressed", a.press)] {
+                    let r = contrast(a.text, fill);
+                    assert!(r >= 4.5, "{theme} act {i} {state}: contrast {r:.2} < 4.5");
+                }
+            }
+        }
+        // A different red (and fills) per theme, not one shared colour.
+        for i in 0..3 {
+            assert_ne!(DARK.act[i].fill, LIGHT.act[i].fill);
+        }
+        let d = DARK.act[Act::Danger as usize].fill;
+        assert!(d.r() > d.g() && d.r() > d.b());
+        let g = LIGHT.act[Act::Add as usize].fill;
+        assert!(g.g() > g.r() && g.g() > g.b());
     }
 }

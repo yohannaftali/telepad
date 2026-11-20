@@ -61,7 +61,7 @@ pub fn detail(
             ui.spinner();
         }
         ui.separator();
-        if ui.button(il(icons::EDIT, "Edit")).clicked() {
+        if act_button(ui, true, Act::Edit, &il(icons::EDIT, "Edit")).clicked() {
             out.push(Msg::Edit(i));
         }
         if ui
@@ -71,7 +71,7 @@ pub fn detail(
         {
             out.push(Msg::Clone(i));
         }
-        if ui.button(il(icons::TRASH, "Delete")).clicked() {
+        if act_button(ui, true, Act::Danger, &il(icons::TRASH, "Delete")).clicked() {
             out.push(Msg::Delete(i));
         }
         // Databases installed on the host itself; container databases are in

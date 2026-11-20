@@ -163,8 +163,7 @@ fn swarm(ui: &mut egui::Ui, sw: &Swarm, host: usize, out: &mut Vec<Msg>) {
                     ui.label(il(icons::STACK, name));
                     ui.label(RichText::new(format!("{n} service(s)")).weak());
                     menu(ui, |ui| {
-                        let t = RichText::new(il(icons::TRASH, "Remove stack…"))
-                            .color(usage_color(95.0));
+                        let t = act_text(Act::Danger, &il(icons::TRASH, "Remove stack…"));
                         if ui.button(t).clicked() {
                             out.push(Msg::SwarmStackRemove {
                                 host,

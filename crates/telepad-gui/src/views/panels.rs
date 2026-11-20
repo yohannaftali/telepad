@@ -338,7 +338,12 @@ fn row_actions(resp: &egui::Response, i: usize, out: &mut Vec<Msg>) {
             ),
             (icons::TRASH, "Delete", Msg::Delete(i)),
         ] {
-            if ui.button(il(icon, text)).clicked() {
+            let label = match icon {
+                icons::EDIT => act_text(Act::Edit, &il(icon, text)),
+                icons::TRASH => act_text(Act::Danger, &il(icon, text)),
+                _ => RichText::new(il(icon, text)),
+            };
+            if ui.button(label).clicked() {
                 out.push(msg);
                 ui.close();
             }

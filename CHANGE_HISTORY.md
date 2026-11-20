@@ -2,6 +2,41 @@
 
 Newest first.
 
+## [2026-11-20] — feat(ui): colour action buttons by risk — red delete / revoke, yellow edit, green add (#76)
+- Issue #76 addressed on GitHub (branch `76-button-colours`).
+- `widgets.rs`: `Act` (Danger / Edit / Add), `act_button` / `act_small` (filled, hover and
+  pressed shades, faded when disabled, text kept on one line), `act_text` for menus; per-theme
+  `Palette::act` (dark: deep maroon / amber / green with light text; light: clear red,
+  yellow with dark text, green). Test: text contrast ≥ 4.5:1 on rest, hover and pressed
+  fills in both themes, and different fills per theme.
+- Applied in Host Management (Add to Telepad / config, delete in Telepad / config, row edit
+  and delete), Public keys (Add key green + plus, Revoke key red + trash), host detail Edit /
+  Delete, host editor Delete, delete confirmation, host list menu, file window toolbar / menu
+  (new = green, edit / rename = yellow, delete = red), delete / overwrite buttons, editor
+  Overwrite / Don't save, database (New table, Add column / index / foreign key, Insert row =
+  green; Edit structure, Rename, cell Edit = yellow; Drop, Delete row, Forget, remove buttons,
+  Run of a dangerous statement = red), Docker Remove, Swarm Remove stack.
+- USER_MANUAL: button colours under Window layout.
+- Verified on Windows 11 (throwaway workspace `hm/ws`): host detail, Host Management and
+  Public keys in dark and light theme; fmt, clippy, tests. Note: Host Management's window
+  grows to fit its toolbar now that button text no longer wraps; #77 makes it a resizable
+  inner window.
+
+## [2026-11-20] — feat(keys): Authorized keys page — list keys by server and by public key, add / revoke
+- Issue #78 created on GitHub (depends on #77)
+- Scope: core (`authorized_keys.rs` read-only list + parser) / app / gui (`views/keys.rs` as a page)
+- Labels: enhancement
+
+## [2026-11-20] — feat(ui): WinBox-style single window — page sidebar, inner windows (move, resize, minimize, maximize, tabs), in-window dialogs
+- Issue #77 created on GitHub; refined the same day to the MikroTik WinBox style (inner windows: move, resize, minimize, maximize, tabs; ☰ top right for settings)
+- Scope: app (`Page` navigation) / gui (sidebar, pages; Host Management, Files, Databases, editor no longer native windows)
+- Labels: enhancement
+
+## [2026-11-20] — feat(ui): colour action buttons by risk — red delete / revoke, yellow edit, green add
+- Issue #76 created on GitHub
+- Scope: gui (`widgets.rs` shared button helper; host_sync, keys, files, database, detail, … views)
+- Labels: enhancement
+
 ## [2026-11-20] — Telepad 0.8.5
 - Fixed: copy and paste (Ctrl+C / Ctrl+X / Ctrl+V, Cmd on macOS) now work with the system
   clipboard in every text field — for example pasting a public key into Public keys…

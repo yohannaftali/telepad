@@ -21,7 +21,7 @@ use telepad_core::files::text::{self, FindOpts};
 use telepad_core::files::time_text;
 
 use crate::icons::{self, label as il};
-use crate::widgets::usage_color;
+use crate::widgets::{Act, act_text, usage_color};
 
 /// Larger texts are shown without colours (fast enough to type in).
 const COLOUR_LIMIT: usize = 2 * 1024 * 1024;
@@ -591,7 +591,7 @@ fn conflict(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, out: &mut Vec<Msg>) {
             );
             ui.horizontal_wrapped(|ui| {
                 if ui
-                    .button(RichText::new("Overwrite").color(red()))
+                    .add(egui::Button::new(act_text(Act::Danger, "Overwrite")))
                     .on_hover_text("Save your text over the file as it is now")
                     .clicked()
                 {
@@ -1024,7 +1024,7 @@ fn question(ui: &mut egui::Ui, s: &FileSession, dr: &EdDraft, out: &mut Vec<Msg>
                 send(out, id, EdMsg::Answer(Answer::Save));
             }
             if ui
-                .button(RichText::new("Don't save").color(red()))
+                .add(egui::Button::new(act_text(Act::Danger, "Don't save")))
                 .clicked()
             {
                 send(out, id, EdMsg::Answer(Answer::Discard));
