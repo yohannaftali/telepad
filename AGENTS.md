@@ -251,4 +251,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #71 | fix(ui): copy and paste do not reach the system clipboard in text fields | closed | 2026-11-20 |
 | #76 | feat(ui): colour action buttons by risk — red delete / revoke, yellow edit, green add | closed | 2026-11-20 |
 | #77 | feat(ui): WinBox-style single window — page sidebar, inner windows (move, resize, minimize, maximize, tabs), in-window dialogs | closed | 2026-11-20 |
-| #78 | feat(keys): Authorized keys page — list keys by server and by public key, add / revoke | ready-for-review | 2026-11-20 |
+| #78 | feat(keys): Authorized keys page — list keys by server and by public key, add / revoke | closed | 2026-11-20 |
