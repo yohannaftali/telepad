@@ -52,6 +52,78 @@ pub fn cluster(
     }
 }
 
+/// The Kubernetes / Docker Swarm page (#84): every cluster once, with the hosts
+/// Telepad reached it from; empty with a note when none was found.
+pub fn cluster_page(
+    ui: &mut egui::Ui,
+    m: &telepad_app::Model,
+    kind: telepad_app::ClusterKind,
+    out: &mut Vec<Msg>,
+) {
+    use telepad_app::ClusterKind;
+    let rows = telepad_app::cluster_rows(m, kind);
+    let name = match kind {
+        ClusterKind::Kube => "Kubernetes",
+        ClusterKind::Swarm => "Docker Swarm",
+    };
+    ui.label(RichText::new(format!("{} {name} cluster(s)", rows.len())).strong());
+    ui.add_space(4.0);
+    if rows.is_empty() {
+        ui.label(
+            RichText::new(if m.hosts.iter().all(|h| h.report.is_none()) {
+                "No host has reported yet.".to_string()
+            } else {
+                format!("No {name} cluster found on your hosts.")
+            })
+            .weak(),
+        );
+        return;
+    }
+    egui::ScrollArea::vertical()
+        .id_salt(("cluster-page", name))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for row in rows {
+                let Some(r) = m.hosts.get(row.host).and_then(|h| h.report.as_ref()) else {
+                    continue;
+                };
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("Reached from").weak());
+                        for &i in &row.hosts {
+                            if let Some(h) = m.hosts.get(i)
+                                && ui
+                                    .link(RichText::new(&h.entry.alias).strong())
+                                    .on_hover_text("Open this host")
+                                    .clicked()
+                            {
+                                out.push(Msg::Select(Some(i)));
+                            }
+                        }
+                    });
+                    let problems = r.cluster.degraded();
+                    for p in &problems {
+                        ui.colored_label(pal().red, format!("{} {p}", icons::WARNING));
+                    }
+                    match kind {
+                        ClusterKind::Kube => {
+                            if let Some(k) = &r.cluster.kube {
+                                kube(ui, k, row.host, out);
+                            }
+                        }
+                        ClusterKind::Swarm => {
+                            if let Some(sw) = &r.cluster.swarm {
+                                swarm(ui, sw, row.host, out);
+                            }
+                        }
+                    }
+                });
+                ui.add_space(6.0);
+            }
+        });
+}
+
 fn ok_color(ok: bool) -> egui::Color32 {
     if ok { pal().green } else { pal().red }
 }

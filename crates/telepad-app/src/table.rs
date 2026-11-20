@@ -516,3 +516,53 @@ pub fn hottest(r: &HostReport) -> Option<f32> {
         .map(|s| s.value)
         .fold(None, |m: Option<f32>, v| Some(m.map_or(v, |m| m.max(v))))
 }
+
+/// Which kind of cluster a page lists (#84).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClusterKind {
+    Kube,
+    Swarm,
+}
+
+/// One cluster for the Kubernetes / Docker Swarm pages: the host whose report
+/// is shown, and every host that reported the same cluster (several managers,
+/// or one machine under two aliases).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterRow {
+    /// `k8s:<id>` / `swarm:<id>`, or `host:<alias>` when the id is unknown.
+    pub key: String,
+    pub host: usize,
+    pub hosts: Vec<usize>,
+}
+
+/// Clusters of `kind` in inventory order of their first host. Swarm: only
+/// managers know the cluster (workers are listed as its nodes).
+pub fn cluster_rows(m: &Model, kind: ClusterKind) -> Vec<ClusterRow> {
+    let mut out: Vec<ClusterRow> = Vec::new();
+    for (i, h) in m.hosts.iter().enumerate() {
+        let Some(r) = &h.report else { continue };
+        let key = match kind {
+            ClusterKind::Kube => match &r.cluster.kube {
+                Some(k) if !k.cluster_id.is_empty() => format!("k8s:{}", k.cluster_id),
+                Some(_) => format!("host:{}", h.entry.alias),
+                None => continue,
+            },
+            ClusterKind::Swarm => match &r.cluster.swarm {
+                Some(s) if s.manager && !s.cluster_id.is_empty() => {
+                    format!("swarm:{}", s.cluster_id)
+                }
+                Some(s) if s.manager => format!("host:{}", h.entry.alias),
+                _ => continue,
+            },
+        };
+        match out.iter_mut().find(|c| c.key == key) {
+            Some(c) => c.hosts.push(i),
+            None => out.push(ClusterRow {
+                key,
+                host: i,
+                hosts: vec![i],
+            }),
+        }
+    }
+    out
+}

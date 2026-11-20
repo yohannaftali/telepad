@@ -38,7 +38,9 @@ pub fn cards(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mut V
 }
 
 fn card(ui: &mut egui::Ui, i: usize, h: &HostState, out: &mut Vec<Msg>) {
-    egui::Frame::group(ui.style())
+    // Text must not take the right-click meant for the card's menu (#83).
+    ui.style_mut().interaction.selectable_labels = false;
+    let card = egui::Frame::group(ui.style())
         .inner_margin(egui::Margin::same(CARD_MARGIN as i8))
         .show(ui, |ui| {
             ui.set_width(CARD_WIDTH);
@@ -56,9 +58,6 @@ fn card(ui: &mut egui::Ui, i: usize, h: &HostState, out: &mut Vec<Msg>) {
                     {
                         out.push(Msg::Select(Some(i)));
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        connect_buttons(ui, h, i, true, out);
-                    });
                 });
                 let mut sub = h.entry.hostname.clone();
                 if !h.entry.note.is_empty() {
@@ -128,4 +127,8 @@ fn card(ui: &mut egui::Ui, i: usize, h: &HostState, out: &mut Vec<Msg>) {
                 );
             });
         });
+    // SSH, Files, databases, edit… on right-click (#83).
+    card.response
+        .interact(egui::Sense::click())
+        .context_menu(|ui| host_menu(ui, h, i, out));
 }

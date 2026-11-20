@@ -26,9 +26,10 @@ pub use state::{
     key_holders, key_selectable, matches_filter,
 };
 pub use table::{
-    Flag, FlagKind, HostGroup, Severity, Sort, SortKey, StackRow, can_reorder, cluster_shown_by,
-    docker_stacks, drop_index, fullest_disk, host_flags, host_list_groups, host_urgency, hottest,
-    maintenance_flags, overview_rows, urgency, worst_usage,
+    ClusterKind, ClusterRow, Flag, FlagKind, HostGroup, Severity, Sort, SortKey, StackRow,
+    can_reorder, cluster_rows, cluster_shown_by, docker_stacks, drop_index, fullest_disk,
+    host_flags, host_list_groups, host_urgency, hottest, maintenance_flags, overview_rows, urgency,
+    worst_usage,
 };
 pub use update::update;
 

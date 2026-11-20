@@ -15,7 +15,7 @@ Telepad | Refresh all | Theme | 2 up 1 down                   ☰ |
 ------------------------------------------------------------------
 Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
  Hosts           | | search | Table / Cards                     | |
- Docker / Podman | | web1  192.0.2.10  …            [ssh][files]| |
+ Docker / Podman | | web1  192.0.2.10  …  (right-click: menu)  | |
  Authorized keys |  +---------------------------------------------+ |
  Host Management |        +-[Files — web1]---------- _ □ × ⧉ +     |
                  |        | this computer | web1              |     |
@@ -27,7 +27,7 @@ Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
 | Area | What it shows |
 |---|---|
 | **Top bar** | **Refresh all**, **Auto every _N_ s**, theme, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (settings: add, import, export, Host Management, Authorized keys, software update) |
-| **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: the **Files** button in its row or window, **Databases** in its window or a container's menu). Below them, **Open windows** lists every open window (click one to bring it back). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
+| **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). Below them, **Open windows** lists every open window (click one to bring it back). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
 
@@ -91,10 +91,11 @@ Click **Hosts** in the sidebar to see every host at once. The page header has th
 **search box** (filters by host name, address, OS or container name) and the **View** switch:
 **Table** or **Cards**; the choice is remembered.
 
-### Docker overview
+### Docker / Podman
 
 **Docker / Podman** (below **Hosts**) lists the containers of every host
-grouped by stack (the compose project name), stacks A–Z, then **Standalone containers**. A
+grouped by stack (the compose project name), stacks A–Z, then **Standalone containers**;
+hosts that run Podman are marked **(podman)**. A
 stack running on several hosts appears once; inside it, each host has its own line with a
 link to the host, how the stack is managed (docker compose folder or Portainer stack) and
 the same **Compose** menu / **Open in Portainer** button as on the host page. Each container
@@ -102,14 +103,26 @@ shows image, status, container IPs and published ports, and its **☰** menu has
 [Docker actions](#docker-actions). Click a stack name to fold it. The search box filters by
 stack, container, image or host.
 
+### Kubernetes and Docker Swarm
+
+**Kubernetes** and **Docker Swarm** in the sidebar list every cluster Telepad found on your
+hosts, once each even when several managers report it, with the hosts it was reached from
+(click one to open it). Each cluster shows the same panel as its host window: nodes,
+workloads / services and stacks, problems in red, and the confirmed actions of
+[Swarm and Kubernetes](#swarm-and-kubernetes). When no host reported a cluster the page
+says so ("No Kubernetes cluster found on your hosts"). Nothing new runs on the hosts: the
+pages use what the regular refresh collected.
+
 ### Table
 
 One row per host: **Host**, **Description**, **Address**, **OS**, **Flags**, **CPU**, **Memory**,
 **Fullest disk**, **Temp** (hottest sensor), **Docker** (running/total containers) and
-**Updated** (age of the data), then two icon buttons: the amber **terminal** opens SSH (or
-RDP for Windows hosts) and the yellow **folder** opens the host's file window. Click a row
-(or the host name) to open its host window; the row under the mouse is highlighted. The
-table always fills the window: the last column takes the spare width.
+**Updated** (age of the data). The row under the mouse is highlighted. Click a row (or the
+host name) to open its host window. **Right-click** a row (or a card) for the host menu:
+**Open SSH** (or **Open RDP**, amber), **Files** (yellow, the host's file window), the
+**databases** Telepad found on the host and in its containers (MariaDB / MySQL / PostgreSQL),
+then **Open host window**, **Edit**, **Clone** and **Delete…**. The table always fills the
+window: the last column takes the spare width.
 
 In inventory order (no column sorted, no search) each row has a **⋮⋮** handle in the first
 column: drag it to reorder hosts. While a column is sorted or the

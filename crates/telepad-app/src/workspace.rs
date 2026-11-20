@@ -14,8 +14,12 @@ use crate::state::Model;
 pub enum Win {
     /// Every host as a table or cards.
     Overview,
-    /// Every container of every host, grouped by stack.
+    /// Every container of every host, grouped by stack (Docker / Podman).
     Docker,
+    /// Kubernetes clusters found on the hosts (#84).
+    Kube,
+    /// Docker Swarm clusters found on the hosts (#84).
+    Swarm,
     /// The selected host (`Model::selected`).
     Host,
     /// Host Management (#58).
@@ -38,6 +42,8 @@ impl Win {
         match self {
             Win::Overview => Some("overview"),
             Win::Docker => Some("docker"),
+            Win::Kube => Some("kube"),
+            Win::Swarm => Some("swarm"),
             Win::HostSync => Some("hostsync"),
             Win::Keys => Some("keys"),
             Win::Host | Win::Files(_) | Win::Db(_) | Win::Editor(_) => None,
@@ -48,6 +54,8 @@ impl Win {
         Some(match k {
             "overview" => Win::Overview,
             "docker" => Win::Docker,
+            "kube" => Win::Kube,
+            "swarm" => Win::Swarm,
             "hostsync" => Win::HostSync,
             "keys" => Win::Keys,
             _ => return None,
@@ -367,7 +375,17 @@ impl Workspace {
             let tabs: Vec<Win> = f[4]
                 .split(';')
                 .filter_map(Win::from_key)
-                .filter(|w| matches!(w, Win::Overview | Win::Docker | Win::HostSync | Win::Keys))
+                .filter(|w| {
+                    matches!(
+                        w,
+                        Win::Overview
+                            | Win::Docker
+                            | Win::Kube
+                            | Win::Swarm
+                            | Win::HostSync
+                            | Win::Keys
+                    )
+                })
                 .collect();
             if tabs.is_empty() {
                 continue;

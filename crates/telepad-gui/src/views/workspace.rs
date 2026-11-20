@@ -31,7 +31,9 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
     };
     match w {
         Win::Overview => (icons::OVERVIEW, "Hosts".into()),
-        Win::Docker => (icons::CONTAINER, "Overview — Docker".into()),
+        Win::Docker => (icons::CONTAINER, "Docker / Podman".into()),
+        Win::Kube => (icons::NETWORK, "Kubernetes".into()),
+        Win::Swarm => (icons::STACK, "Docker Swarm".into()),
         Win::Host => (
             icons::DESKTOP,
             m.selected
@@ -56,7 +58,7 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
 fn close_msg(w: Win) -> Msg {
     use telepad_app::files::FmMsg;
     match w {
-        Win::Overview | Win::Docker => Msg::Ws(WsMsg::Close(w)),
+        Win::Overview | Win::Docker | Win::Kube | Win::Swarm => Msg::Ws(WsMsg::Close(w)),
         Win::Host => Msg::Select(None),
         Win::HostSync => Msg::HostSync(telepad_app::hostsync::HsMsg::Close),
         Win::Keys => Msg::KeysClose,
@@ -73,7 +75,7 @@ fn close_msg(w: Win) -> Msg {
 fn default_size(w: Win) -> Vec2 {
     match w {
         Win::Overview => egui::vec2(1000.0, 600.0),
-        Win::Docker => egui::vec2(1000.0, 600.0),
+        Win::Docker | Win::Kube | Win::Swarm => egui::vec2(1000.0, 600.0),
         Win::Host => egui::vec2(900.0, 640.0),
         Win::HostSync => egui::vec2(1150.0, 680.0),
         Win::Keys => egui::vec2(660.0, 560.0),
@@ -125,8 +127,20 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
         (
             Win::Docker,
             icons::CONTAINER,
-            "Overview — Docker",
+            "Docker / Podman",
             "Containers of all hosts, grouped by stack",
+        ),
+        (
+            Win::Kube,
+            icons::NETWORK,
+            "Kubernetes",
+            "Kubernetes clusters found on your hosts",
+        ),
+        (
+            Win::Swarm,
+            icons::STACK,
+            "Docker Swarm",
+            "Docker Swarm clusters found on your hosts",
         ),
     ] {
         if nav_button(ui, shown(w), icon, text(name))
