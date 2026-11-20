@@ -35,12 +35,11 @@ pub fn detail(
     ui.horizontal_wrapped(|ui| {
         let rdp = h.entry.access == Access::Rdp;
         let open = if rdp { "Open RDP" } else { "Open SSH" };
-        if ui.button(il(connect_icon(&h.entry), open)).clicked() {
+        if act_button(ui, true, Act::Caution, &il(connect_icon(&h.entry), open)).clicked() {
             out.push(Msg::Ssh(i));
         }
         if !rdp
-            && ui
-                .button(il(icons::FOLDER, "Open files…"))
+            && act_button(ui, true, Act::Edit, &il(icons::FOLDER, "Open files…"))
                 .on_hover_text("This computer and the host side by side: browse and copy files")
                 .clicked()
         {

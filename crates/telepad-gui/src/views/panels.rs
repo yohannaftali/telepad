@@ -157,13 +157,6 @@ fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
         .response
         .on_hover_text("System follows your Windows / macOS setting");
     ui.separator();
-    ui.label(RichText::new(icons::SEARCH).size(16.0));
-    ui.add(
-        egui::TextEdit::singleline(&mut d.filter)
-            .desired_width(180.0)
-            .hint_text("host, IP, OS, container"),
-    );
-    ui.separator();
     ui.label(
         RichText::new(format!("{} {} up", icons::DOT, m.online_count())).color(usage_color(0.0)),
     );

@@ -3,7 +3,6 @@
 
 use eframe::egui::{self, RichText};
 use telepad_app::{HostState, Model, Msg, Sort, fullest_disk, host_flags, hottest, overview_rows};
-use telepad_core::config::Access;
 
 use super::overview::docker_text;
 use crate::icons::{self, label as il};
@@ -58,17 +57,7 @@ fn card(ui: &mut egui::Ui, i: usize, h: &HostState, out: &mut Vec<Msg>) {
                         out.push(Msg::Select(Some(i)));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let (label, tip) = match h.entry.access {
-                            Access::Ssh => ("SSH", "Open an SSH session in a terminal"),
-                            Access::Rdp => ("RDP", "Open Remote Desktop"),
-                        };
-                        if ui
-                            .small_button(il(connect_icon(&h.entry), label))
-                            .on_hover_text(tip)
-                            .clicked()
-                        {
-                            out.push(Msg::Ssh(i));
-                        }
+                        connect_buttons(ui, h, i, true, out);
                     });
                 });
                 let mut sub = h.entry.hostname.clone();

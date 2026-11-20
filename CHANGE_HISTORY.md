@@ -2,6 +2,27 @@
 
 Newest first.
 
+## [2026-11-20] — feat(ui): Hosts page polish (#83)
+- Issue #83 addressed on GitHub (branch `83-hosts-page`).
+- Hosts table: the last column (icon buttons) is a remainder column, so the table fills the
+  window; double-click a header border fits that column to its longest value (Excel style).
+  egui_extras' own double-click auto-size never fires when the table has an id (it reads
+  the double-click from another id), and clipped cells report their column width, so Telepad
+  detects the double-click on the border itself (column left edges, the header responses are
+  wider than their columns), clipped cells report their text's natural width, and the table is
+  rebuilt with the fitted width. Rows highlight on hover and open the host on click; sortable
+  headers show a hand cursor.
+- Row buttons (table, cards), icon only per owner request: amber SSH / RDP (`Act::Caution`,
+  own shades per theme, contrast test) and yellow Files (opens the host's file window); the host
+  window's Open SSH / Open files… use the same colours.
+- "Overview — all hosts" is now **Hosts** (sidebar, window title; layout key unchanged); the
+  search box moved from the top bar into the Hosts and Docker page headers; Files and Databases
+  left the sidebar; the folded sidebar centres its icons.
+- Docs: USER_MANUAL (layout wireframe, Hosts table, button colours).
+- Verified on Windows 11 (throwaway workspace, lab containers, light theme): table fills the
+  window, double-click fit of the OS column, row click, icon buttons, folded sidebar; fmt,
+  clippy, tests.
+
 ## [2026-11-20] — fix(ui): light theme too light (#86)
 - Issue #86 addressed on GitHub (branch `86-light-theme`).
 - Cause: egui's light visuals put panels and windows on the same gray 248 and buttons on

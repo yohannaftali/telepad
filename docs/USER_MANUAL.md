@@ -11,22 +11,23 @@ Telepad is one window (like MikroTik WinBox): pages open as windows **inside** i
 
 ```
 ------------------------------------------------------------------
-Telepad | Refresh all | Theme | search | 2 up 1 down          ☰ |
+Telepad | Refresh all | Theme | 2 up 1 down                   ☰ |
 ------------------------------------------------------------------
-Pages            | +-[Overview — all hosts]-[Overview — Docker]-+ |
- Overview — all  | | table / cards                     _ □ × ⧉  | |
- Overview — Dock |  +---------------------------------------------+ |
- Authorized keys |        +-[Files — web1]---------- _ □ × ⧉ +     |
- Host Management |        | this computer | web1              |     |
- Files           |        +----------------------------------+     |
- Databases       | [Host — db01]  (minimized)                      |
+Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
+ Hosts           | | search | Table / Cards                     | |
+ Docker / Podman | | web1  192.0.2.10  …            [ssh][files]| |
+ Authorized keys |  +---------------------------------------------+ |
+ Host Management |        +-[Files — web1]---------- _ □ × ⧉ +     |
+                 |        | this computer | web1              |     |
+                 |        +----------------------------------+     |
+                 | [Host — db01]  (minimized)                      |
 ------------------------------------------------------------------
 ```
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | **Refresh all**, **Auto every _N_ s**, theme, the search box, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (settings: add, import, export, Host Management, Authorized keys, software update) |
-| **Pages** (left sidebar) | One button per page: **Overview — all hosts**, **Overview — Docker**, **Authorized keys**, **Host Management**, **Files** (pick a host), **Databases** (open connections). Below them, **Open windows** lists every open window (click one to bring it back). The **▯ ‹** button at the top folds the sidebar to icons only; Telepad remembers it |
+| **Top bar** | **Refresh all**, **Auto every _N_ s**, theme, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (settings: add, import, export, Host Management, Authorized keys, software update) |
+| **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: the **Files** button in its row or window, **Databases** in its window or a container's menu). Below them, **Open windows** lists every open window (click one to bring it back). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
 
@@ -57,7 +58,8 @@ below 70 °C, yellow from 70 °C and red from 85 °C.
 
 **Button colours**: a button's colour says what it does. **Red** (with the trash icon)
 deletes, removes, drops, revokes or overwrites something; **yellow** edits or renames;
-**green** adds or creates. Other buttons keep the neutral look. Each theme has its own
+**green** adds or creates; **amber** opens a session that can change things (SSH, RDP).
+Other buttons keep the neutral look. Each theme has its own
 shades (deep fills with light text in the dark theme, brighter fills in the light theme),
 and in menus the same meaning shows as red / yellow / green text.
 
@@ -85,12 +87,13 @@ restart. The handles are hidden while the search box has text or a column is sor
 
 ## Overview
 
-Click **Overview — all hosts** in the sidebar to see every host at once. The
-**View** switch above the overview chooses **Table** or **Cards**; the choice is remembered.
+Click **Hosts** in the sidebar to see every host at once. The page header has the
+**search box** (filters by host name, address, OS or container name) and the **View** switch:
+**Table** or **Cards**; the choice is remembered.
 
 ### Docker overview
 
-**Overview — Docker** (below **Overview — all hosts**) lists the containers of every host
+**Docker / Podman** (below **Hosts**) lists the containers of every host
 grouped by stack (the compose project name), stacks A–Z, then **Standalone containers**. A
 stack running on several hosts appears once; inside it, each host has its own line with a
 link to the host, how the stack is managed (docker compose folder or Portainer stack) and
@@ -103,8 +106,10 @@ stack, container, image or host.
 
 One row per host: **Host**, **Description**, **Address**, **OS**, **Flags**, **CPU**, **Memory**,
 **Fullest disk**, **Temp** (hottest sensor), **Docker** (running/total containers) and
-**Updated** (age of the data). Click a host name to open its detail page; the button at
-the end of a row opens SSH/RDP.
+**Updated** (age of the data), then two icon buttons: the amber **terminal** opens SSH (or
+RDP for Windows hosts) and the yellow **folder** opens the host's file window. Click a row
+(or the host name) to open its host window; the row under the mouse is highlighted. The
+table always fills the window: the last column takes the spare width.
 
 In inventory order (no column sorted, no search) each row has a **⋮⋮** handle in the first
 column: drag it to reorder hosts. While a column is sorted or the
@@ -116,13 +121,15 @@ search box has text, the handles are hidden and a hint above the table says what
   return to the inventory order. The unlabelled first column sorts by status (down hosts
   first). Addresses sort numerically (`10.0.0.9` before `10.0.0.10`), and hosts without a
   value for the column (no data yet, or unreachable) always stay at the bottom.
-- **Resize:** drag the border between two column headers. Text that does not fit is cut
-  with "…"; hover over it to read all of it. Error messages stay inside the OS column.
+- **Resize:** drag the border between two column headers. **Double-click** a border to fit
+  the column to its longest value, like Excel. Text that does not fit is cut with "…";
+  hover over it to read all of it. Error messages stay inside the OS column. Sortable
+  headers show a hand cursor.
 - The header row stays in place while you scroll; when the columns are wider than the
   window, scroll sideways.
 
-The search box filters the overview and the Docker overview by host name, address, OS
-or container name.
+The search box (in the Hosts and Docker / Podman page headers) filters both pages by host
+name, address, OS or container name.
 
 ### Cards
 
