@@ -2,6 +2,16 @@
 
 Newest first.
 
+## [2026-11-20] — Telepad 0.8.4
+- New: **file operations** in the file window (#63) — new folder (F7) / new file, rename
+  (F2), delete (Del, one confirmation listing every item with its size), properties,
+  permissions (checkboxes or octal, optionally everything inside), copy path; on both
+  sides, from each pane's toolbar or the right-click menu; per-item errors.
+- New: **editor** (#64) — double-click, Edit or F4 opens a file of either side in a
+  VS Code-like editor window: tabs, line numbers, syntax colours, find / replace (regex),
+  go to line, indent, status bar; saves keep line endings, encoding and permissions, and
+  ask before overwriting a file that changed on the host.
+
 ## [2026-11-20] — fix(ui): copy and paste do not reach the system clipboard in text fields
 - Issue #71 created on GitHub (found while testing #64)
 - Scope: workspace `Cargo.toml` (eframe built without its `clipboard` feature) / gui

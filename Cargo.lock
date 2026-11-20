@@ -3848,14 +3848,14 @@ dependencies = [
 
 [[package]]
 name = "telepad-app"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "telepad-core",
 ]
 
 [[package]]
 name = "telepad-check"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "serde_json",
  "telepad-core",
@@ -3863,7 +3863,7 @@ dependencies = [
 
 [[package]]
 name = "telepad-core"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "keyring",
  "mysql",
@@ -3882,7 +3882,7 @@ dependencies = [
 
 [[package]]
 name = "telepad-gui"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "arboard",
  "eframe",
