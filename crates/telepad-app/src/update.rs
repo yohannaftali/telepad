@@ -417,6 +417,9 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             if d.keys.is_none() {
                 d.keys = Some(KeysDraft::default());
             }
+            if m.auth_keys.is_empty() {
+                fx.extend(load_keys(m, None));
+            }
             if m.key_run.as_ref().is_some_and(|r| !r.running()) {
                 m.key_run = None;
             }
@@ -461,6 +464,42 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 k.typed.clear();
             }
         }
+        Msg::AkLoad(aliases) => fx.extend(load_keys(m, aliases)),
+        Msg::AkListed { alias, result } => {
+            if m.hosts.iter().any(|h| h.entry.alias == alias) {
+                let v = match result {
+                    Ok(k) => crate::state::AkHost::Ready(k),
+                    Err(e) => crate::state::AkHost::Failed(e),
+                };
+                m.auth_keys.insert(alias, v);
+            }
+        }
+        Msg::AkTab(tab) => {
+            if let Some(k) = &mut d.keys {
+                k.tab = tab;
+            }
+        }
+        Msg::AkPrepare {
+            action,
+            line,
+            aliases,
+        } => {
+            let k = d.keys.get_or_insert_with(KeysDraft::default);
+            if k.confirm.is_none() && !m.key_run.as_ref().is_some_and(KeyRun::running) {
+                k.text = line;
+                k.selected = m
+                    .hosts
+                    .iter()
+                    .filter(|h| aliases.contains(&h.entry.alias) && key_selectable(&h.entry))
+                    .filter_map(|h| h.entry.id)
+                    .collect();
+                k.tab = crate::state::KeysTab::AddRevoke;
+                k.typed.clear();
+                if PublicKey::parse(&k.text).is_ok() && !k.chosen(m).is_empty() {
+                    k.confirm = Some(action);
+                }
+            }
+        }
         Msg::KeysConfirmCancel => {
             if let Some(k) = &mut d.keys {
                 k.confirm = None;
@@ -491,6 +530,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             fx.push(Effect::ApplyKey { action, key, hosts });
         }
         Msg::KeyResult { alias, outcome } => {
+            let was_running = m.key_run.as_ref().is_some_and(KeyRun::running);
             if let Some(run) = &mut m.key_run
                 && let Some(slot) = run
                     .results
@@ -516,6 +556,16 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                     );
                     say(m, now, text);
                 }
+            }
+            // The run just finished: read the changed hosts again so the
+            // lists show the result.
+            let changed: Option<Vec<String>> = m
+                .key_run
+                .as_ref()
+                .filter(|r| was_running && !r.running())
+                .map(|r| r.results.iter().map(|(a, _)| a.clone()).collect());
+            if let Some(c) = changed {
+                fx.extend(load_keys(m, Some(c)));
             }
         }
         Msg::PasteImport => d.paste = Some(PasteImport::default()),
@@ -774,6 +824,11 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         let db: Vec<_> = m.hosts.iter().map(|h| h.entry.clone()).collect();
         crate::hostsync::refresh(hs, &db);
     }
+    // Authorized keys reopened from the saved layout: read the lists once the
+    // hosts are known.
+    if hosts_changed && d.keys.is_some() && m.auth_keys.is_empty() {
+        fx.extend(load_keys(m, None));
+    }
     // Session windows follow their sessions; save the layout when it changed.
     let mut ws = std::mem::take(&mut m.ws);
     ws.sync(m);
@@ -946,4 +1001,25 @@ fn open_plan(
         Some((_, Err(e))) => say(m, now, e),
         None => say(m, now, "Refresh the host first"),
     }
+}
+
+/// Hosts whose `authorized_keys` the page reads: saved, SSH, among `aliases`
+/// (`None` = all). Marks them loading and returns the effect.
+fn load_keys(m: &mut Model, aliases: Option<Vec<String>>) -> Option<Effect> {
+    let hosts: Vec<HostEntry> = m
+        .hosts
+        .iter()
+        .map(|h| &h.entry)
+        .filter(|e| key_selectable(e))
+        .filter(|e| aliases.as_ref().is_none_or(|a| a.contains(&e.alias)))
+        .cloned()
+        .collect();
+    if hosts.is_empty() {
+        return None;
+    }
+    for h in &hosts {
+        m.auth_keys
+            .insert(h.alias.clone(), crate::state::AkHost::Loading);
+    }
+    Some(Effect::ListKeys(hosts))
 }

@@ -180,6 +180,23 @@ pub enum Msg {
     OrderSaved(Result<(), String>),
     RunInfoLoaded(RunInfo),
     ClipboardRead(Result<String, String>),
+    /// Authorized keys page (#78): read `authorized_keys` again on these hosts
+    /// (`None` = every SSH host).
+    AkLoad(Option<Vec<String>>),
+    /// One host's `authorized_keys` was read.
+    AkListed {
+        alias: String,
+        result: Result<telepad_core::authorized_keys::HostKeys, String>,
+    },
+    /// Switch the page's view.
+    AkTab(crate::state::KeysTab),
+    /// Shortcut from a list: put `line` in the key box, choose `aliases`, go to
+    /// Add / revoke and ask for the confirmation word (when the key is valid).
+    AkPrepare {
+        action: KeyAction,
+        line: String,
+        aliases: Vec<String>,
+    },
     /// One host of a key run finished.
     KeyResult {
         alias: String,
@@ -258,6 +275,9 @@ pub enum Effect {
     OpenUrl(String),
     /// Start the new exe and close this window.
     Relaunch,
+    /// Read `~/.ssh/authorized_keys` on each host (read-only), in the
+    /// background → one [`Msg::AkListed`] per host.
+    ListKeys(Vec<HostEntry>),
     /// Add / revoke `key` in `~/.ssh/authorized_keys` on each host, in the
     /// background → one [`Msg::KeyResult`] per host.
     ApplyKey {

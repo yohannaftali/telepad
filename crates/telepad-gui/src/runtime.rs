@@ -362,6 +362,17 @@ impl Runtime {
             Effect::SaveUiPrefs(p) => {
                 Some(Msg::UiPrefsSaved(self.with_store(|s| s.set_ui_prefs(&p))))
             }
+            Effect::ListKeys(hosts) => {
+                let s = self.ssh.clone()?;
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                thread::spawn(move || {
+                    authorized_keys::list_all(&s, &hosts, WORKERS, |alias, result| {
+                        let _ = tx.send(Msg::AkListed { alias, result });
+                        ctx.request_repaint();
+                    });
+                });
+                None
+            }
             Effect::ApplyKey { action, key, hosts } => {
                 let s = self.ssh.clone()?;
                 let (tx, ctx) = (self.tx.clone(), self.ctx.clone());

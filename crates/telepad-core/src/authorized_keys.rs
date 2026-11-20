@@ -1,5 +1,5 @@
-//! Add or revoke one SSH public key in the login user's `~/.ssh/authorized_keys`
-//! on many hosts at once. This is the one in-app action that changes a remote
+//! List the keys in the login user's `~/.ssh/authorized_keys` (read-only, #78)
+//! and add or revoke one SSH public key there on many hosts at once. This is the one in-app action that changes a remote
 //! host (owner decision on #49): the app runs it only after the user typed the
 //! confirmation word, never from a refresh.
 
@@ -307,6 +307,178 @@ pub fn apply_all(
     });
 }
 
+/// One key line of a host's `authorized_keys`, as read by [`list`] (#78).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthKey {
+    /// 1-based line number in the file.
+    pub line_no: usize,
+    /// Options before the key (`from="…",no-pty`), empty when none.
+    pub options: String,
+    /// Type, data and comment as written (the type may be one Telepad does
+    /// not add, e.g. `ssh-dss` or a certificate type).
+    pub key: PublicKey,
+    /// Type known to [`PublicKey::parse`] and data that belongs to it: only
+    /// those can be added elsewhere or revoked from Telepad.
+    pub supported: bool,
+}
+
+/// Every key line of one host's `authorized_keys`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HostKeys {
+    pub keys: Vec<AuthKey>,
+    /// The file does not exist (no key is authorized).
+    pub missing: bool,
+    /// Lines that are neither blank, `#` comments nor keys (shown as a count).
+    pub unreadable: usize,
+    /// Fingerprints of the keys Telepad logs in to this host with (from
+    /// [`login_keys`]): never revoked from Telepad.
+    pub login: Vec<String>,
+}
+
+/// Read-only script: prints the login user's `~/.ssh/authorized_keys`
+/// between markers (nothing is changed on the host).
+pub fn list_script() -> &'static str {
+    r#"LC_ALL=C
+export LC_ALL
+F="${HOME:-}/.ssh/authorized_keys"
+if [ -z "${HOME:-}" ]; then echo "TELEPAD-AK error HOME is not set"; exit 0; fi
+if [ ! -e "$F" ]; then echo "TELEPAD-AK none"; exit 0; fi
+if [ ! -r "$F" ]; then echo "TELEPAD-AK error $F is not readable"; exit 0; fi
+echo "TELEPAD-AK begin"
+cat "$F"
+echo
+echo "TELEPAD-AK end"
+"#
+}
+
+/// Split one `authorized_keys` line into options and the key words; `None`
+/// for blank and `#` lines. Options may hold quoted text with spaces.
+fn split_line(line: &str) -> Option<(String, Vec<&str>)> {
+    let t = line.trim();
+    if t.is_empty() || t.starts_with('#') {
+        return None;
+    }
+    let first = t.split_whitespace().next()?;
+    if is_key_type(first) {
+        return Some((String::new(), t.split_whitespace().collect()));
+    }
+    // Options: up to the first space outside double quotes.
+    let mut quoted = false;
+    let mut end = t.len();
+    for (i, c) in t.char_indices() {
+        match c {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                end = i;
+                break;
+            }
+            _ => {}
+        }
+    }
+    let rest = t[end..].trim_start();
+    Some((t[..end].to_string(), rest.split_whitespace().collect()))
+}
+
+/// Looks like a key type: one of [`KEY_TYPES`], or `ssh-…`, `ecdsa-…`, `sk-…`
+/// (older or certificate types are listed, not managed).
+fn is_key_type(w: &str) -> bool {
+    KEY_TYPES.contains(&w) || ["ssh-", "ecdsa-", "sk-"].iter().any(|p| w.starts_with(p))
+}
+
+/// Read an `authorized_keys` file's text.
+pub fn parse_authorized_keys(text: &str) -> HostKeys {
+    let mut out = HostKeys::default();
+    for (n, line) in text.lines().enumerate() {
+        let Some((options, words)) = split_line(line) else {
+            continue;
+        };
+        let (Some(kind), Some(blob)) = (words.first(), words.get(1)) else {
+            out.unreadable += 1;
+            continue;
+        };
+        if !is_key_type(kind) {
+            out.unreadable += 1;
+            continue;
+        }
+        let comment = words[2..].join(" ");
+        let bare = format!("{kind} {blob} {comment}");
+        let supported = PublicKey::parse(bare.trim()).is_ok();
+        out.keys.push(AuthKey {
+            line_no: n + 1,
+            options,
+            key: PublicKey {
+                kind: (*kind).to_string(),
+                blob: (*blob).to_string(),
+                comment,
+            },
+            supported,
+        });
+    }
+    out
+}
+
+/// Read the list script's output.
+pub fn parse_list(out: &str) -> Result<HostKeys, String> {
+    let mut lines = out.lines();
+    loop {
+        let Some(l) = lines.next() else {
+            return Err("no answer from the host".into());
+        };
+        match l.trim().strip_prefix("TELEPAD-AK ") {
+            Some("none") => {
+                return Ok(HostKeys {
+                    missing: true,
+                    ..HostKeys::default()
+                });
+            }
+            Some("begin") => break,
+            Some(r) => {
+                return Err(r.strip_prefix("error ").unwrap_or(r).to_string());
+            }
+            None => {}
+        }
+    }
+    let body: Vec<&str> = lines.take_while(|l| l.trim() != "TELEPAD-AK end").collect();
+    Ok(parse_authorized_keys(&body.join("\n")))
+}
+
+/// List the keys authorized on one host (read-only; blocks up to the ssh timeout).
+pub fn list(settings: &SshSettings, host: &HostEntry) -> Result<HostKeys, String> {
+    if host.access == Access::Rdp {
+        return Err("RDP-only host, no SSH".into());
+    }
+    let (out, err, code) = run_script(settings, host, list_script())?;
+    let mut keys = match parse_list(&out) {
+        Ok(k) => k,
+        Err(e) if out.contains("TELEPAD-AK") => return Err(e),
+        Err(_) => return Err(explain_ssh_error(&err, code)),
+    };
+    keys.login = login_keys(settings, host)
+        .iter()
+        .map(|(_, k)| k.fingerprint())
+        .collect();
+    Ok(keys)
+}
+
+/// [`list`] on every host, at most `workers` at a time.
+pub fn list_all(
+    settings: &SshSettings,
+    hosts: &[HostEntry],
+    workers: usize,
+    done: impl Fn(String, Result<HostKeys, String>) + Sync,
+) {
+    let next = AtomicUsize::new(0);
+    thread::scope(|s| {
+        for _ in 0..workers.clamp(1, hosts.len().max(1)) {
+            s.spawn(|| {
+                while let Some(h) = hosts.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    done(h.alias.clone(), list(settings, h));
+                }
+            });
+        }
+    });
+}
+
 /// The key type string at the start of the key data (SSH wire format).
 fn embedded_type(data: &[u8]) -> Option<&str> {
     let len = u32::from_be_bytes(data.get(..4)?.try_into().ok()?) as usize;
@@ -371,6 +543,58 @@ mod tests {
         format!("ssh-ed25519 {} {comment}", base64(&data))
             .trim_end()
             .to_string()
+    }
+
+    #[test]
+    fn lists_keys_with_options_comments_and_odd_lines() {
+        let text = format!(
+            "# managed by hand\n\n{}\nfrom=\"192.0.2.0/24,198.51.100.7\",command=\"echo a b\" {}\n\
+             ssh-dss AAAAB3NzaC1kc3M= old-key\nnot a key line\n{}\n",
+            fake_key(1, "alice@example.com"),
+            fake_key(2, "backup job"),
+            fake_key(1, "alice laptop"),
+        );
+        let h = parse_authorized_keys(&text);
+        assert_eq!(h.keys.len(), 4);
+        assert_eq!(h.unreadable, 1);
+        let k0 = &h.keys[0];
+        assert_eq!((k0.line_no, k0.options.as_str()), (3, ""));
+        assert_eq!(k0.key.comment, "alice@example.com");
+        assert!(k0.supported);
+        let k1 = &h.keys[1];
+        assert_eq!(
+            k1.options,
+            "from=\"192.0.2.0/24,198.51.100.7\",command=\"echo a b\""
+        );
+        assert_eq!(k1.key.comment, "backup job");
+        assert!(k1.supported);
+        // An old type is listed but not managed.
+        assert_eq!(h.keys[2].key.kind, "ssh-dss");
+        assert!(!h.keys[2].supported);
+        // Same key twice (other comment): same fingerprint.
+        assert_eq!(h.keys[3].key.fingerprint(), k0.key.fingerprint());
+    }
+
+    #[test]
+    fn reads_the_list_script_output() {
+        let out = format!(
+            "motd noise\nTELEPAD-AK begin\n{}\n\nTELEPAD-AK end\n",
+            fake_key(3, "ops")
+        );
+        let h = parse_list(&out).unwrap();
+        assert_eq!(h.keys.len(), 1);
+        assert!(!h.missing);
+        assert!(parse_list("TELEPAD-AK none\n").unwrap().missing);
+        assert_eq!(
+            parse_list("TELEPAD-AK error HOME is not set\n").unwrap_err(),
+            "HOME is not set"
+        );
+        assert!(parse_list("").is_err());
+        // The script only reads.
+        let sc = list_script();
+        for w in ["mv ", "rm ", "cp ", ">>", "chmod", "mkdir", "awk"] {
+            assert!(!sc.contains(w), "list script must not contain {w}");
+        }
     }
 
     #[test]

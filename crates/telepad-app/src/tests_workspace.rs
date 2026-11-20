@@ -229,6 +229,8 @@ fn saved_layout_reopens_its_pages_on_start() {
     assert!(s.model.host_sync.is_some(), "Host Management reopened");
     assert!(s.model.ws.is_open(Win::HostSync));
     assert!(fx.iter().any(|e| matches!(e, Effect::HostSync(_))));
+    // The Authorized keys lists were read once the hosts loaded (in `started`).
+    assert_eq!(s.model.auth_keys.get("web1"), Some(&crate::AkHost::Loading));
 }
 
 #[test]

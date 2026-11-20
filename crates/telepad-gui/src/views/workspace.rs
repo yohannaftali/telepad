@@ -40,7 +40,7 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
                 .map_or("Host".into(), |h| format!("Host — {}", h.entry.alias)),
         ),
         Win::HostSync => (icons::SYNC, "Host Management".into()),
-        Win::Keys => (icons::KEY, "Public keys".into()),
+        Win::Keys => (icons::KEY, "Authorized keys".into()),
         Win::Files(id) => (icons::FOLDER, format!("Files — {}", alias(id))),
         Win::Db(id) => (
             icons::DATABASE,
@@ -133,8 +133,10 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
         }
         ui.add_space(3.0);
     }
-    if nav_button(ui, shown(Win::Keys), icons::KEY, text("Public keys"))
-        .on_hover_text("Public keys: add or revoke an SSH key on chosen hosts")
+    if nav_button(ui, shown(Win::Keys), icons::KEY, text("Authorized keys"))
+        .on_hover_text(
+            "Authorized keys: the keys on each server, by server or by key; add or revoke",
+        )
         .clicked()
     {
         if m.ws.is_open(Win::Keys) {

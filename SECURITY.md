@@ -14,8 +14,8 @@ Only the latest release is supported.
 
 - Monitoring only runs read-only commands on hosts; `sudo` is only used as
   `sudo -n` (never prompts) for the BMC readings. Changes happen only through actions
-  the user starts and confirms: Docker / BMC actions in a terminal, and **Public keys…**
-  (adds or removes one line in the login user's `~/.ssh/authorized_keys` after the user
+  the user starts and confirms: Docker / BMC actions in a terminal, and **Authorized keys**
+  (reads `~/.ssh/authorized_keys` to list the keys — read-only; adds or removes one line in the login user's `~/.ssh/authorized_keys` after the user
   types `add` / `revoke`; it refuses to revoke the key Telepad itself logs in with).
 - **Open database…** reaches a database only through `ssh -N -L` over the host's normal
   login (`BatchMode=yes`); no database port is opened and nothing on the host is changed.

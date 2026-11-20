@@ -55,6 +55,9 @@ pub struct Model {
     pub files_next: crate::files::FmId,
     /// Inner windows of the main window (#77).
     pub ws: crate::workspace::Workspace,
+    /// Authorized keys page (#78): what each host's `authorized_keys` holds,
+    /// by alias.
+    pub auth_keys: std::collections::BTreeMap<String, AkHost>,
     /// The layout last sent to the database (saved again only when it changes).
     pub ws_saved: (String, bool),
 }
@@ -117,6 +120,14 @@ pub struct Drafts {
 /// confirmation being typed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KeysDraft {
+    /// Which view of the Authorized keys page is shown (#78).
+    pub tab: KeysTab,
+    /// By server: the host whose keys are shown.
+    pub server: Option<String>,
+    /// By public key: the key (fingerprint) whose servers are shown.
+    pub open_key: Option<String>,
+    /// Narrows the server and key lists (alias, comment, fingerprint).
+    pub list_filter: String,
     pub text: String,
     /// Narrows the host list (alias, address, description, OS).
     pub filter: String,
@@ -144,6 +155,76 @@ impl KeysDraft {
             .filter(|e| key_selectable(e) && e.id.is_some_and(|id| self.selected.contains(&id)))
             .collect()
     }
+}
+
+/// The views of the Authorized keys page (#78).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum KeysTab {
+    /// One host's keys.
+    #[default]
+    ByServer,
+    /// Every key and the hosts that have it.
+    ByKey,
+    /// Paste a key, pick hosts, confirm, see the results (#49).
+    AddRevoke,
+}
+
+/// One host's `authorized_keys` as last read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AkHost {
+    Loading,
+    Ready(telepad_core::authorized_keys::HostKeys),
+    Failed(String),
+}
+
+/// One distinct key (by fingerprint) and the hosts whose `authorized_keys`
+/// hold it, for the "By public key" view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyHolders {
+    pub fingerprint: String,
+    /// The first line seen (type, data, comment) and whether Telepad can manage it.
+    pub key: telepad_core::authorized_keys::PublicKey,
+    pub supported: bool,
+    /// Comments seen for it on any host.
+    pub comments: Vec<String>,
+    /// Aliases, in host order; `true` = Telepad logs in to that host with it.
+    pub hosts: Vec<(String, bool)>,
+}
+
+/// Every key found on the loaded hosts, grouped by fingerprint, in the order
+/// first seen (hosts in inventory order).
+pub fn key_holders(m: &Model) -> Vec<KeyHolders> {
+    let mut out: Vec<KeyHolders> = Vec::new();
+    for h in &m.hosts {
+        let Some(AkHost::Ready(hk)) = m.auth_keys.get(&h.entry.alias) else {
+            continue;
+        };
+        for ak in &hk.keys {
+            let fp = ak.key.fingerprint();
+            let login = hk.login.contains(&fp);
+            let i = match out.iter().position(|k| k.fingerprint == fp) {
+                Some(i) => i,
+                None => {
+                    out.push(KeyHolders {
+                        fingerprint: fp.clone(),
+                        key: ak.key.clone(),
+                        supported: ak.supported,
+                        comments: Vec::new(),
+                        hosts: Vec::new(),
+                    });
+                    out.len() - 1
+                }
+            };
+            let k = &mut out[i];
+            if !ak.key.comment.is_empty() && !k.comments.contains(&ak.key.comment) {
+                k.comments.push(ak.key.comment.clone());
+            }
+            if !k.hosts.iter().any(|(a, _)| *a == h.entry.alias) {
+                k.hosts.push((h.entry.alias.clone(), login));
+            }
+        }
+    }
+    out
 }
 
 /// A host the key window can change: saved, with SSH (not RDP-only).

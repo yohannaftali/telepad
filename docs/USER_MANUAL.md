@@ -16,7 +16,7 @@ Telepad | Refresh all | Theme | search | 2 up 1 down          ☰ |
 Pages            | +-[Overview — all hosts]-[Overview — Docker]-+ |
  Overview — all  | | table / cards                     _ □ × ⧉  | |
  Overview — Dock |  +---------------------------------------------+ |
- Public keys     |        +-[Files — web1]---------- _ □ × ⧉ +     |
+ Authorized keys |        +-[Files — web1]---------- _ □ × ⧉ +     |
  Host Management |        | this computer | web1              |     |
  Files           |        +----------------------------------+     |
  Databases       | [Host — db01]  (minimized)                      |
@@ -25,8 +25,8 @@ Pages            | +-[Overview — all hosts]-[Overview — Docker]-+ |
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | **Refresh all**, **Auto every _N_ s**, theme, the search box, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (settings: add, import, export, Host Management, Public keys, software update) |
-| **Pages** (left sidebar) | One button per page: **Overview — all hosts**, **Overview — Docker**, **Public keys**, **Host Management**, **Files** (pick a host), **Databases** (open connections). Below them, **Open windows** lists every open window (click one to bring it back). The **▯ ‹** button at the top folds the sidebar to icons only; Telepad remembers it |
+| **Top bar** | **Refresh all**, **Auto every _N_ s**, theme, the search box, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (settings: add, import, export, Host Management, Authorized keys, software update) |
+| **Pages** (left sidebar) | One button per page: **Overview — all hosts**, **Overview — Docker**, **Authorized keys**, **Host Management**, **Files** (pick a host), **Databases** (open connections). Below them, **Open windows** lists every open window (click one to bring it back). The **▯ ‹** button at the top folds the sidebar to icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
 
@@ -46,7 +46,7 @@ back to the front if it is already open. Each window has a title bar:
 - Clicking a host in the overview opens its **Host — _name_** window; Files, the editor and
   each database open as windows too. Dialogs (edit host, import, delete, update, file
   questions) open over the workspace, never as a separate window of the system.
-- Telepad remembers the windows of Overview, Docker, Host Management and Public keys (place,
+- Telepad remembers the windows of Overview, Docker, Host Management and Authorized keys (place,
   size, tabs, minimized / maximized) and opens them again on the next start. Host, file,
   editor and database windows are not reopened (they belong to a session). The first start
   shows the overview, maximized.
@@ -61,7 +61,7 @@ deletes, removes, drops, revokes or overwrites something; **yellow** edits or re
 shades (deep fills with light text in the dark theme, brighter fills in the light theme),
 and in menus the same meaning shows as red / yellow / green text.
 
-**Copy and paste**: every text field (forms, filters, the Public keys box, database
+**Copy and paste**: every text field (forms, filters, the Authorized keys box, database
 queries, the file window's path bars, the editor) works with the system clipboard:
 Ctrl+C / Ctrl+X / Ctrl+V (Cmd on macOS), in every window.
 
@@ -530,11 +530,34 @@ full path). Opening a file that already has a tab switches to it.
   closing, close it again after answering.
 - Editing on the host needs SFTP: on a host without it, only this computer's files open.
 
-## Public keys (add / revoke)
+## Authorized keys (list, add, revoke)
 
-**☰ → Public keys… (add / revoke)** gives someone SSH access to many hosts at once, or
-takes it away, using the access Telepad already has. It changes only the
+**Authorized keys** in the sidebar (or **☰ → Authorized keys…**) shows who can log in to
+your hosts with an SSH key, and gives someone SSH access to many hosts at once, or takes it
+away, using the access Telepad already has. It reads and changes only the
 `~/.ssh/authorized_keys` file of the user Telepad logs in as on each host (no `sudo`).
+
+When the page opens, Telepad reads that file on every SSH host (read-only, in parallel);
+**Refresh** reads them all again, the small ↻ next to a server only that one. The page has
+three tabs:
+
+- **By server**: the servers on the left with their number of keys (**no file** when there
+  is no `authorized_keys`, **failed** with the reason on hover when the host could not be
+  read). Pick one to see its keys: type, comment, SHA256 fingerprint and options
+  (`from=`, `command=` …). The key Telepad itself logs in with is marked
+  **Telepad logs in with this key** and cannot be revoked. A red **Revoke** removes that key
+  from this server; the green **Add key** opens Add / revoke with this server ticked.
+  Older key types (e.g. `ssh-dss`) are listed but not managed; lines that are not keys are
+  counted and left alone.
+- **By public key**: every key found, grouped by fingerprint, with its comments and the
+  number of servers that have it. Click it to see those servers, each with a red
+  **Revoke**, and **Revoke on all _N_ servers** (not the servers Telepad logs in to with
+  it). The green **Add to server…** opens Add / revoke with the key filled in, to tick more
+  servers.
+- **Add / revoke**: the form below. Every shortcut above opens it with the key and the
+  servers filled in and the confirmation waiting; nothing changes until you type the word.
+
+After a run, the changed servers are read again, so the lists show the result.
 
 1. Paste one public key (Ctrl+V): the single line from a `.pub` file, for example
    `ssh-ed25519 AAAAC3Nza… alice@example.com`. Telepad shows its type, its SHA256
