@@ -7,7 +7,7 @@ use telepad_core::authorized_keys::{KeyAction, PublicKey};
 use telepad_core::config::Access;
 
 use crate::icons::{self, label as il};
-use crate::widgets::usage_color;
+use crate::widgets::{Act, act_button, usage_color};
 
 pub fn keys_window(ctx: &egui::Context, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
     let Some(k) = &mut d.keys else { return };
@@ -101,9 +101,13 @@ fn body(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {
             }
             let ready = k.typed.trim() == word;
             let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if ui
-                .add_enabled(ready, egui::Button::new(il(icons::KEY, action.title())))
-                .clicked()
+            if act_button(
+                ui,
+                ready,
+                key_act(action),
+                &il(key_icon(action), action.title()),
+            )
+            .clicked()
                 || (ready && enter)
             {
                 out.push(Msg::KeysRun);
@@ -116,9 +120,13 @@ fn body(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {
         let can = key.is_ok() && !chosen.is_empty() && !running;
         ui.horizontal(|ui| {
             for action in [KeyAction::Add, KeyAction::Revoke] {
-                if ui
-                    .add_enabled(can, egui::Button::new(il(icons::KEY, action.title())))
-                    .clicked()
+                if act_button(
+                    ui,
+                    can,
+                    key_act(action),
+                    &il(key_icon(action), action.title()),
+                )
+                .clicked()
                 {
                     out.push(Msg::KeysAsk(action));
                 }
@@ -241,4 +249,19 @@ fn results(ui: &mut egui::Ui, m: &Model, ok: egui::Color32, bad: egui::Color32) 
                 ui.end_row();
             }
         });
+}
+
+/// Add is green, Revoke red (#76).
+fn key_act(action: KeyAction) -> Act {
+    match action {
+        KeyAction::Add => Act::Add,
+        KeyAction::Revoke => Act::Danger,
+    }
+}
+
+fn key_icon(action: KeyAction) -> &'static str {
+    match action {
+        KeyAction::Add => icons::PLUS,
+        KeyAction::Revoke => icons::TRASH,
+    }
 }

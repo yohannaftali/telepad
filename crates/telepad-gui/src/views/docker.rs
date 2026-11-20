@@ -27,11 +27,10 @@ fn portainer_url(r: &HostReport, host: &str) -> Option<String> {
 const TERMINAL_HINT: &str = "Opens a terminal on the host that shows the exact command and runs it only after you press Enter";
 
 fn action_label(text: &str, destructive: bool) -> RichText {
-    let t = RichText::new(text);
     if destructive {
-        t.color(usage_color(95.0))
+        act_text(Act::Danger, text)
     } else {
-        t
+        RichText::new(text)
     }
 }
 

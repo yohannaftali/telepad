@@ -14,7 +14,7 @@ use telepad_core::db::{
 };
 
 use crate::icons::{self, label as il};
-use crate::widgets::usage_color;
+use crate::widgets::{Act, act_button, act_small, act_text, usage_color};
 
 const ROW: f32 = 20.0;
 /// Characters of a value shown in a grid cell.
@@ -183,8 +183,7 @@ fn login(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) 
                 ui.label("Opening the SSH tunnel and logging in…");
             }
             if !connecting
-                && ui
-                    .button(il(icons::TRASH, "Forget saved connection"))
+                && act_button(ui, true, Act::Danger, &il(icons::TRASH, "Forget saved connection"))
                     .on_hover_text("Delete the saved user, database and password")
                     .clicked()
             {
@@ -410,13 +409,7 @@ fn tree(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) {
 
 fn node_menu(ui: &mut egui::Ui, s: &DbSession, db: &str, schema: &str, out: &mut Vec<Msg>) {
     let id = s.id;
-    if ui
-        .add_enabled(
-            !s.read_only,
-            egui::Button::new(il(icons::PLUS, "New table…")),
-        )
-        .clicked()
-    {
+    if act_button(ui, !s.read_only, Act::Add, &il(icons::PLUS, "New table…")).clicked() {
         send(
             out,
             DbMsg::NewTable {
@@ -548,13 +541,7 @@ fn table_menu(ui: &mut egui::Ui, s: &DbSession, t: &TableRef, kind: TableKind, o
         );
         ui.close();
     }
-    if ui
-        .add_enabled(
-            writable,
-            egui::Button::new(RichText::new(il(icons::TRASH, "Drop…")).color(red())),
-        )
-        .clicked()
-    {
+    if act_button(ui, writable, Act::Danger, &il(icons::TRASH, "Drop…")).clicked() {
         send(
             out,
             DbMsg::DropTable {
@@ -621,13 +608,7 @@ fn database_tab(ui: &mut egui::Ui, s: &DbSession, out: &mut Vec<Msg>) {
             ui.label(RichText::new("choose a schema on the left").weak());
             return;
         }
-        if ui
-            .add_enabled(
-                !s.read_only,
-                egui::Button::new(il(icons::PLUS, "New table…")),
-            )
-            .clicked()
-        {
+        if act_button(ui, !s.read_only, Act::Add, &il(icons::PLUS, "New table…")).clicked() {
             send(
                 out,
                 DbMsg::NewTable {
@@ -732,12 +713,7 @@ fn table_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Ms
         let writable = !s.read_only && !s.ddl_running;
         if d.structure.is_none()
             && info.kind == TableKind::Table
-            && ui
-                .add_enabled(
-                    writable,
-                    egui::Button::new(il(icons::EDIT, "Edit structure")),
-                )
-                .clicked()
+            && act_button(ui, writable, Act::Edit, &il(icons::EDIT, "Edit structure")).clicked()
         {
             send(out, DbMsg::StructureEdit(id));
         }
@@ -752,10 +728,7 @@ fn table_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Ms
                 }
             }
             None => {
-                if ui
-                    .add_enabled(writable, egui::Button::new(il(icons::EDIT, "Rename…")))
-                    .clicked()
-                {
+                if act_button(ui, writable, Act::Edit, &il(icons::EDIT, "Rename…")).clicked() {
                     send(out, DbMsg::RenameTable(id));
                 }
             }
@@ -773,13 +746,7 @@ fn table_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Ms
                 },
             );
         }
-        if ui
-            .add_enabled(
-                writable,
-                egui::Button::new(RichText::new(il(icons::TRASH, "Drop…")).color(red())),
-            )
-            .clicked()
-        {
+        if act_button(ui, writable, Act::Danger, &il(icons::TRASH, "Drop…")).clicked() {
             send(
                 out,
                 DbMsg::DropTable {
@@ -954,7 +921,7 @@ fn structure_editor(ui: &mut egui::Ui, engine: Engine, edit: &mut TableEdit, all
     let my = engine == Engine::MySql;
     ui.horizontal(|ui| {
         ui.strong("Columns");
-        if ui.button(il(icons::PLUS, "Add column")).clicked() {
+        if act_button(ui, true, Act::Add, &il(icons::PLUS, "Add column")).clicked() {
             let n = edit.columns.len() + 1;
             edit.columns.push(TableEdit::blank_column(engine, n));
         }
@@ -1006,8 +973,7 @@ fn structure_editor(ui: &mut egui::Ui, engine: Engine, edit: &mut TableEdit, all
                             swap = Some((i, i + 1));
                         }
                     }
-                    if ui
-                        .small_button(icons::TRASH)
+                    if act_small(ui, true, Act::Danger, icons::TRASH)
                         .on_hover_text("Remove column")
                         .clicked()
                     {
@@ -1082,7 +1048,7 @@ fn structure_editor(ui: &mut egui::Ui, engine: Engine, edit: &mut TableEdit, all
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.strong("Indexes");
-        if ui.button(il(icons::PLUS, "Add index")).clicked() {
+        if act_button(ui, true, Act::Add, &il(icons::PLUS, "Add index")).clicked() {
             edit.indexes.push(IndexEdit {
                 original: None,
                 index: telepad_core::db::Index {
@@ -1101,8 +1067,7 @@ fn structure_editor(ui: &mut egui::Ui, engine: Engine, edit: &mut TableEdit, all
         .show(ui, |ui| {
             for (i, ie) in edit.indexes.iter_mut().enumerate() {
                 let ix = &mut ie.index;
-                if ui
-                    .small_button(icons::TRASH)
+                if act_small(ui, true, Act::Danger, icons::TRASH)
                     .on_hover_text("Remove index")
                     .clicked()
                 {
@@ -1132,7 +1097,7 @@ fn structure_editor(ui: &mut egui::Ui, engine: Engine, edit: &mut TableEdit, all
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.strong("Foreign keys");
-        if ui.button(il(icons::PLUS, "Add foreign key")).clicked() {
+        if act_button(ui, true, Act::Add, &il(icons::PLUS, "Add foreign key")).clicked() {
             edit.foreign_keys.push(FkEdit {
                 original: None,
                 fk: telepad_core::db::ForeignKey {
@@ -1165,8 +1130,7 @@ fn structure_editor(ui: &mut egui::Ui, engine: Engine, edit: &mut TableEdit, all
             }
             for (i, fe) in edit.foreign_keys.iter_mut().enumerate() {
                 let fk = &mut fe.fk;
-                if ui
-                    .small_button(icons::TRASH)
+                if act_small(ui, true, Act::Danger, icons::TRASH)
                     .on_hover_text("Remove foreign key")
                     .clicked()
                 {
@@ -1338,22 +1302,17 @@ fn data_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg
         }
         ui.separator();
         let editable = blocked.is_none() && s.data.grid.is_some();
-        if ui
-            .add_enabled(
-                editable,
-                egui::Button::new(il(icons::ROW_PLUS, "Insert row")),
-            )
-            .clicked()
-        {
+        if act_button(ui, editable, Act::Add, &il(icons::ROW_PLUS, "Insert row")).clicked() {
             send(out, DbMsg::InsertRow(id));
         }
-        if ui
-            .add_enabled(
-                editable && d.selected_row.is_some(),
-                egui::Button::new(il(icons::TRASH, "Delete row")),
-            )
-            .on_hover_text("Marks the selected row; again to unmark")
-            .clicked()
+        if act_button(
+            ui,
+            editable && d.selected_row.is_some(),
+            Act::Danger,
+            &il(icons::TRASH, "Delete row"),
+        )
+        .on_hover_text("Marks the selected row; again to unmark")
+        .clicked()
             && let Some(row) = d.selected_row
         {
             send(out, DbMsg::DeleteRow { id, row });
@@ -1581,7 +1540,10 @@ fn cell(
             .and_then(|v| v.as_value())
             .map(str::to_string);
         if ui
-            .add_enabled(can_edit, egui::Button::new(il(icons::EDIT, "Edit")))
+            .add_enabled(
+                can_edit,
+                egui::Button::new(act_text(Act::Edit, &il(icons::EDIT, "Edit"))),
+            )
             .clicked()
         {
             d.cell = Some((r, c, full.clone().unwrap_or_default(), false));
@@ -1957,13 +1919,7 @@ fn confirm(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>
         }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui
-                .add_enabled(
-                    ready,
-                    egui::Button::new(RichText::new(il(icons::PLAY, "Run")).color(red())),
-                )
-                .clicked()
-            {
+            if act_button(ui, ready, Act::Danger, &il(icons::PLAY, "Run")).clicked() {
                 send(out, DbMsg::ConfirmOk(id));
             }
             if ui.button("Cancel").clicked() {

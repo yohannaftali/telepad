@@ -9,7 +9,7 @@ use telepad_core::config::{Access, HostEntry};
 use telepad_core::hostsync::{Row, RowState};
 
 use crate::icons::{self, label as il};
-use crate::widgets::usage_color;
+use crate::widgets::{Act, act_button, act_small, act_text, usage_color};
 
 const ROW: f32 = 26.0;
 
@@ -123,7 +123,7 @@ fn body(ui: &mut egui::Ui, m: &Model, hs: &HostSync, d: &mut HostSyncDraft, out:
                 ui.close();
             }
             if ui
-                .button(RichText::new("Replace").color(red()))
+                .button(act_text(Act::Danger, "Replace"))
                 .on_hover_text("The config's hosts become a copy of Telepad's; hosts only the config has are removed (Host *, Match and shared lines stay)")
                 .clicked()
             {
@@ -141,7 +141,7 @@ fn body(ui: &mut egui::Ui, m: &Model, hs: &HostSync, d: &mut HostSyncDraft, out:
                 ui.close();
             }
             if ui
-                .button(RichText::new("Replace").color(red()))
+                .button(act_text(Act::Danger, "Replace"))
                 .on_hover_text("Telepad's hosts become a copy of the config's; hosts only Telepad has are removed")
                 .clicked()
             {
@@ -157,10 +157,10 @@ fn body(ui: &mut egui::Ui, m: &Model, hs: &HostSync, d: &mut HostSyncDraft, out:
             send(out, HsMsg::Sync);
         }
         ui.separator();
-        if ui.button(il(icons::PLUS, "Add to Telepad…")).clicked() {
+        if act_button(ui, true, Act::Add, &il(icons::PLUS, "Add to Telepad…")).clicked() {
             send(out, HsMsg::Add(Side::Telepad));
         }
-        if ui.button(il(icons::PLUS, "Add to config…")).clicked() {
+        if act_button(ui, true, Act::Add, &il(icons::PLUS, "Add to config…")).clicked() {
             send(out, HsMsg::Add(Side::Config));
         }
     });
@@ -179,7 +179,14 @@ fn body(ui: &mut egui::Ui, m: &Model, hs: &HostSync, d: &mut HostSyncDraft, out:
             {
                 send(out, HsMsg::ToTelepad(selected.clone()));
             }
-            if ui.button(il(icons::TRASH, "delete in Telepad")).clicked() {
+            if act_button(
+                ui,
+                true,
+                Act::Danger,
+                &il(icons::TRASH, "delete in Telepad"),
+            )
+            .clicked()
+            {
                 send(
                     out,
                     HsMsg::Delete {
@@ -188,7 +195,7 @@ fn body(ui: &mut egui::Ui, m: &Model, hs: &HostSync, d: &mut HostSyncDraft, out:
                     },
                 );
             }
-            if ui.button(il(icons::TRASH, "delete in config")).clicked() {
+            if act_button(ui, true, Act::Danger, &il(icons::TRASH, "delete in config")).clicked() {
                 send(
                     out,
                     HsMsg::Delete {
@@ -449,7 +456,10 @@ fn side_cell(
                     );
                 return;
             }
-            if ui.small_button(icons::EDIT).on_hover_text("Edit").clicked() {
+            if act_small(ui, true, Act::Edit, icons::EDIT)
+                .on_hover_text("Edit")
+                .clicked()
+            {
                 send(
                     out,
                     HsMsg::Edit {
@@ -458,8 +468,7 @@ fn side_cell(
                     },
                 );
             }
-            if ui
-                .small_button(icons::TRASH)
+            if act_small(ui, true, Act::Danger, icons::TRASH)
                 .on_hover_text(format!("Delete in {}", side.title()))
                 .clicked()
             {

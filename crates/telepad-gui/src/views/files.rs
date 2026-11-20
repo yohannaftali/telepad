@@ -21,7 +21,7 @@ use telepad_core::files::transfer::{Decision, Direction};
 use telepad_core::files::{Entry, Kind, perm_text, time_text};
 
 use crate::icons::{self, label as il};
-use crate::widgets::usage_color;
+use crate::widgets::{Act, act_button, act_small, act_text, usage_color};
 
 const ROW: f32 = 22.0;
 
@@ -750,7 +750,7 @@ fn ask(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>
             format!("Apply to all {left} existing file(s)"),
         );
         ui.horizontal(|ui| {
-            if ui.button(RichText::new("Overwrite").color(red())).clicked() {
+            if act_button(ui, true, Act::Danger, "Overwrite").clicked() {
                 send(
                     out,
                     FmMsg::Decide {
@@ -792,6 +792,16 @@ fn ask(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>
 }
 
 /// The operations of one pane: (op, icon, label, hint).
+/// Colour of an operation's button (#76); `None` = neutral.
+fn op_act(op: OpKind) -> Option<Act> {
+    match op {
+        OpKind::NewFolder | OpKind::NewFile => Some(Act::Add),
+        OpKind::Edit | OpKind::Rename => Some(Act::Edit),
+        OpKind::Delete => Some(Act::Danger),
+        _ => None,
+    }
+}
+
 fn ops_for(side: Side) -> Vec<(OpKind, &'static str, &'static str, &'static str)> {
     let mut v = vec![
         (
@@ -832,7 +842,10 @@ fn toolbar(ui: &mut egui::Ui, s: &FileSession, d: &FileDraft, side: Side, out: &
     let n = d.selected(side).len();
     for (op, icon, label, hint) in ops_for(side) {
         let why = op_blocked(s, n, side, op);
-        let r = ui.add_enabled(why.is_none(), egui::Button::new(il(icon, label)).small());
+        let r = match op_act(op) {
+            Some(k) => act_small(ui, why.is_none(), k, &il(icon, label)),
+            None => ui.add_enabled(why.is_none(), egui::Button::new(il(icon, label)).small()),
+        };
         let r = match why {
             Some(w) => r.on_disabled_hover_text(w),
             None => r.on_hover_text(hint),
@@ -855,7 +868,11 @@ fn toolbar_menu(ui: &mut egui::Ui, s: &FileSession, d: &FileDraft, side: Side, o
     let n = d.selected(side).len();
     for (op, icon, _, hint) in ops_for(side) {
         let why = op_blocked(s, n, side, op);
-        let r = ui.add_enabled(why.is_none(), egui::Button::new(il(icon, hint)));
+        let text = match op_act(op) {
+            Some(k) => act_text(k, &il(icon, hint)),
+            None => RichText::new(il(icon, hint)),
+        };
+        let r = ui.add_enabled(why.is_none(), egui::Button::new(text));
         let r = match why {
             Some(w) => r.on_disabled_hover_text(w),
             None => r,
@@ -1084,12 +1101,12 @@ fn dialog(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<M
 fn buttons(ui: &mut egui::Ui, busy: bool, ok: &str, danger: bool) -> Option<()> {
     let mut clicked = None;
     ui.horizontal(|ui| {
-        let text = if danger {
-            RichText::new(ok).color(red())
+        let r = if danger {
+            act_button(ui, !busy, Act::Danger, &il(icons::TRASH, ok))
         } else {
-            RichText::new(ok)
+            ui.add_enabled(!busy, egui::Button::new(ok))
         };
-        if ui.add_enabled(!busy, egui::Button::new(text)).clicked() {
+        if r.clicked() {
             clicked = Some(());
         }
         if busy {

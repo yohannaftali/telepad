@@ -18,6 +18,12 @@ Status dot: green = last check succeeded, red = it failed, blue = first check ru
 grey = no result yet (or not monitored). Usage bars turn yellow and red as they fill; temperatures are blue
 below 70 °C, yellow from 70 °C and red from 85 °C.
 
+**Button colours**: a button's colour says what it does. **Red** (with the trash icon)
+deletes, removes, drops, revokes or overwrites something; **yellow** edits or renames;
+**green** adds or creates. Other buttons keep the neutral look. Each theme has its own
+shades (deep fills with light text in the dark theme, brighter fills in the light theme),
+and in menus the same meaning shows as red / yellow / green text.
+
 **Copy and paste**: every text field (forms, filters, the Public keys box, database
 queries, the file window's path bars, the editor) works with the system clipboard:
 Ctrl+C / Ctrl+X / Ctrl+V (Cmd on macOS), in the main window and in the extra windows.
