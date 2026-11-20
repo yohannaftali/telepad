@@ -163,7 +163,7 @@ impl KeyOutcome {
 /// file next to it (same mode) and moved over it, so a failure leaves it intact.
 /// Type and data are validated (safe in single quotes); the whole line, comment
 /// included, is read from a quoted here-document, so nothing in it is expanded.
-pub fn script(action: KeyAction, key: &PublicKey) -> String {
+pub fn script(action: KeyAction, key: &PublicKey, group: Option<&str>) -> String {
     format!(
         r#"LC_ALL=C
 export LC_ALL
@@ -174,6 +174,13 @@ KEY=$(cat <<'TELEPAD_KEY_END'
 {line}
 TELEPAD_KEY_END
 )
+GROUP=$(cat <<'TELEPAD_GROUP_END'
+{group}
+TELEPAD_GROUP_END
+)
+TP_KEY="$KEY"
+TP_GROUP="$GROUP"
+export TP_KEY TP_GROUP
 say() {{ echo "TELEPAD-KEY $*"; }}
 [ -n "${{HOME:-}}" ] || {{ say "error HOME is not set"; exit 0; }}
 D="$HOME/.ssh"
@@ -191,11 +198,12 @@ if [ {action} = add ]; then
   fi
   if [ -f "$F" ]; then
     cp -p "$F" "$TMP" || {{ say "error cannot copy $F"; exit 0; }}
-    if [ -s "$TMP" ] && [ -n "$(tail -c 1 "$TMP")" ]; then echo >> "$TMP"; fi
+    SRC="$F"
   else
     : > "$TMP" && chmod 600 "$TMP" || {{ say "error cannot write in $D"; exit 0; }}
+    SRC=/dev/null
   fi
-  printf '%s\n' "$KEY" >> "$TMP" && mv -f "$TMP" "$F" || {{ say "error cannot write $F"; exit 0; }}
+  awk '{insert}' "$SRC" > "$TMP" && mv -f "$TMP" "$F" || {{ say "error cannot write $F"; exit 0; }}
   if has; then say added; else say "error the key is not in $F after writing"; fi
   exit 0
 fi
@@ -209,8 +217,55 @@ if has; then say "error the key is still in $F"; else say "removed $N"; fi
         kind = key.kind,
         blob = key.blob,
         line = key.line(),
+        group = group.unwrap_or_default(),
         action = action.word(),
+        insert = INSERT_AWK,
     )
+}
+
+/// awk program for Add (#85): writes the file with `TP_KEY` inserted. With a
+/// group (`TP_GROUP`): after the last key of that group's block (a `#` line
+/// naming it, up to the next `#` line), or at the end under a new `# group`
+/// line. Without: before the first `#` line (at the end when there is none),
+/// so the key does not land in someone's group. Other lines are copied as is.
+const INSERT_AWK: &str = r##"function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+{ line[NR] = $0 }
+END {
+  key = ENVIRON["TP_KEY"]; g = ENVIRON["TP_GROUP"]; at = NR; found = 0
+  if (g == "") {
+    for (i = 1; i <= NR; i++) if (line[i] ~ /^[ \t]*#/) { at = i - 1; break }
+  } else {
+    for (i = 1; i <= NR && !found; i++) {
+      if (line[i] ~ /^[ \t]*#/) {
+        t = line[i]; sub(/^[ \t]*#+/, "", t)
+        if (trim(t) == g) { found = 1; at = i
+          for (j = i + 1; j <= NR; j++) {
+            if (line[j] ~ /^[ \t]*#/) break
+            if (trim(line[j]) != "") at = j
+          }
+        }
+      }
+    }
+  }
+  for (i = 1; i <= at; i++) print line[i]
+  if (g != "" && !found) print "# " g
+  print key
+  for (i = at + 1; i <= NR; i++) print line[i]
+}"##;
+
+/// A group name for Add: one line, no control characters, 64 characters at most.
+pub fn check_group(g: &str) -> Result<String, String> {
+    let g = g.trim().trim_start_matches('#').trim();
+    if g.chars().any(char::is_control) {
+        return Err("The group name contains control characters".into());
+    }
+    if g.chars().count() > 64 {
+        return Err("The group name is longer than 64 characters".into());
+    }
+    if g.contains("TELEPAD_") {
+        return Err("The group name cannot contain TELEPAD_".into());
+    }
+    Ok(g.to_string())
 }
 
 /// Read the script's `TELEPAD-KEY` line.
@@ -266,6 +321,7 @@ pub fn apply(
     host: &HostEntry,
     action: KeyAction,
     key: &PublicKey,
+    group: Option<&str>,
 ) -> KeyOutcome {
     if host.access == Access::Rdp {
         return KeyOutcome::Refused("RDP-only host, no SSH".into());
@@ -277,7 +333,7 @@ pub fn apply(
     {
         return KeyOutcome::Refused(format!("Telepad logs in with this key ({path})"));
     }
-    match run_script(settings, host, &script(action, key)) {
+    match run_script(settings, host, &script(action, key, group)) {
         Ok((out, err, code)) => {
             parse_result(&out).unwrap_or_else(|| KeyOutcome::Failed(explain_ssh_error(&err, code)))
         }
@@ -292,6 +348,7 @@ pub fn apply_all(
     hosts: &[HostEntry],
     action: KeyAction,
     key: &PublicKey,
+    group: Option<&str>,
     workers: usize,
     done: impl Fn(String, KeyOutcome) + Sync,
 ) {
@@ -300,7 +357,7 @@ pub fn apply_all(
         for _ in 0..workers.clamp(1, hosts.len().max(1)) {
             s.spawn(|| {
                 while let Some(h) = hosts.get(next.fetch_add(1, Ordering::Relaxed)) {
-                    done(h.alias.clone(), apply(settings, h, action, key));
+                    done(h.alias.clone(), apply(settings, h, action, key, group));
                 }
             });
         }
@@ -320,6 +377,9 @@ pub struct AuthKey {
     /// Type known to [`PublicKey::parse`] and data that belongs to it: only
     /// those can be added elsewhere or revoked from Telepad.
     pub supported: bool,
+    /// The `#` comment line above it that names its group (#85), `None` =
+    /// no group yet.
+    pub group: Option<String>,
 }
 
 /// Every key line of one host's `authorized_keys`.
@@ -388,7 +448,17 @@ fn is_key_type(w: &str) -> bool {
 /// Read an `authorized_keys` file's text.
 pub fn parse_authorized_keys(text: &str) -> HostKeys {
     let mut out = HostKeys::default();
+    let mut group: Option<String> = None;
     for (n, line) in text.lines().enumerate() {
+        // A comment line names the group of the keys below it (#85); blank
+        // lines do not end a group.
+        if let Some(c) = line.trim().strip_prefix('#') {
+            let name = c.trim_start_matches('#').trim();
+            if !name.is_empty() {
+                group = Some(name.to_string());
+            }
+            continue;
+        }
         let Some((options, words)) = split_line(line) else {
             continue;
         };
@@ -412,6 +482,7 @@ pub fn parse_authorized_keys(text: &str) -> HostKeys {
                 comment,
             },
             supported,
+            group: group.clone(),
         });
     }
     out
@@ -576,6 +647,86 @@ mod tests {
     }
 
     #[test]
+    fn comment_lines_name_the_groups_of_the_keys_below() {
+        let text = format!(
+            "{}\n\n# maintainer\n{}\n\n{}\n# developer\n# (added 2026)\n{}\n",
+            fake_key(1, "loose"),
+            fake_key(2, "ana"),
+            fake_key(3, "budi"),
+            fake_key(4, "citra"),
+        );
+        let h = parse_authorized_keys(&text);
+        let groups: Vec<Option<&str>> = h.keys.iter().map(|k| k.group.as_deref()).collect();
+        assert_eq!(
+            groups,
+            [
+                None,
+                Some("maintainer"),
+                Some("maintainer"),
+                Some("(added 2026)")
+            ],
+            "no comment = no group; blank lines keep the group; the last comment line names it"
+        );
+        assert_eq!(check_group("  # developer ").unwrap(), "developer");
+        assert!(check_group("a\u{7}b").is_err());
+        assert!(check_group(&"x".repeat(65)).is_err());
+    }
+
+    #[test]
+    fn script_adds_into_a_group() {
+        let home = std::env::temp_dir().join(format!("telepad-home-g-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".ssh")).unwrap();
+        let file = home.join(".ssh").join("authorized_keys");
+        let (a, b, c) = (
+            fake_key(1, "loose"),
+            fake_key(2, "ana"),
+            fake_key(3, "dev1"),
+        );
+        std::fs::write(
+            &file,
+            format!("{a}\n# maintainer\n{b}\n\n# developer\n{c}\n"),
+        )
+        .unwrap();
+        let k1 = PublicKey::parse(&fake_key(7, "maint2")).unwrap();
+        let Some(r) = run_local_group(&home, KeyAction::Add, &k1, Some("maintainer")) else {
+            return; // no local sh
+        };
+        assert_eq!(r, KeyOutcome::Added);
+        let k2 = PublicKey::parse(&fake_key(8, "ops1")).unwrap();
+        run_local_group(&home, KeyAction::Add, &k2, Some("ops"));
+        let k3 = PublicKey::parse(&fake_key(9, "nogroup")).unwrap();
+        run_local_group(&home, KeyAction::Add, &k3, None);
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            format!(
+                "{a}\n{}\n# maintainer\n{b}\n{}\n\n# developer\n{c}\n# ops\n{}\n",
+                k3.line(),
+                k1.line(),
+                k2.line()
+            )
+        );
+        let groups: Vec<Option<String>> =
+            parse_authorized_keys(&std::fs::read_to_string(&file).unwrap())
+                .keys
+                .into_iter()
+                .map(|k| k.group)
+                .collect();
+        assert_eq!(
+            groups,
+            [
+                None,
+                None,
+                Some("maintainer".into()),
+                Some("maintainer".into()),
+                Some("developer".into()),
+                Some("ops".into())
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn reads_the_list_script_output() {
         let out = format!(
             "motd noise\nTELEPAD-AK begin\n{}\n\nTELEPAD-AK end\n",
@@ -678,7 +829,7 @@ mod tests {
         let mut rdp = HostEntry::new("win01");
         rdp.access = Access::Rdp;
         assert!(matches!(
-            apply(&s, &rdp, KeyAction::Add, &key),
+            apply(&s, &rdp, KeyAction::Add, &key, None),
             KeyOutcome::Refused(_)
         ));
 
@@ -692,7 +843,7 @@ mod tests {
         assert!(found.iter().any(|(_, k)| k.same_key(&key)));
         // Refused before any ssh is started.
         assert!(matches!(
-            apply(&s, &host, KeyAction::Revoke, &key),
+            apply(&s, &host, KeyAction::Revoke, &key, None),
             KeyOutcome::Refused(why) if why.contains("logs in with this key")
         ));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -701,6 +852,15 @@ mod tests {
     /// Run the remote script with the local sh against a temporary HOME
     /// (skipped where there is no sh). Returns the script's result.
     fn run_local(home: &std::path::Path, action: KeyAction, key: &PublicKey) -> Option<KeyOutcome> {
+        run_local_group(home, action, key, None)
+    }
+
+    fn run_local_group(
+        home: &std::path::Path,
+        action: KeyAction,
+        key: &PublicKey,
+        group: Option<&str>,
+    ) -> Option<KeyOutcome> {
         let mut child = Command::new("sh")
             .arg("-s")
             .env("HOME", home)
@@ -712,7 +872,7 @@ mod tests {
         child
             .stdin
             .take()?
-            .write_all(script(action, key).as_bytes())
+            .write_all(script(action, key, group).as_bytes())
             .unwrap();
         let out = child.wait_with_output().unwrap();
         let text = String::from_utf8_lossy(&out.stdout);

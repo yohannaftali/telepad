@@ -373,7 +373,12 @@ impl Runtime {
                 });
                 None
             }
-            Effect::ApplyKey { action, key, hosts } => {
+            Effect::ApplyKey {
+                action,
+                key,
+                hosts,
+                group,
+            } => {
                 let s = self.ssh.clone()?;
                 let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
                 thread::spawn(move || {
@@ -382,6 +387,7 @@ impl Runtime {
                         &hosts,
                         action,
                         &key,
+                        group.as_deref(),
                         WORKERS,
                         |alias, outcome| {
                             let _ = tx.send(Msg::KeyResult { alias, outcome });

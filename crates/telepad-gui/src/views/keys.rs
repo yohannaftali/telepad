@@ -120,6 +120,17 @@ fn by_server(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>
                     aliases: vec![alias.clone()],
                 });
             }
+            if act_button(ui, true, Act::Edit, &il(icons::EDIT, "Edit file"))
+                .on_hover_text(
+                    "Open ~/.ssh/authorized_keys of this server in the editor (saved only on Save)",
+                )
+                .clicked()
+            {
+                out.push(Msg::Files(telepad_app::files::FmMsg::OpenFile {
+                    alias: alias.clone(),
+                    rel: ".ssh/authorized_keys".into(),
+                }));
+            }
             if ui
                 .small_button(icons::REFRESH)
                 .on_hover_text("Read this server again")
@@ -158,16 +169,37 @@ fn by_server(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>
                     .id_salt(("ak-keys", &alias))
                     .auto_shrink(false)
                     .show(ui, |ui| {
+                        // Keys under their group heading (the `#` line above
+                        // them, #85), groups in file order, "No group" last.
+                        let mut groups: Vec<Option<&str>> = Vec::new();
                         for ak in &h.keys {
-                            key_row(
-                                ui,
-                                ak,
-                                h.login.contains(&ak.key.fingerprint()),
-                                &alias,
-                                running,
-                                ok,
-                                out,
-                            );
+                            let g = ak.group.as_deref();
+                            if g.is_some() && !groups.contains(&g) {
+                                groups.push(g);
+                            }
+                        }
+                        if h.keys.iter().any(|k| k.group.is_none()) {
+                            groups.push(None);
+                        }
+                        let grouped = groups.iter().any(Option::is_some);
+                        for g in groups {
+                            if grouped {
+                                ui.add_space(4.0);
+                                ui.label(
+                                    RichText::new(il(icons::KEY, g.unwrap_or("No group"))).strong(),
+                                );
+                            }
+                            for ak in h.keys.iter().filter(|k| k.group.as_deref() == g) {
+                                key_row(
+                                    ui,
+                                    ak,
+                                    h.login.contains(&ak.key.fingerprint()),
+                                    &alias,
+                                    running,
+                                    ok,
+                                    out,
+                                );
+                            }
                         }
                     });
             }
@@ -259,6 +291,7 @@ fn by_key(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {
             for kh in all {
                 let mut texts: Vec<&str> = vec![&kh.fingerprint, &kh.key.kind];
                 texts.extend(kh.comments.iter().map(String::as_str));
+                texts.extend(kh.groups.iter().map(String::as_str));
                 texts.extend(kh.hosts.iter().map(|(a, _)| a.as_str()));
                 if !hit(&k.list_filter, &texts) {
                     continue;
@@ -290,6 +323,12 @@ fn by_key(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {
                             k.open_key = (!open).then(|| kh.fingerprint.clone());
                         }
                         ui.label(RichText::new(format!("{} server(s)", kh.hosts.len())).weak());
+                        let groups = if kh.groups.is_empty() {
+                            "No group".to_string()
+                        } else {
+                            kh.groups.join(", ")
+                        };
+                        ui.label(RichText::new(il(icons::KEY, &groups)).small());
                         let missing: Vec<String> = ssh
                             .iter()
                             .filter(|a| !kh.hosts.iter().any(|(h, _)| h == *a))
@@ -414,6 +453,40 @@ fn body(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {
         Err(_) => {}
     }
 
+    // Group for Add (#85): an existing one or a new name; empty = no group.
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Group (for Add):");
+        ui.add(
+            egui::TextEdit::singleline(&mut k.group)
+                .desired_width(160.0)
+                .hint_text("no group"),
+        );
+        let known = telepad_app::key_groups(m);
+        if !known.is_empty() {
+            egui::ComboBox::from_id_salt("ak-group-pick")
+                .selected_text("pick…")
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(k.group.is_empty(), "No group")
+                        .clicked()
+                    {
+                        k.group.clear();
+                    }
+                    for g in known {
+                        if ui.selectable_label(k.group == g, &g).clicked() {
+                            k.group = g;
+                        }
+                    }
+                });
+        }
+        ui.label(
+            RichText::new(
+                "the key goes under the # line with this name (created at the end if new)",
+            )
+            .weak()
+            .small(),
+        );
+    });
     ui.separator();
     host_picker(ui, m, k, out);
     ui.separator();

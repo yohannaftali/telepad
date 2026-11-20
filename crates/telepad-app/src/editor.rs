@@ -145,6 +145,11 @@ pub enum EdMsg {
         side: Side,
         name: String,
     },
+    /// Open a file by its full path (not picked in a pane; #85).
+    OpenPath {
+        side: Side,
+        path: String,
+    },
     Loaded {
         tab: TabId,
         load: Load,
@@ -225,6 +230,44 @@ pub(crate) fn update(
                 path,
                 name,
                 state,
+                crlf: false,
+                mixed: false,
+                bom: false,
+                stamp: None,
+                saved: String::new(),
+                saving: None,
+                error: None,
+                conflict: None,
+                close_after_save: false,
+            });
+            e.active = Some(tab);
+        }
+        EdMsg::OpenPath { side, path } => {
+            if s.status != Status::Ready || (side == Side::Remote && s.mode == Mode::Fallback) {
+                return false;
+            }
+            let e = &mut s.editor;
+            if let Some(t) = e.tabs.iter().find(|t| t.side == side && t.path == path) {
+                e.active = Some(t.id);
+                return false;
+            }
+            e.next += 1;
+            let tab = e.next;
+            let name = path.rsplit(['/', '\\']).next().unwrap_or(&path).to_string();
+            fx.push(FmEffect::Load {
+                id,
+                tab,
+                side,
+                path: path.clone(),
+                load: Load::Open,
+            });
+            e.tabs.push(EdTab {
+                id: tab,
+                side,
+                lang: Lang::detect(&path, ""),
+                path,
+                name,
+                state: TabState::Loading,
                 crlf: false,
                 mixed: false,
                 bom: false,

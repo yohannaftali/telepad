@@ -236,3 +236,80 @@ fn a_finished_run_reads_its_hosts_again() {
     );
     assert_eq!(s.model.auth_keys.get("web1"), Some(&AkHost::Loading));
 }
+
+#[test]
+fn groups_are_shown_and_used_when_adding() {
+    let mut s = state();
+    let a = fake_key(1, "ana");
+    let b = fake_key(2, "budi");
+    listed(&mut s, "web1", &format!("{b}\n# maintainer\n{a}\n"), vec![]);
+    listed(&mut s, "db1", &format!("# developer\n{a}\n"), vec![]);
+    let k = key_holders(&s.model);
+    assert_eq!(k[0].groups, Vec::<String>::new(), "budi: no group");
+    assert_eq!(k[1].groups, ["maintainer", "developer"]);
+    assert_eq!(key_groups(&s.model), ["developer", "maintainer"]);
+
+    update(&mut s, Msg::KeysOpen, Instant::now());
+    update(
+        &mut s,
+        Msg::AkPrepare {
+            action: KeyAction::Add,
+            line: fake_key(6, "eko"),
+            aliases: vec!["web1".into()],
+        },
+        Instant::now(),
+    );
+    let d = s.drafts.keys.as_mut().unwrap();
+    d.group = " # maintainer ".into();
+    d.typed = "add".into();
+    let fx = update(&mut s, Msg::KeysRun, Instant::now());
+    assert!(matches!(&fx[..], [Effect::ApplyKey { group: Some(g), .. }] if g == "maintainer"));
+}
+
+#[test]
+fn edit_file_opens_authorized_keys_once_connected() {
+    use crate::files::{FmEffect, FmMsg, Mode, Side};
+    let mut s = state();
+    let fx = update(
+        &mut s,
+        Msg::Files(FmMsg::OpenFile {
+            alias: "web1".into(),
+            rel: ".ssh/authorized_keys".into(),
+        }),
+        Instant::now(),
+    );
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::Files(FmEffect::Connect { .. })))
+    );
+    let id = s.model.files[0].id;
+    let fx = update(
+        &mut s,
+        Msg::Files(FmMsg::Connected {
+            id,
+            result: Ok((Mode::Sftp, "/home/ops".into(), None)),
+            local_home: "/home/me".into(),
+        }),
+        Instant::now(),
+    );
+    assert!(fx.iter().any(|e| matches!(
+        e,
+        Effect::Files(FmEffect::Load { side: Side::Remote, path, .. })
+            if path == "/home/ops/.ssh/authorized_keys"
+    )));
+    assert!(s.model.ws.is_open(crate::workspace::Win::Editor(id)));
+    // Again while connected: the same tab, no second load.
+    let fx = update(
+        &mut s,
+        Msg::Files(FmMsg::OpenFile {
+            alias: "web1".into(),
+            rel: ".ssh/authorized_keys".into(),
+        }),
+        Instant::now(),
+    );
+    assert!(
+        !fx.iter()
+            .any(|e| matches!(e, Effect::Files(FmEffect::Load { .. })))
+    );
+    assert_eq!(s.model.files[0].editor.tabs.len(), 1);
+}

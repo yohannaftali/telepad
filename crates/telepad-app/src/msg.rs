@@ -284,6 +284,8 @@ pub enum Effect {
         action: KeyAction,
         key: PublicKey,
         hosts: Vec<HostEntry>,
+        /// Add into this group of `authorized_keys` (#85).
+        group: Option<String>,
     },
     /// Database windows: connect, load, run, save (worker per window).
     Db(crate::db::DbEffect),

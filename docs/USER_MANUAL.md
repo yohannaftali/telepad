@@ -561,18 +561,38 @@ away, using the access Telepad already has. It reads and changes only the
 
 When the page opens, Telepad reads that file on every SSH host (read-only, in parallel);
 **Refresh** reads them all again, the small ↻ next to a server only that one. The page has
-three tabs:
+three tabs.
+
+**Groups.** A `#` comment line names the group of the keys below it, until the next comment
+line (blank lines do not end a group; with several comment lines in a row, the last one is
+the name). Keys with no comment above them are in **No group**, so you can see which keys
+are not grouped yet. Example (made-up keys):
+
+```
+ssh-ed25519 AAAA…  backup-job          ← No group
+# maintainer
+ssh-ed25519 AAAA…  ana@example.com     ← maintainer
+ssh-ed25519 AAAA…  budi@example.com    ← maintainer
+
+# developer
+ssh-ed25519 AAAA…  citra@example.com   ← developer
+```
 
 - **By server**: the servers on the left with their number of keys (**no file** when there
   is no `authorized_keys`, **failed** with the reason on hover when the host could not be
   read). Pick one to see its keys: type, comment, SHA256 fingerprint and options
   (`from=`, `command=` …). The key Telepad itself logs in with is marked
   **Telepad logs in with this key** and cannot be revoked. A red **Revoke** removes that key
-  from this server; the green **Add key** opens Add / revoke with this server ticked.
+  from this server; the green **Add key** opens Add / revoke with this server ticked. Keys
+  are shown under their group headings when the file has groups. The yellow **Edit file**
+  opens the server's `~/.ssh/authorized_keys` in the [editor](#editor) (its file window
+  connects first if needed), with a warning that removing or breaking the key Telepad logs in
+  with locks you out; it is written only when you click **Save**, and the list is read again
+  after saving.
   Older key types (e.g. `ssh-dss`) are listed but not managed; lines that are not keys are
   counted and left alone.
-- **By public key**: every key found, grouped by fingerprint, with its comments and the
-  number of servers that have it. Click it to see those servers, each with a red
+- **By public key**: every key found, grouped by fingerprint, with its comments, its
+  group(s) and the number of servers that have it (the filter also matches group names). Click it to see those servers, each with a red
   **Revoke**, and **Revoke on all _N_ servers** (not the servers Telepad logs in to with
   it). The green **Add to server…** opens Add / revoke with the key filled in, to tick more
   servers.
@@ -585,6 +605,10 @@ After a run, the changed servers are read again, so the lists show the result.
    `ssh-ed25519 AAAAC3Nza… alice@example.com`. Telepad shows its type, its SHA256
    fingerprint (the same as `ssh-keygen -lf`) and its comment, or why it is not a valid
    key. Private keys, several lines and keys with options (`from=`, `command=`) are refused.
+   **Group (for Add)**: type a group name or pick one found on your hosts. Add puts the key
+   at the end of that group's block, or at the end of the file under a new `# name` line
+   when the group does not exist yet. Empty: the key goes before the first comment line
+   (or at the end when there is none), so it stays in **No group**. Revoke ignores it.
 2. Tick the hosts. **Select all** ticks every host the filter shows (click again to clear
    them); the filter box narrows the list by name, address, description or OS. RDP-only
    hosts are listed but cannot be ticked. The number of selected hosts is shown.

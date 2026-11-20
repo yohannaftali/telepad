@@ -1536,7 +1536,12 @@ fn key_run_needs_a_valid_key_hosts_and_the_typed_word() {
     assert!(update(&mut s, Msg::KeysRun, t0).is_empty());
     s.drafts.keys.as_mut().unwrap().typed = " revoke ".into();
     let fx = update(&mut s, Msg::KeysRun, t0);
-    let [Effect::ApplyKey { action, key, hosts }] = &fx[..] else {
+    let [
+        Effect::ApplyKey {
+            action, key, hosts, ..
+        },
+    ] = &fx[..]
+    else {
         panic!("{fx:?}")
     };
     assert_eq!(*action, KeyAction::Revoke);
