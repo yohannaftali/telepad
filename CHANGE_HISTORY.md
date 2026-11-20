@@ -2,6 +2,25 @@
 
 Newest first.
 
+## [2026-11-20] — Telepad 0.9.1
+- **Hosts page** (#83): the table fills the window; double-click a column border to fit it;
+  rows highlight on hover; click a row to open the host, **right-click** for its menu (Open
+  SSH, Files, databases, Edit, Clone, Delete); search moved into the page; "Overview — all
+  hosts" is now **Hosts**; the folded sidebar centres its icons.
+- **Docker / Podman**, **Kubernetes** and **Docker Swarm** pages (#84).
+- **Authorized keys** (#85): groups from the `#` comment lines, add a key into a group,
+  **Edit file** opens `authorized_keys` in the editor.
+- **Light theme** (#86): grey background, white bordered windows, visible buttons and inputs.
+- README: screenshots and a "Using Telepad" section.
+
+## [2026-11-20] — Tested and merged: #86, #83, #84, #85 (PRs #87–#90)
+- All four merged after CI green on Windows, macOS, Linux; issues closed. Owner follow-ups
+  during the work: SSH / Files buttons became icons, then a right-click host menu (with
+  databases); the host name in the table is plain text so the menu works on it too.
+- README screenshots taken from a throwaway workspace (made-up host names, documentation
+  addresses, local lab containers), cropped without the status bar; the host window shot was
+  left out because it shows this PC's hardware.
+
 ## [2026-11-20] — feat(keys): key groups, add into a group, edit the file (#85)
 - Issue #85 addressed on GitHub (branch `85-key-groups`, on top of #84).
 - Core: `AuthKey::group` from the `#` line above (blank lines ignored, last comment line of a
