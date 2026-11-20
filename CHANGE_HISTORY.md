@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-20] — Tested and merged: copy and paste in text fields (#71)
+- PR #74 merged (CI green on Windows, macOS, Linux builds and checks, `db-live`,
+  `files-live`); issue closed.
+- Tested on Windows 11 with made-up clipboard text (the user's clipboard restored): paste
+  into Public keys, copy back out, same in the file window.
+
 ## [2026-11-20] — fix(ui): copy and paste do not reach the system clipboard in text fields (#71)
 - Issue #71 addressed on GitHub (branch `71-clipboard`).
 - Cause: the workspace built `eframe` with `default-features = false` and without its
