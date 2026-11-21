@@ -258,6 +258,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #84 | feat(docker): Docker / Podman page name and Kubernetes / Docker Swarm pages | closed | 2026-11-20 |
 | #85 | feat(keys): key groups from authorized_keys comments, add into a group, edit the file in the editor | closed | 2026-11-20 |
 | #86 | fix(ui): light theme too light — clearer backgrounds, window borders and buttons | closed | 2026-11-20 |
-| #92 | feat(ui): searchable open-windows picker in the top bar, Theme moves to ☰ Settings | open | 2026-11-21 |
-| #93 | feat(ui): add / import / export hosts on the Host Management page, slimmer ☰ menu | open | 2026-11-21 |
-| #94 | feat(ui): named workspaces (WinBox style) saved in preference.db, window arrange (tile, stack, minimize all) | open | 2026-11-21 |
+| #92 | feat(ui): searchable open-windows picker in the top bar, Theme moves to ☰ Settings | closed | 2026-11-21 |
+| #93 | feat(ui): add / import / export hosts on the Host Management page, slimmer ☰ menu | closed | 2026-11-21 |
+| #94 | feat(ui): named workspaces (WinBox style) saved in preference.db, window arrange (tile, stack, minimize all) | closed | 2026-11-21 |
