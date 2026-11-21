@@ -2,6 +2,36 @@
 
 Newest first.
 
+## [2026-11-21] — Telepad 0.9.2
+- **Window picker** (#92): the top bar shows the window in front and how many are open;
+  click it to search every open window (minimized ones too) and bring one to the front.
+  The sidebar's *Open windows* list is gone. **Theme** moved to **☰ → Settings**.
+- **Host Management** (#93): **Add host…**, **Import** (file, `~/.ssh/config`, pasted text)
+  and **Export…** are on its Telepad side; the ☰ menu keeps only Settings and Software
+  update (Host Management and Authorized keys open from the sidebar).
+- **Workspaces** (#94, WinBox style): `<none>` / `<own>` / your own, searchable dropdown
+  with a delete icon per workspace and Save / Add… at its foot; switching closes the
+  windows and opens the picked set (host windows by alias); saved automatically in the new
+  `preference.db` next to `telepad.db` (`--prefs` / `TELEPAD_PREFS`); the old layout
+  becomes `<own>` on the first start. **Arrange**: Tile, Stack, Minimize all, Restore all;
+  title bars use corners-out / corners-in for maximize / restore.
+- README: top bar section and new screenshots.
+
+## [2026-11-21] — Tested and merged: #92, #93, #94 (PRs #95–#97)
+- Branches stacked (#92 → #93 → #94); each merged after CI green on Windows, macOS, Linux,
+  `db-live`, `files-live`; issues closed with the test notes.
+- GUI tested on Windows 11 in a throwaway workspace (made-up hosts, documentation
+  addresses), the window driven by a scratch PowerShell helper and captured window-only
+  (desktop automation tools were not available): picker search / Enter / Escape, ☰ Settings,
+  Add host / Import on Host Management, add / switch / `<none>` / delete workspaces, Tile,
+  Stack, Minimize / Restore all, maximize icons, restart keeps the workspace.
+- Found and fixed during the test: dropdowns opened with the first row highlighted, so Enter
+  picked `<none>`; they now open on the current entry. Owner follow-up: Host Management left
+  the ☰ menu too.
+- Not covered by the GUI pass: the unsaved-editor stop on switch and an unreadable
+  `preference.db` (unit tests); Export (native save dialog).
+- README screenshots retaken from local lab containers (1000 × 480; host window left out).
+
 ## [2026-11-21] — feat(ui): named workspaces (WinBox style) saved in preference.db, window arrange (tile, stack, minimize all)
 - Issue #94 created on GitHub
 - Scope: core (new preference.db) / app (workspaces, arrange) / gui (top bar dropdown, Arrange menu, title-bar icons)
