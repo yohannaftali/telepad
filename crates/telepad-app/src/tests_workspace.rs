@@ -241,3 +241,40 @@ fn sidebar_collapse_is_saved() {
     let fx = ws(&mut s, WsMsg::SetSidebarCollapsed(true));
     assert!(saved(&fx).is_none());
 }
+
+// ---------------------------------------------------------------- #92 window picker
+
+#[test]
+fn picker_query_matches_every_word_ignoring_case() {
+    assert!(matches_query("Files — web1", ""));
+    assert!(matches_query("Files — web1", "WEB"));
+    assert!(matches_query("Files — web1", "web files"));
+    assert!(!matches_query("Files — web1", "db"));
+    assert!(!matches_query("Host — web1", "files web1"));
+}
+
+#[test]
+fn picker_lists_every_open_window_with_minimized_ones() {
+    let mut ws = Workspace::default();
+    ws.open(Win::Overview);
+    ws.open(Win::Docker);
+    ws.update(WsMsg::Merge {
+        win: Win::Docker,
+        into: Win::Overview,
+    });
+    ws.open(Win::Kube);
+    ws.update(WsMsg::Minimize(Win::Kube));
+    assert_eq!(
+        ws.open_windows(),
+        vec![
+            (Win::Overview, false),
+            (Win::Docker, false),
+            (Win::Kube, true)
+        ]
+    );
+    // Picking a minimized window brings it back.
+    ws.update(WsMsg::Open(Win::Kube));
+    assert_eq!(ws.open_windows()[2], (Win::Kube, false));
+    assert_eq!(ws.focused, Some(Win::Kube));
+    assert!(Workspace::default().open_windows().is_empty());
+}

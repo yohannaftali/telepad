@@ -179,37 +179,6 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
             out.push(Msg::HostSync(telepad_app::hostsync::HsMsg::Open));
         }
     }
-    // Every open window, to bring one back (also the minimized ones).
-    let wins: Vec<Win> = m.ws.groups.iter().flat_map(|g| g.tabs.clone()).collect();
-    if wins.is_empty() {
-        return;
-    }
-    ui.add_space(8.0);
-    ui.separator();
-    if !collapsed {
-        ui.label(RichText::new("Open windows").weak().small());
-    }
-    egui::ScrollArea::vertical()
-        .id_salt("ws-open-list")
-        .show(ui, |ui| {
-            for w in wins {
-                let (icon, name) = title(m, w);
-                let label = if collapsed {
-                    icon.to_string()
-                } else {
-                    il(icon, &name)
-                };
-                let r = if collapsed {
-                    ui.vertical_centered(|ui| ui.selectable_label(focused == Some(w), label))
-                        .inner
-                } else {
-                    ui.selectable_label(focused == Some(w), label)
-                };
-                if r.on_hover_text(&name).clicked() {
-                    ws(out, WsMsg::Open(w));
-                }
-            }
-        });
 }
 
 // ---------------------------------------------------------------- workspace

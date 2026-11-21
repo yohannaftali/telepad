@@ -11,7 +11,7 @@ Telepad is one window (like MikroTik WinBox): pages open as windows **inside** i
 
 ```
 ------------------------------------------------------------------
-Telepad | Refresh all | Theme | 2 up 1 down                   ☰ |
+Telepad | Refresh all | ▣ Hosts · 3 ▾ | 2 up 1 down           ☰ |
 ------------------------------------------------------------------
 Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
  Hosts           | | search | Table / Cards                     | |
@@ -26,8 +26,8 @@ Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | **Refresh all**, **Auto every _N_ s**, theme, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (settings: add, import, export, Host Management, Authorized keys, software update) |
-| **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). Below them, **Open windows** lists every open window (click one to bring it back). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
+| **Top bar** | **Refresh all**, **Auto every _N_ s**, the **window picker** (the window in front and how many are open; see below), up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (add, import, export, Host Management, Authorized keys, **Settings ▸ Theme**, software update) |
+| **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
 
@@ -36,12 +36,18 @@ back to the front if it is already open. Each window has a title bar:
 
 - **Move**: drag the title bar. **Resize**: drag the right edge, the bottom edge or the
   bottom-right corner. Windows stay inside the workspace.
-- **_ (Minimize)** puts it in the strip at the bottom; click it there (or in **Open
-  windows**) to bring it back. **□ (Maximize)** fills the workspace; click again, or
+- **_ (Minimize)** puts it in the strip at the bottom; click it there (or pick it in the
+  window picker) to bring it back. **□ (Maximize)** fills the workspace; click again, or
   double-click the title bar, to get the old size back. **×** closes it (a file window
   with unsaved editor tabs asks first).
 - **⧉ (Tabs)**: **Show as a tab in** → another window puts this page in that window as a
   tab; click a tab to show it, middle-click to close it; **Own window** takes it out again.
+- **Window picker** (top bar): shows the window in front and the number of open windows
+  (**No windows** when none is open). Click it for a list of every open window — tabs and
+  minimized windows too (marked *minimized*), the front one with a ✓. Type to filter by
+  title (host, file host, database, page name; every word must match, case does not
+  matter). **↑ / ↓** move, **Enter** or a click brings that window to the front (a minimized
+  one comes back), **Escape** or a click outside closes the list.
 - Keys (F2, F4, F5, F7, Del in a file window, Ctrl+S and the others in the editor) go to the
   window in front; click a window to bring it to the front.
 - Clicking a host in the overview opens its **Host — _name_** window; Files, the editor and
@@ -69,7 +75,7 @@ Ctrl+C / Ctrl+X / Ctrl+V (Cmd on macOS), in every window.
 
 ## Theme
 
-**Theme** in the top bar switches between **System** (follows the Windows / macOS / desktop
+**☰ → Settings → Theme** switches between **System** (follows the Windows / macOS / desktop
 setting, the default), **Light** and **Dark**. The choice is saved in the database. The light
 theme uses a grey background behind white windows with a border, and buttons and input
 boxes with a visible fill and border, so every layer stands apart.

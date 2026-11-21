@@ -22,8 +22,8 @@ pub mod workspace;
 pub use msg::{Effect, Msg};
 pub use state::{
     AkHost, Drafts, Editor, HostState, ImportDialog, KeyHolders, KeyRun, KeysDraft, KeysTab,
-    MESSAGE_TTL, Model, OverviewPage, PasteImport, RunInfoView, State, UpdatePhase, UpdateState,
-    key_groups, key_holders, key_selectable, matches_filter,
+    MESSAGE_TTL, Model, OverviewPage, PasteImport, PickerDraft, RunInfoView, State, UpdatePhase,
+    UpdateState, key_groups, key_holders, key_selectable, matches_filter, matches_query,
 };
 pub use table::{
     ClusterKind, ClusterRow, Flag, FlagKind, HostGroup, Severity, Sort, SortKey, StackRow,
