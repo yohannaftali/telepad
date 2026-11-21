@@ -26,7 +26,7 @@ Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | **Refresh all**, **Auto every _N_ s**, the **window picker** (the window in front and how many are open; see below), up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (add, import, export, Host Management, Authorized keys, **Settings ▸ Theme**, software update) |
+| **Top bar** | **Refresh all**, **Auto every _N_ s**, the **window picker** (the window in front and how many are open; see below), up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Host Management…**, **Settings ▸ Theme**, **Software update…**; adding, importing and exporting hosts is on the Host Management page) |
 | **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
@@ -289,7 +289,9 @@ up the others. The window stays responsive while hosts load.
 
 ## Adding, editing and removing hosts
 
-**☰ → Add one host…** opens the editor:
+**Add host…** at the top of the [Host Management](#host-management-compare-with-an-openssh-config)
+page (Telepad database side; sidebar → **Host Management**, or **☰ → Host Management…**)
+opens the editor and saves the host straight into Telepad:
 
 | Field | Meaning |
 |---|---|
@@ -314,10 +316,13 @@ machine that is down looks different from one where only SSH is broken.
 
 ## Import and export
 
-- **☰ → Import ~/.ssh/config** imports your own OpenSSH client config in one click.
+Import and export are at the top of the **Host Management** page, on the Telepad database
+side (sidebar → **Host Management**): the **Import** menu and **Export…**.
+
+- **Import → From ~/.ssh/config** imports your own OpenSSH client config in one click.
   To compare it host by host and copy changes in either direction, use
   [Host Management](#host-management-compare-with-an-openssh-config).
-- **☰ → Import from a file…** reads any file you pick:
+- **Import → From a file…** reads any file you pick:
   - an **OpenSSH client config** (any file that is not JSON);
   - **JSON** with a list of hosts: a Telepad export from any version, `{"hosts": [...]}`
     or a bare `[...]`. Common field names are understood, in any case and with or
@@ -333,7 +338,7 @@ machine that is down looks different from one where only SSH is broken.
 
   An import is all or nothing: if any host is invalid, nothing changes. Global
   `Host *` / `Match` blocks are imported too.
-- **☰ → Import from pasted text…** opens a text box: paste with Ctrl+V or
+- **Import → From pasted text…** opens a text box: paste with Ctrl+V or
   **Paste from clipboard**, then **Next: preview**. It reads OpenSSH config text
   (`Host` blocks) or JSON as above, or a simple list with one host per line:
 
@@ -348,7 +353,7 @@ machine that is down looks different from one where only SSH is broken.
   Lines that cannot be read and invalid hosts are left out and listed with their
   line number in the preview; the other hosts can still be imported. If nothing
   can be read, the window stays open and says why.
-- **☰ → Export…** writes `.json` (re-importable, keeps every field) or OpenSSH
+- **Export…** writes `.json` (re-importable, keeps every field) or OpenSSH
   config text. Hosts that are not monitored or RDP-only are marked with
   `# telepad: not monitored` / `# telepad: rdp only` comments so they round-trip.
 
@@ -357,9 +362,14 @@ or use Export. You can also inspect it with any SQLite tool.
 
 ## Host Management (compare with an OpenSSH config)
 
-**☰ → Host Management… (compare with ~/.ssh/config)** shows Telepad's hosts (database
+**Host Management** in the sidebar (or **☰ → Host Management…**) shows Telepad's hosts (database
 icon, left) next to the hosts of an OpenSSH config file (monitor icon, right), so the two
-can be kept in step in either direction. Nothing is written until you click **Apply**.
+can be kept in step in either direction. Nothing is written to either side until you click
+**Apply** — except the buttons under **Telepad database**: **Add host…**, **Import**
+(from a file, from `~/.ssh/config`, from pasted text) and **Export…** work at once, as
+described in [Adding hosts](#adding-editing-and-removing-hosts) and
+[Import and export](#import-and-export). (**Add to Telepad…** in the toolbar below is
+different: it waits for Apply like every change in the list.)
 
 **Which file:** `~/.ssh/config` at first. **File…** picks another file, **Folder…** a folder
 (its `config` file is used); the choice is remembered. **Reload** reads the file again. A
@@ -560,7 +570,7 @@ full path). Opening a file that already has a tab switches to it.
 
 ## Authorized keys (list, add, revoke)
 
-**Authorized keys** in the sidebar (or **☰ → Authorized keys…**) shows who can log in to
+**Authorized keys** in the sidebar shows who can log in to
 your hosts with an SSH key, and gives someone SSH access to many hosts at once, or takes it
 away, using the access Telepad already has. It reads and changes only the
 `~/.ssh/authorized_keys` file of the user Telepad logs in as on each host (no `sudo`).
