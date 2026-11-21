@@ -6,7 +6,7 @@ A small desktop infrastructure monitor written in Rust. Telepad logs in to your
 hosts with the **system OpenSSH client** and the keys you already use, runs a
 **read-only** POSIX shell script, and shows per host (everything in one window: a page
 sidebar on the left, pages as windows inside Telepad that can be moved, resized,
-minimized, maximized and tabbed):
+minimized, maximized, tabbed and arranged, kept in named workspaces like MikroTik WinBox):
 
 - OS name and logo, kernel, architecture, uptime
 - CPU model, cores, usage %, load average
@@ -24,9 +24,9 @@ minimized, maximized and tabbed):
   editor (tabs, syntax colours, find / replace, line endings kept, changed-on-host check)
 - **Authorized keys**: the keys in each host's `authorized_keys`, by server or by key,
   and add or revoke one SSH public key on many hosts at once
-- **Host Management…**: Telepad's hosts next to `~/.ssh/config` (or another config
-  file); copy, edit or delete per host, merge / replace / sync, with a preview and a
-  backup before the file is written
+- **Host Management**: add, import (OpenSSH config, JSON, pasted text) and export hosts;
+  Telepad's hosts next to `~/.ssh/config` (or another config file); copy, edit or delete
+  per host, merge / replace / sync, with a preview and a backup before the file is written
 - **Open database…**: a HeidiSQL-style window for MariaDB / MySQL / PostgreSQL in a
   container or on the host, through the SSH login (tree, data grid with editing, queries,
   table structure); passwords optionally in the system password store
@@ -54,8 +54,8 @@ Releases are built for Windows (x86_64), macOS (Apple silicon and Intel) and Lin
    Start-menu entry; uninstall it in **Settings → Apps**.
 2. Start **Telepad** from the Start menu.
 
-Your hosts and settings live in `%APPDATA%\Telepad\telepad.db`, and uninstalling keeps
-them. To import an existing OpenSSH config on the first start, put it there as `config`, or
+Your hosts and settings live in `%APPDATA%\Telepad\telepad.db` (workspaces in
+`preference.db` next to it), and uninstalling keeps them. To import an existing OpenSSH config on the first start, put it there as `config`, or
 use **Host Management → Import → From ~/.ssh/config**.
 
 ### Windows (portable zip)
@@ -91,7 +91,8 @@ choose **More info → Run anyway**.
 
 3. Start Telepad from Applications or Launchpad. **Open SSH** uses Terminal.app.
 
-Hosts and settings live in `~/Library/Application Support/Telepad/telepad.db`; put an
+Hosts and settings live in `~/Library/Application Support/Telepad/telepad.db` (workspaces
+in `preference.db` next to it); put an
 OpenSSH config there as `config` to import it on the first start, or use
 **Host Management → Import → From ~/.ssh/config**. A portable zip (`telepad-<version>-macos-<arch>.zip`)
 is also published; it keeps its data next to the program and needs the same `xattr` step
@@ -109,8 +110,8 @@ for its folder.
 
 The Linux builds are made on Ubuntu 22.04 and need glibc 2.35 or newer.
 
-On every platform the folder must stay writable: `telepad.db` is created next to the
-program, and in-app updates replace the programs in place.
+On every platform the folder must stay writable: `telepad.db` and `preference.db` are
+created next to the program, and in-app updates replace the programs in place.
 
 ### With Cargo (any platform)
 
@@ -120,7 +121,8 @@ cargo install --git https://github.com/yohannaftali/telepad --locked telepad-gui
 
 This builds and installs `telepad` and `telepad-check` into `~/.cargo/bin`. See
 [Building from source](CONTRIBUTING.md#building-from-source) for the prerequisites. When installed this way,
-pass `--db <path>` (or set `TELEPAD_DB`) so the database does not live in `~/.cargo/bin`,
+pass `--db <path>` (or set `TELEPAD_DB`) so the database does not live in `~/.cargo/bin`
+(`preference.db` goes next to it; `--prefs <path>` / `TELEPAD_PREFS` to put it elsewhere),
 and update with the same `cargo install` command instead of the in-app updater.
 
 ### Requirements on your PC
@@ -151,8 +153,8 @@ systems and NAS devices work and missing tools only hide that section.
    ```
 
 2. Start Telepad. On the first start the hosts from `config` are imported into
-   `telepad.db`, and every host is checked once. No config? Open **Host Management** in the sidebar and use **Add host…**
-   or **Import → From ~/.ssh/config**.
+   `telepad.db`, and every host is checked once. No config? Open **Host Management** in
+   the sidebar and use **Add host…** or **Import → From ~/.ssh/config**.
 3. The **Hosts** page shows every host: status, OS, CPU, memory, disks, Docker. Click a
    row for the host's own window (details, sensors, ports, containers).
 4. **Right-click** a host for its menu: **Open SSH** (a terminal logged in to it),
@@ -164,12 +166,22 @@ systems and NAS devices work and missing tools only hide that section.
 
 Telepad is one window. The **sidebar** on the left opens pages; each page opens as a window
 **inside** Telepad that you can move (drag its title), resize (drag its right or bottom
-edge), minimize (**_**, it waits in a strip at the bottom), maximize (**□**, or double-click
-the title) and close (**×**). Put two pages in one window as tabs with the **⧉** button.
-The **window picker** in the top bar lists everything that is open — type to search, Enter to
-bring a window to the front; the **▯ ‹** button folds the sidebar to icons. **Arrange** tiles, stacks, minimizes or restores all windows, and the
-**workspace** dropdown keeps several saved sets of windows (WinBox style: `<none>`, `<own>`
-and your own, saved automatically in `preference.db`).
+edge), minimize (**−**, it waits in a strip at the bottom), maximize (corners out, or
+double-click the title) and close (**×**). Put two pages in one window as tabs with the
+**⧉** button; the **▯ ‹** button folds the sidebar to icons.
+
+The **top bar** holds the tools for those windows:
+
+- **Workspace** (`<own>` at first): saved sets of windows with their places, like MikroTik
+  WinBox. **Add…** keeps the windows that are open now under a name, picking a workspace
+  closes the current windows and opens its own, the trash icon deletes one, and `<none>`
+  closes every window. Changes are saved automatically in `preference.db`.
+- **Window picker**: the window in front and how many are open; click it for the list of
+  every open window — type to search, Enter brings that window to the front.
+- **Arrange**: **Tile** side by side, **Stack** as a cascade, **Minimize all**, **Restore all**.
+- **☰**: **Settings → Theme** (System / Light / Dark) and **Software update…**.
+
+![Two custom workspaces, three windows tiled](docs/images/workspaces.png)
 
 | Page | What you do there |
 |---|---|
@@ -177,7 +189,7 @@ and your own, saved automatically in `preference.db`).
 | **Docker / Podman** | Every container of every host, grouped by compose stack, with start / stop / logs / shell actions (each one shown and confirmed in a terminal) |
 | **Kubernetes**, **Docker Swarm** | The clusters found on your hosts: nodes, workloads, services, problems |
 | **Authorized keys** | Who can log in with which SSH key: by server or by key, grouped by the `#` comment lines in `authorized_keys`. Add or revoke a key on many servers at once (you type `add` / `revoke` to confirm), or edit the file |
-| **Host Management** | Compare Telepad's hosts with `~/.ssh/config` and copy, edit or delete hosts on either side |
+| **Host Management** | **Add host…**, **Import** (from a file, `~/.ssh/config` or pasted text) and **Export…**; compare Telepad's hosts with `~/.ssh/config` and copy, edit or delete hosts on either side |
 
 ![Authorized keys, by server](docs/images/authorized-keys.png)
 
