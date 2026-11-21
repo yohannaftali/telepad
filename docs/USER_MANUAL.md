@@ -26,7 +26,7 @@ Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | **Refresh all**, **Auto every _N_ s**, the **workspace** dropdown and the **window picker** (the window in front and how many are open; see below), **Arrange**, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Host Management…**, **Settings ▸ Theme**, **Software update…**; adding, importing and exporting hosts is on the Host Management page) |
+| **Top bar** | **Refresh all**, **Auto every _N_ s**, the **workspace** dropdown and the **window picker** (the window in front and how many are open; see below), **Arrange**, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Settings ▸ Theme**, **Software update…**; Host Management and Authorized keys are in the sidebar, adding, importing and exporting hosts is on the Host Management page) |
 | **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
@@ -322,7 +322,7 @@ up the others. The window stays responsive while hosts load.
 ## Adding, editing and removing hosts
 
 **Add host…** at the top of the [Host Management](#host-management-compare-with-an-openssh-config)
-page (Telepad database side; sidebar → **Host Management**, or **☰ → Host Management…**)
+page (Telepad database side; sidebar → **Host Management**)
 opens the editor and saves the host straight into Telepad:
 
 | Field | Meaning |
@@ -394,7 +394,7 @@ or use Export. You can also inspect it with any SQLite tool.
 
 ## Host Management (compare with an OpenSSH config)
 
-**Host Management** in the sidebar (or **☰ → Host Management…**) shows Telepad's hosts (database
+**Host Management** in the sidebar shows Telepad's hosts (database
 icon, left) next to the hosts of an OpenSSH config file (monitor icon, right), so the two
 can be kept in step in either direction. Nothing is written to either side until you click
 **Apply** — except the buttons under **Telepad database**: **Add host…**, **Import**

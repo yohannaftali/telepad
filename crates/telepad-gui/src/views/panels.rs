@@ -39,22 +39,11 @@ pub fn top_bar(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>)
     ui.add_space(4.0);
 }
 
-/// ☰ at the top right: Host Management, settings, software update. Adding,
-/// importing and exporting hosts live on the Host Management page (#93);
-/// Authorized keys opens from the sidebar.
+/// ☰ at the top right: settings and software update. Host Management and
+/// Authorized keys open from the sidebar; adding, importing and exporting
+/// hosts live on the Host Management page (#93).
 fn hosts_menu(ui: &mut egui::Ui, theme: ThemePref, out: &mut Vec<Msg>) {
     ui.menu_button(RichText::new(icons::MENU).size(20.0), |ui| {
-        if ui
-            .button(il(
-                icons::SYNC,
-                "Host Management… (add, import, export, compare)",
-            ))
-            .clicked()
-        {
-            out.push(Msg::HostSync(telepad_app::hostsync::HsMsg::Open));
-            ui.close();
-        }
-        ui.separator();
         // Settings (#92): the theme left the top bar for the window picker.
         ui.label(RichText::new("Settings").weak().small());
         ui.horizontal(|ui| {
@@ -77,7 +66,7 @@ fn hosts_menu(ui: &mut egui::Ui, theme: ThemePref, out: &mut Vec<Msg>) {
         }
     })
     .response
-    .on_hover_text("Host Management · Settings (theme) · Software update");
+    .on_hover_text("Settings (theme) · Software update");
 }
 
 fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
