@@ -166,8 +166,8 @@ Telepad is one window. The **sidebar** on the left opens pages; each page opens 
 **inside** Telepad that you can move (drag its title), resize (drag its right or bottom
 edge), minimize (**_**, it waits in a strip at the bottom), maximize (**□**, or double-click
 the title) and close (**×**). Put two pages in one window as tabs with the **⧉** button.
-**Open windows** under the sidebar lists everything that is open; the **▯ ‹** button folds
-the sidebar to icons. Telepad remembers the layout.
+The **window picker** in the top bar lists everything that is open — type to search, Enter to
+bring a window to the front; the **▯ ‹** button folds the sidebar to icons. Telepad remembers the layout.
 
 | Page | What you do there |
 |---|---|
@@ -180,7 +180,7 @@ the sidebar to icons. Telepad remembers the layout.
 ![Authorized keys, by server](docs/images/authorized-keys.png)
 
 **Buttons tell you what they do by colour:** red deletes or revokes, yellow edits, green
-adds, amber opens a session (SSH / RDP). **Theme** in the top bar switches System / Light /
+adds, amber opens a session (SSH / RDP). **☰ → Settings → Theme** switches System / Light /
 Dark:
 
 ![The Hosts page in the light theme](docs/images/hosts-light.png)

@@ -134,6 +134,15 @@ impl Workspace {
         self.group_of(win).is_some()
     }
 
+    /// Every open page for the window picker (#92): windows oldest first,
+    /// tabs in their order, with whether its window is minimized.
+    pub fn open_windows(&self) -> Vec<(Win, bool)> {
+        self.groups
+            .iter()
+            .flat_map(|g| g.tabs.iter().map(move |&w| (w, g.minimized)))
+            .collect()
+    }
+
     fn bump(&mut self) -> u64 {
         self.raise_seq += 1;
         self.raise_seq

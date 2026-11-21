@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use eframe::egui::{self, RichText};
 use telepad_app::{Drafts, Model, Msg, UpdatePhase};
+use telepad_core::store::ThemePref;
 use telepad_core::update::CURRENT_VERSION;
 
 use crate::icons::{self, label as il};
@@ -24,7 +25,7 @@ pub fn top_bar(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>)
             .max_rect(menu_rect)
             .layout(egui::Layout::right_to_left(egui::Align::Min)),
     );
-    hosts_menu(&mut menu_ui, out);
+    hosts_menu(&mut menu_ui, d.theme, out);
     ui.expand_to_include_rect(menu_ui.min_rect());
     let row = egui::vec2(
         (full.width() - MENU_WIDTH - 8.0).max(100.0),
@@ -38,8 +39,8 @@ pub fn top_bar(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>)
     ui.add_space(4.0);
 }
 
-/// ☰ at the top right: add, import, export, software update.
-fn hosts_menu(ui: &mut egui::Ui, out: &mut Vec<Msg>) {
+/// ☰ at the top right: add, import, export, settings, software update.
+fn hosts_menu(ui: &mut egui::Ui, theme: ThemePref, out: &mut Vec<Msg>) {
     ui.menu_button(RichText::new(icons::MENU).size(20.0), |ui| {
         for (group, items) in [
             ("Add", vec![(icons::PLUS, "Add one host…", Msg::AddHost)]),
@@ -78,6 +79,21 @@ fn hosts_menu(ui: &mut egui::Ui, out: &mut Vec<Msg>) {
             }
             ui.separator();
         }
+        // Settings (#92): the theme left the top bar for the window picker.
+        ui.label(RichText::new("Settings").weak().small());
+        ui.horizontal(|ui| {
+            ui.label(il(icons::CIRCLE_HALF, "Theme"));
+            for t in ThemePref::ALL {
+                if ui
+                    .selectable_label(theme == t, t.title())
+                    .on_hover_text("System follows your Windows / macOS setting")
+                    .clicked()
+                {
+                    out.push(Msg::SetTheme(t));
+                    ui.close();
+                }
+            }
+        });
         ui.separator();
         if ui.button(il(icons::IMPORT, "Software update…")).clicked() {
             out.push(Msg::UpdateWindow(true));
@@ -86,7 +102,7 @@ fn hosts_menu(ui: &mut egui::Ui, out: &mut Vec<Msg>) {
     })
     .response
     .on_hover_text(
-        "Hosts: add, import, export, Host Management · Authorized keys · Software update",
+        "Hosts: add, import, export, Host Management · Authorized keys · Settings (theme) · Software update",
     );
 }
 
@@ -144,18 +160,7 @@ fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
             .suffix(" s"),
     );
     ui.separator();
-    let theme = d.theme;
-    egui::ComboBox::from_id_salt("theme")
-        .selected_text(format!("Theme: {}", theme.title()))
-        .show_ui(ui, |ui| {
-            for t in telepad_core::store::ThemePref::ALL {
-                if ui.selectable_label(theme == t, t.title()).clicked() {
-                    out.push(Msg::SetTheme(t));
-                }
-            }
-        })
-        .response
-        .on_hover_text("System follows your Windows / macOS setting");
+    window_picker(ui, m, d, out);
     ui.separator();
     ui.label(
         RichText::new(format!("{} {} up", icons::DOT, m.online_count())).color(usage_color(0.0)),
@@ -168,6 +173,46 @@ fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
     if m.busy > 0 {
         ui.spinner();
         ui.label(format!("{} loading", m.busy));
+    }
+}
+
+/// Every open window, searchable (#92): pick one to bring it to the front
+/// (a minimized one is restored).
+fn window_picker(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
+    use super::picker::{Item, Picked, Spec, picker, shorten};
+    use telepad_app::workspace::WsMsg;
+    let wins = m.ws.open_windows();
+    let button = match m.ws.focused.filter(|&w| m.ws.is_open(w)) {
+        _ if wins.is_empty() => il(icons::APP_WINDOW, "No windows"),
+        Some(w) => {
+            let (icon, name) = super::workspace::title(m, w);
+            format!("{icon} {} · {}", shorten(&name, 28), wins.len())
+        }
+        None => il(icons::APP_WINDOW, &format!("Windows · {}", wins.len())),
+    };
+    let items: Vec<Item> = wins
+        .iter()
+        .map(|&(w, minimized)| {
+            let (icon, label) = super::workspace::title(m, w);
+            Item {
+                icon,
+                label,
+                current: m.ws.focused == Some(w),
+                note: if minimized { "minimized" } else { "" },
+                delete: None,
+            }
+        })
+        .collect();
+    let spec = Spec {
+        button,
+        tip: "Open windows: search and pick one to bring it to the front",
+        enabled: !wins.is_empty(),
+        placeholder: "Search windows…",
+        empty: "No matching windows",
+        width: 320.0,
+    };
+    if let Some(Picked::Item(i)) = picker(ui, spec, &items, &[], &mut d.win_picker) {
+        out.push(Msg::Ws(WsMsg::Open(wins[i].0)));
     }
 }
 

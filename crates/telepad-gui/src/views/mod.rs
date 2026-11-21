@@ -16,6 +16,7 @@ mod import;
 mod keys;
 mod overview;
 mod panels;
+mod picker;
 mod ports;
 mod run_info;
 mod sensors;

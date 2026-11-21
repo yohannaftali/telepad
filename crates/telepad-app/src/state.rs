@@ -114,6 +114,24 @@ pub struct Drafts {
     pub host_sync: crate::hostsync::HostSyncDraft,
     /// File windows: path bars, filters, selection.
     pub files: std::collections::BTreeMap<crate::files::FmId, crate::files::FileDraft>,
+    /// Open-windows picker in the top bar (#92).
+    pub win_picker: PickerDraft,
+}
+
+/// A searchable dropdown (select2 style): the search text and the
+/// highlighted row of the filtered list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PickerDraft {
+    pub query: String,
+    pub highlight: usize,
+}
+
+/// `text` matches `query` when it contains every word of it, ignoring case.
+pub fn matches_query(text: &str, query: &str) -> bool {
+    let text = text.to_lowercase();
+    query
+        .split_whitespace()
+        .all(|w| text.contains(&w.to_lowercase()))
 }
 
 /// "Public keys…" window: the pasted key, the chosen hosts and the
@@ -293,6 +311,7 @@ impl Default for Drafts {
             db: Default::default(),
             host_sync: Default::default(),
             files: Default::default(),
+            win_picker: PickerDraft::default(),
         }
     }
 }

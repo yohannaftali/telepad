@@ -69,6 +69,7 @@ pub const X: &str = "\u{e4f6}";
 pub const SQUARE: &str = "\u{e45e}";
 pub const SIDEBAR: &str = "\u{ec24}";
 pub const APP_WINDOW: &str = "\u{e5da}";
+pub const CIRCLE_HALF: &str = "\u{e18c}";
 
 /// Add Phosphor as a fallback font so icon codepoints render in any text.
 pub fn install(ctx: &egui::Context) {
@@ -439,6 +440,7 @@ mod tests {
             SQUARE,
             SIDEBAR,
             APP_WINDOW,
+            CIRCLE_HALF,
         ] {
             for c in icon.chars() {
                 used.entry(c).or_insert_with(|| "icons.rs".to_string());
