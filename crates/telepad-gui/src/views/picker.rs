@@ -78,9 +78,10 @@ pub fn picker(
         .layout(egui::Layout::top_down_justified(egui::Align::Min))
         .show(|ui| {
             ui.set_min_width(spec.width);
+            // Opened: the current choice is highlighted, so Enter keeps it.
             if !was_open {
                 d.query.clear();
-                d.highlight = 0;
+                d.highlight = items.iter().position(|it| it.current).unwrap_or(0);
             }
             let shown: Vec<usize> = items
                 .iter()
