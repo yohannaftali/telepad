@@ -2,6 +2,21 @@
 
 Newest first.
 
+## [2026-11-21] — feat(ui): named workspaces (WinBox style) saved in preference.db, window arrange (tile, stack, minimize all)
+- Issue #94 created on GitHub
+- Scope: core (new preference.db) / app (workspaces, arrange) / gui (top bar dropdown, Arrange menu, title-bar icons)
+- Labels: enhancement
+
+## [2026-11-21] — feat(ui): add / import / export hosts on the Host Management page, slimmer ☰ menu
+- Issue #93 created on GitHub
+- Scope: gui (Host Management page toolbar, ☰ menu)
+- Labels: enhancement
+
+## [2026-11-21] — feat(ui): searchable open-windows picker in the top bar, Theme moves to ☰ Settings
+- Issue #92 created on GitHub
+- Scope: gui (top bar, workspace sidebar, ☰ menu) / app (workspace filter)
+- Labels: enhancement
+
 ## [2026-11-20] — Telepad 0.9.1
 - **Hosts page** (#83): the table fills the window; double-click a column border to fit it;
   rows highlight on hover; click a row to open the host, **right-click** for its menu (Open
