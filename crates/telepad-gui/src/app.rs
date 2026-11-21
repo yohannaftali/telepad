@@ -8,7 +8,11 @@ use telepad_app::State;
 use crate::runtime::Runtime;
 use crate::{icons, views};
 
-pub fn run(cli_config: Option<String>, cli_db: Option<String>) -> eframe::Result<()> {
+pub fn run(
+    cli_config: Option<String>,
+    cli_db: Option<String>,
+    cli_prefs: Option<String>,
+) -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Telepad")
         .with_inner_size([1280.0, 800.0])
@@ -26,7 +30,7 @@ pub fn run(cli_config: Option<String>, cli_db: Option<String>) -> eframe::Result
     eframe::run_native(
         "Telepad",
         options,
-        Box::new(move |cc| Ok(Box::new(TelepadApp::new(cc, cli_config, cli_db)))),
+        Box::new(move |cc| Ok(Box::new(TelepadApp::new(cc, cli_config, cli_db, cli_prefs)))),
     )
 }
 
@@ -41,6 +45,7 @@ impl TelepadApp {
         cc: &eframe::CreationContext<'_>,
         cli_config: Option<String>,
         cli_db: Option<String>,
+        cli_prefs: Option<String>,
     ) -> Self {
         icons::install(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -52,6 +57,7 @@ impl TelepadApp {
             &mut state,
             cli_config.as_deref(),
             cli_db.as_deref(),
+            cli_prefs.as_deref(),
         );
         Self {
             state,
@@ -63,6 +69,7 @@ impl TelepadApp {
 
 impl eframe::App for TelepadApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.runtime.flush_prefs(&self.state.model);
         self.runtime.shutdown();
     }
 

@@ -26,6 +26,7 @@ fn started(now: Instant) -> (State, Vec<Effect>) {
             imported_from: None,
             update_config: Ok(UpdateConfig::default()),
             ui_prefs: UiPrefs::default(),
+            prefs: Ok(Default::default()),
         },
         now,
     );
@@ -105,6 +106,7 @@ fn fatal_and_bad_update_settings_are_reported() {
                 theme: telepad_core::store::ThemePref::Dark,
                 ..Default::default()
             },
+            prefs: Ok(Default::default()),
         },
         Instant::now(),
     );

@@ -63,6 +63,23 @@ impl Win {
     }
 }
 
+/// The named workspaces (#94): pick, add, save, delete.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WkMsg {
+    Switch(telepad_core::prefs::Current),
+    /// Save the current layout now (autosave does it too).
+    Save,
+    /// Open the "Add workspace" dialog.
+    AskAdd,
+    /// Create a workspace from the current layout and switch to it.
+    Add(String),
+    CancelAdd,
+    /// Ask before deleting this custom workspace.
+    AskDelete(String),
+    Delete(String),
+    CancelDelete,
+}
+
 /// Position and size inside the workspace, in points: x, y, width, height.
 pub type Rect = [f32; 4];
 
@@ -94,6 +111,8 @@ pub struct Workspace {
     /// The window keys go to (the one clicked or opened last).
     pub focused: Option<Win>,
     pub sidebar_collapsed: bool,
+    /// Host window of a restored layout, placed once the hosts are known.
+    pub pending_host: Option<PendingHost>,
     next_id: u64,
     raise_seq: u64,
 }
@@ -123,6 +142,19 @@ pub enum WsMsg {
         rect: Rect,
     },
     SetSidebarCollapsed(bool),
+    /// Arrange (#94): the shown windows in a grid filling the workspace
+    /// (`w` × `h`, from the view).
+    Tile {
+        w: f32,
+        h: f32,
+    },
+    /// Arrange (#94): the shown windows cascading from the top left.
+    Stack {
+        w: f32,
+        h: f32,
+    },
+    MinimizeAll,
+    RestoreAll,
 }
 
 impl Workspace {
@@ -335,6 +367,31 @@ impl Workspace {
                 }
                 g.rect = Some(rect);
             }
+            WsMsg::Tile { w, h } => {
+                let order = self.shown_back_to_front();
+                self.arrange(tile_rects(order.len(), w, h), order);
+            }
+            WsMsg::Stack { w, h } => {
+                let order = self.shown_back_to_front();
+                self.arrange(stack_rects(order.len(), w, h), order);
+            }
+            WsMsg::MinimizeAll => {
+                for g in &mut self.groups {
+                    g.minimized = true;
+                }
+                self.focused = None;
+            }
+            WsMsg::RestoreAll => {
+                let mut order: Vec<usize> = (0..self.groups.len()).collect();
+                order.sort_by_key(|&i| self.groups[i].raise);
+                for gi in order {
+                    let raise = self.bump();
+                    let g = &mut self.groups[gi];
+                    g.minimized = false;
+                    g.raise = raise;
+                }
+                self.focus_front();
+            }
             WsMsg::SetSidebarCollapsed(c) => {
                 if self.sidebar_collapsed == c {
                     return false;
@@ -345,17 +402,22 @@ impl Workspace {
         true
     }
 
-    /// The layout saved in `settings` (`ui_workspace`): one line per window
-    /// with at least one page that is reopened on start:
-    /// `x,y,w,h|minimized|maximized|active|tab;tab`.
-    pub fn save(&self) -> String {
+    /// The layout of a workspace (#94, kept in `preference.db`): one line per
+    /// window with at least one page that is reopened:
+    /// `x,y,w,h|minimized|maximized|active|tab;tab`. The host window is
+    /// `host:<alias>` (`host` = the selected host's alias).
+    pub fn save(&self, host: Option<&str>) -> String {
+        let key = |w: Win| match w {
+            Win::Host => host.map(|a| format!("host:{a}")),
+            _ => w.key().map(String::from),
+        };
         let mut lines = Vec::new();
         for g in &self.groups {
-            let tabs: Vec<&str> = g.tabs.iter().filter_map(|w| w.key()).collect();
+            let tabs: Vec<String> = g.tabs.iter().filter_map(|&w| key(w)).collect();
             if tabs.is_empty() {
                 continue;
             }
-            let active = g.active_win().key().unwrap_or(tabs[0]);
+            let active = key(g.active_win()).unwrap_or_else(|| tabs[0].clone());
             let rect = g
                 .rect
                 .map(|r| format!("{},{},{},{}", r[0], r[1], r[2], r[3]))
@@ -370,17 +432,27 @@ impl Workspace {
         lines.join("\n")
     }
 
-    /// Restore a saved layout. `host` is dropped when no host is selected,
-    /// `keys` when the Public keys window is closed (they follow their
-    /// session). Empty or unreadable: Overview, maximized.
+    /// Restore a saved layout exactly (nothing saved: no windows). `keys` is
+    /// dropped when the Authorized keys page is closed (it follows its
+    /// session); a `host:<alias>` tab waits in `pending_host` until the
+    /// hosts are known ([`Workspace::place_host`]).
     pub fn restore(&mut self, saved: &str) {
-        self.groups.clear();
-        self.focused = None;
+        let sidebar = self.sidebar_collapsed;
+        *self = Workspace {
+            sidebar_collapsed: sidebar,
+            next_id: self.next_id,
+            raise_seq: self.raise_seq,
+            ..Default::default()
+        };
         for line in saved.lines() {
             let f: Vec<&str> = line.split('|').collect();
             if f.len() != 5 {
                 continue;
             }
+            let host = f[4]
+                .split(';')
+                .find_map(|t| t.strip_prefix("host:"))
+                .filter(|a| !a.is_empty());
             let tabs: Vec<Win> = f[4]
                 .split(';')
                 .filter_map(Win::from_key)
@@ -396,29 +468,163 @@ impl Workspace {
                     )
                 })
                 .collect();
-            if tabs.is_empty() {
-                continue;
-            }
             let nums: Vec<f32> = f[0].split(',').filter_map(|v| v.parse().ok()).collect();
             let rect = (nums.len() == 4 && nums[2] > 0.0 && nums[3] > 0.0)
                 .then(|| [nums[0], nums[1], nums[2], nums[3]]);
-            let gi = self.new_group(tabs, rect);
-            let g = &mut self.groups[gi];
-            g.minimized = f[1] == "1";
-            g.maximized = f[2] == "1";
-            if let Some(a) = Win::from_key(f[3]).and_then(|w| g.tabs.iter().position(|&t| t == w)) {
-                g.active = a;
+            let (minimized, maximized) = (f[1] == "1", f[2] == "1");
+            let mut group = None;
+            if !tabs.is_empty() {
+                let gi = self.new_group(tabs, rect);
+                let g = &mut self.groups[gi];
+                g.minimized = minimized;
+                g.maximized = maximized;
+                if let Some(a) =
+                    Win::from_key(f[3]).and_then(|w| g.tabs.iter().position(|&t| t == w))
+                {
+                    g.active = a;
+                }
+                group = Some(g.id);
+            }
+            if let Some(alias) = host
+                && self.pending_host.is_none()
+            {
+                self.pending_host = Some(PendingHost {
+                    alias: alias.to_string(),
+                    group,
+                    active: f[3].starts_with("host:"),
+                    rect,
+                    minimized,
+                    maximized,
+                });
             }
         }
-        if self.groups.is_empty() {
+        self.focus_front();
+    }
+
+    /// [`Workspace::restore`], or the Hosts page maximized when nothing was
+    /// saved (first start).
+    pub fn restore_or_default(&mut self, saved: &str) {
+        self.restore(saved);
+        if self.groups.is_empty() && self.pending_host.is_none() {
             let gi = self.new_group(vec![Win::Overview], None);
             self.groups[gi].maximized = true;
+            self.focus_front();
         }
+    }
+
+    fn focus_front(&mut self) {
         self.focused = self
             .groups
             .iter()
-            .rev()
-            .find(|g| !g.minimized)
+            .filter(|g| !g.minimized)
+            .max_by_key(|g| g.raise)
             .map(Group::active_win);
     }
+
+    /// Put the host window of a restored layout back where it was (the
+    /// host has been selected by the caller).
+    pub fn place_host(&mut self, p: PendingHost) {
+        if self.is_open(Win::Host) {
+            return;
+        }
+        if let Some(gi) = p
+            .group
+            .and_then(|id| self.groups.iter().position(|g| g.id == id))
+        {
+            let g = &mut self.groups[gi];
+            g.tabs.push(Win::Host);
+            if p.active {
+                g.active = g.tabs.len() - 1;
+            }
+        } else {
+            let gi = self.new_group(vec![Win::Host], p.rect);
+            let g = &mut self.groups[gi];
+            g.minimized = p.minimized;
+            g.maximized = p.maximized;
+        }
+        self.focus_front();
+    }
+
+    /// Windows that are not minimized, back to front.
+    fn shown_back_to_front(&self) -> Vec<usize> {
+        let mut v: Vec<usize> = (0..self.groups.len())
+            .filter(|&i| !self.groups[i].minimized)
+            .collect();
+        v.sort_by_key(|&i| self.groups[i].raise);
+        v
+    }
+
+    fn arrange(&mut self, rects: Vec<Rect>, order: Vec<usize>) {
+        for (&gi, r) in order.iter().zip(rects) {
+            let raise = self.bump();
+            let g = &mut self.groups[gi];
+            g.rect = Some(r);
+            g.maximized = false;
+            g.raise = raise;
+        }
+    }
+}
+
+/// The host window of a restored layout, waiting for the hosts (#94).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingHost {
+    pub alias: String,
+    /// The window it was a tab of (when it had other tabs).
+    group: Option<u64>,
+    active: bool,
+    rect: Option<Rect>,
+    minimized: bool,
+    maximized: bool,
+}
+
+const GAP: f32 = 4.0;
+const STEP: f32 = 28.0;
+
+/// Tile (#94): `n` windows in a grid filling a `w` × `h` workspace, rows
+/// top to bottom; a last, shorter row is stretched to the full width.
+pub fn tile_rects(n: usize, w: f32, h: f32) -> Vec<Rect> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let (w, h) = (w.max(1.0), h.max(1.0));
+    let cols = (n as f32).sqrt().ceil() as usize;
+    let rows = n.div_ceil(cols);
+    let ch = h / rows as f32;
+    let mut out = Vec::with_capacity(n);
+    for r in 0..rows {
+        let in_row = if r == rows - 1 {
+            n - cols * (rows - 1)
+        } else {
+            cols
+        };
+        let cw = w / in_row as f32;
+        for c in 0..in_row {
+            out.push([
+                (c as f32 * cw + GAP / 2.0).round(),
+                (r as f32 * ch + GAP / 2.0).round(),
+                (cw - GAP).max(1.0).round(),
+                (ch - GAP).max(1.0).round(),
+            ]);
+        }
+    }
+    out
+}
+
+/// Stack (#94): `n` windows cascading from the top left, one title bar
+/// apart, all the same size; the last one is in front.
+pub fn stack_rects(n: usize, w: f32, h: f32) -> Vec<Rect> {
+    let off = STEP * n.saturating_sub(1) as f32;
+    let size_w = (w - off - GAP * 2.0).max(w * 0.5).max(1.0).round();
+    let size_h = (h - off - GAP * 2.0).max(h * 0.5).max(1.0).round();
+    (0..n)
+        .map(|i| {
+            let k = STEP * i as f32;
+            [
+                (GAP + k).min((w - size_w).max(0.0)).round(),
+                (GAP + k).min((h - size_h).max(0.0)).round(),
+                size_w,
+                size_h,
+            ]
+        })
+        .collect()
 }

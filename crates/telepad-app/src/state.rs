@@ -58,8 +58,20 @@ pub struct Model {
     /// Authorized keys page (#78): what each host's `authorized_keys` holds,
     /// by alias.
     pub auth_keys: std::collections::BTreeMap<String, AkHost>,
-    /// The layout last sent to the database (saved again only when it changes).
+    /// The live layout and sidebar state last seen: a change goes to the
+    /// current workspace (layout) or `telepad.db` (sidebar).
     pub ws_saved: (String, bool),
+    /// Named workspaces (#94), as in `preference.db`.
+    pub wss: telepad_core::prefs::WorkspacePrefs,
+    /// `preference.db` is open; when not, nothing is saved there.
+    pub prefs_ok: bool,
+    /// The workspaces changed since they were last written.
+    pub prefs_dirty: bool,
+    /// When they were last written (autosave at most once a second).
+    pub prefs_written: Option<Instant>,
+    /// `ui_workspace` from `telepad.db` as loaded; kept as it is (the
+    /// layouts live in `preference.db` now).
+    pub ws_legacy: String,
 }
 
 /// A key added to / revoked from several hosts.
@@ -116,6 +128,21 @@ pub struct Drafts {
     pub files: std::collections::BTreeMap<crate::files::FmId, crate::files::FileDraft>,
     /// Open-windows picker in the top bar (#92).
     pub win_picker: PickerDraft,
+    /// Workspace dropdown in the top bar (#94).
+    pub ws_picker: PickerDraft,
+    /// "Add workspace" dialog (#94).
+    pub ws_add: Option<WsAddDraft>,
+    /// Custom workspace waiting for the delete confirmation (#94).
+    pub ws_delete: Option<String>,
+    /// Size of the workspace area as last drawn (for Tile / Stack).
+    pub ws_area: [f32; 2],
+}
+
+/// "Add workspace" dialog: the label being typed and why it was refused.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WsAddDraft {
+    pub label: String,
+    pub error: Option<String>,
 }
 
 /// A searchable dropdown (select2 style): the search text and the
@@ -312,6 +339,10 @@ impl Default for Drafts {
             host_sync: Default::default(),
             files: Default::default(),
             win_picker: PickerDraft::default(),
+            ws_picker: PickerDraft::default(),
+            ws_add: None,
+            ws_delete: None,
+            ws_area: [1200.0, 700.0],
         }
     }
 }
@@ -518,15 +549,17 @@ impl UpdateState {
 }
 
 impl Drafts {
-    /// View settings to save; the workspace layout comes from the model.
-    pub fn ui_prefs(&self, ws: &crate::workspace::Workspace) -> UiPrefs {
+    /// View settings to save; the sidebar comes from the model, the old
+    /// `ui_workspace` is written back unchanged.
+    pub fn ui_prefs(&self, m: &Model) -> UiPrefs {
+        let ws = &m.ws;
         UiPrefs {
             compact_host_list: self.compact_host_list,
             group_by_status: self.group_by_status,
             overview_cards: self.overview_cards,
             theme: self.theme,
             sidebar_collapsed: ws.sidebar_collapsed,
-            workspace: ws.save(),
+            workspace: m.ws_legacy.clone(),
         }
     }
 }

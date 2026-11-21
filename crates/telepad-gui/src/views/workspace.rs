@@ -203,9 +203,15 @@ pub fn workspace(
     } else {
         Rect::from_min_max(full.min, egui::pos2(full.max.x, full.max.y - STRIP_H))
     };
+    d.ws_area = [area.width(), area.height()];
     if m.ws.groups.is_empty() {
+        let text = if m.wss.current == telepad_core::prefs::Current::None {
+            "Workspace <none>: no windows. Pick a page on the left, or another workspace at the top."
+        } else {
+            "Pick a page on the left."
+        };
         ui.centered_and_justified(|ui| {
-            ui.label(RichText::new("Pick a page on the left.").weak());
+            ui.label(RichText::new(text).weak());
         });
     }
     if !minimized.is_empty() {
@@ -491,9 +497,9 @@ fn title_bar(
         out.push(close_msg(active));
     }
     let (max_icon, max_tip) = if g.maximized {
-        (icons::APP_WINDOW, "Restore size")
+        (icons::CORNERS_IN, "Restore size")
     } else {
-        (icons::SQUARE, "Maximize")
+        (icons::CORNERS_OUT, "Maximize")
     };
     if ui
         .add(egui::Button::new(max_icon).frame(false))
