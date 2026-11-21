@@ -167,7 +167,9 @@ Telepad is one window. The **sidebar** on the left opens pages; each page opens 
 edge), minimize (**_**, it waits in a strip at the bottom), maximize (**□**, or double-click
 the title) and close (**×**). Put two pages in one window as tabs with the **⧉** button.
 The **window picker** in the top bar lists everything that is open — type to search, Enter to
-bring a window to the front; the **▯ ‹** button folds the sidebar to icons. Telepad remembers the layout.
+bring a window to the front; the **▯ ‹** button folds the sidebar to icons. **Arrange** tiles, stacks, minimizes or restores all windows, and the
+**workspace** dropdown keeps several saved sets of windows (WinBox style: `<none>`, `<own>`
+and your own, saved automatically in `preference.db`).
 
 | Page | What you do there |
 |---|---|

@@ -134,7 +134,9 @@ fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
             .suffix(" s"),
     );
     ui.separator();
+    super::workspaces::workspace_picker(ui, m, d, out);
     window_picker(ui, m, d, out);
+    super::workspaces::arrange_menu(ui, m, d, out);
     ui.separator();
     ui.label(
         RichText::new(format!("{} {} up", icons::DOT, m.online_count())).color(usage_color(0.0)),

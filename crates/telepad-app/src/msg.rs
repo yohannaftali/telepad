@@ -27,6 +27,9 @@ pub enum Msg {
         update_config: Result<UpdateConfig, String>,
         /// Remembered view settings (defaults if they could not be read).
         ui_prefs: UiPrefs,
+        /// Workspaces from `preference.db` (#94); `Err`: it could not be
+        /// opened, Telepad starts with `<own>` and saves nothing there.
+        prefs: Result<telepad_core::prefs::WorkspacePrefs, String>,
     },
     /// The database could not be opened; nothing else works.
     Fatal(String),
@@ -92,6 +95,9 @@ pub enum Msg {
     SelectAlias(String),
     /// Workspace: open, close, move, minimize, maximize, tab inner windows (#77).
     Ws(crate::workspace::WsMsg),
+    /// Named workspaces (#94).
+    Wk(crate::workspace::WkMsg),
+    PrefsSaved(Result<(), String>),
     /// Host list: compact (true) or detailed rows.
     SetCompactHostList(bool),
     /// Host list grouped by status.
@@ -264,6 +270,8 @@ pub enum Effect {
     SaveUpdateConfig(UpdateConfig),
     /// → [`Msg::UiPrefsSaved`]
     SaveUiPrefs(UiPrefs),
+    /// Write the workspaces to `preference.db` → [`Msg::PrefsSaved`].
+    SavePrefs(telepad_core::prefs::WorkspacePrefs),
     /// Host ids in display order; saved in one transaction, ssh config
     /// regenerated → [`Msg::OrderSaved`].
     SaveOrder(Vec<i64>),

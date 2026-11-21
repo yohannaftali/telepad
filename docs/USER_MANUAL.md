@@ -3,7 +3,7 @@
 How to use Telepad once it is [installed](../README.md#install). For a first run see the
 [quick start](../README.md#quick-start).
 
-**Contents:** [Window layout](#window-layout) · [Overview](#overview) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
+**Contents:** [Window layout](#window-layout) · [Workspaces](#workspaces) · [Overview](#overview) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
 
 ## Window layout
 
@@ -11,7 +11,7 @@ Telepad is one window (like MikroTik WinBox): pages open as windows **inside** i
 
 ```
 ------------------------------------------------------------------
-Telepad | Refresh all | ▣ Hosts · 3 ▾ | 2 up 1 down           ☰ |
+Telepad | Refresh all | ▤ <own> ▾ | ▣ Hosts · 3 ▾ | Arrange | 2 up ☰ |
 ------------------------------------------------------------------
 Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
  Hosts           | | search | Table / Cards                     | |
@@ -26,7 +26,7 @@ Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | **Refresh all**, **Auto every _N_ s**, the **window picker** (the window in front and how many are open; see below), up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Host Management…**, **Settings ▸ Theme**, **Software update…**; adding, importing and exporting hosts is on the Host Management page) |
+| **Top bar** | **Refresh all**, **Auto every _N_ s**, the **workspace** dropdown and the **window picker** (the window in front and how many are open; see below), **Arrange**, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Host Management…**, **Settings ▸ Theme**, **Software update…**; adding, importing and exporting hosts is on the Host Management page) |
 | **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
@@ -36,9 +36,9 @@ back to the front if it is already open. Each window has a title bar:
 
 - **Move**: drag the title bar. **Resize**: drag the right edge, the bottom edge or the
   bottom-right corner. Windows stay inside the workspace.
-- **_ (Minimize)** puts it in the strip at the bottom; click it there (or pick it in the
-  window picker) to bring it back. **□ (Maximize)** fills the workspace; click again, or
-  double-click the title bar, to get the old size back. **×** closes it (a file window
+- **− (Minimize)** puts it in the strip at the bottom; click it there (or pick it in the
+  window picker) to bring it back. **Maximize** (the corners-out icon) fills the workspace;
+  **Restore size** (corners in) or a double-click on the title bar gets the old size back. **×** closes it (a file window
   with unsaved editor tabs asks first).
 - **⧉ (Tabs)**: **Show as a tab in** → another window puts this page in that window as a
   tab; click a tab to show it, middle-click to close it; **Own window** takes it out again.
@@ -53,10 +53,42 @@ back to the front if it is already open. Each window has a title bar:
 - Clicking a host in the overview opens its **Host — _name_** window; Files, the editor and
   each database open as windows too. Dialogs (edit host, import, delete, update, file
   questions) open over the workspace, never as a separate window of the system.
-- Telepad remembers the windows of Overview, Docker, Host Management and Authorized keys (place,
-  size, tabs, minimized / maximized) and opens them again on the next start. Host, file,
-  editor and database windows are not reopened (they belong to a session). The first start
-  shows the overview, maximized.
+- **Arrange** (top bar): **Tile** puts the shown windows side by side in a grid that fills
+  the workspace, **Stack** cascades them from the top left one title bar apart (the front
+  one stays in front), **Minimize all** sends every window to the strip, **Restore all**
+  brings them back. Maximized windows are un-maximized first.
+- Telepad remembers the windows of the current [workspace](#workspaces) — pages (Hosts,
+  Docker / Podman, Kubernetes, Docker Swarm, Authorized keys, Host Management) and the host
+  window, with place, size, tabs, minimized / maximized — and opens them again on the next
+  start. File, editor and database windows are not reopened (they need a connection, a
+  password or unsaved text). The first start shows the Hosts page, maximized.
+
+### Workspaces
+
+Like MikroTik WinBox, Telepad keeps several **workspaces**: saved sets of windows. The
+**workspace** dropdown in the top bar shows the current one; click it for the list, with a
+search field on top (type to filter; **↑ / ↓**, **Enter**, **Escape** as in the window
+picker):
+
+| Entry | What it does |
+|---|---|
+| **&lt;none&gt;** | Closes every window. Nothing is saved while it is current, so the other workspaces stay as they were |
+| **&lt;own&gt;** | The default workspace (your layout from before 0.9.2 is in it) |
+| a custom workspace | Its windows, as you left them. The red trash icon at the end of its row deletes it (after a question; if it was the current one, Telepad goes back to &lt;own&gt;). Only the saved set of windows goes — hosts and files are not touched |
+| **Save** (foot of the list) | Saves the windows of the current workspace now. Not needed normally: every change (open, close, move, resize, tabs, minimize, maximize, Arrange) is saved automatically within a second. Not available on &lt;none&gt; |
+| **Add…** (foot of the list) | A new workspace with the windows that are open now; it becomes the current one. Its name: 1–40 characters on one line, not &lt;none&gt; / &lt;own&gt;, not used yet (case does not matter) |
+
+Picking another workspace closes the windows of the current one — file and database
+windows end their connection, as when you close them — and opens the windows of the one
+you picked. If an editor has unsaved changes, Telepad asks about them first and stays on the
+current workspace: answer the question, then pick the workspace again. The current
+workspace is remembered for the next start. The [window picker](#window-layout) lists only
+the windows of the current workspace.
+
+Workspaces are kept in **`preference.db`** next to `telepad.db` (another file with
+`--prefs <path>` or `TELEPAD_PREFS`), apart from the host inventory. If it cannot be opened
+(read-only folder, written by a newer Telepad), Telepad still starts with &lt;own&gt; = the
+Hosts page and says in the status bar that workspaces are not saved.
 
 Status dot: green = last check succeeded, red = it failed, blue = first check running,
 grey = no result yet (or not monitored). Usage bars turn yellow and red as they fill; temperatures are blue
@@ -820,6 +852,7 @@ also pauses automatic installs until the next start.
 telepad.exe                              # GUI
 telepad.exe --db D:\other\telepad.db     # use another database
 telepad.exe --config D:\ssh\config       # import from this config on first start
+telepad.exe --prefs D:\other\preference.db  # workspaces from another file
 telepad-check.exe                        # check all monitored hosts once, text
 telepad-check.exe web01 nas01 --json     # selected hosts, JSON
 telepad-check.exe --check-update         # newer release on GitHub?
@@ -834,6 +867,7 @@ is available and 2 when the check failed.
 | Database | `--db <path>`, `TELEPAD_DB`, else `telepad.db` next to `config`, else next to the exe for a portable copy (`portable` file or an existing `telepad.db` there), else the per-user data folder: `%APPDATA%\Telepad`, `~/Library/Application Support/Telepad`, `~/.local/share/telepad` |
 | First-run import | `--config <path>`, `TELEPAD_CONFIG`, `./config`, `config` next to the exe, or `config` in the data folder; only read while the database is empty |
 | Generated ssh config | `telepad.ssh_config` next to the database (do not edit: rewritten on every change) |
+| Workspaces | `--prefs <path>`, `TELEPAD_PREFS`, else `preference.db` next to the database |
 | Fallback key for hosts without IdentityFile | `SSH_IDENTITY_FILE=` in a `.env` file next to `config` |
 | ssh binary | `TELEPAD_SSH` (default: Windows `System32\OpenSSH\ssh.exe`, else `ssh` on `PATH`) |
 

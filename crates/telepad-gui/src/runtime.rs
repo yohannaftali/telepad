@@ -21,6 +21,7 @@ use telepad_core::authorized_keys;
 use telepad_core::collector::{self, Collector, SshSettings};
 use telepad_core::db::client::{CancelSlot, Session};
 use telepad_core::db::{detect, secret, tunnel};
+use telepad_core::prefs::{self, Prefs, WorkspacePrefs};
 use telepad_core::store;
 use telepad_core::update::{self, Updater, relaunch};
 use telepad_core::{Workspace, config, open_workspace, platform};
@@ -39,6 +40,8 @@ pub struct Runtime {
     db: HashMap<DbId, DbWorker>,
     /// File windows: browse worker (one SFTP connection) and transfer cancel flags.
     files: HashMap<FmId, FileWorker>,
+    /// `preference.db` writer (#94): writes off the UI thread, latest first.
+    prefs: Option<(Sender<WorkspacePrefs>, thread::JoinHandle<()>)>,
 }
 
 struct FileWorker {
@@ -133,6 +136,7 @@ impl Runtime {
         state: &mut State,
         cli_config: Option<&str>,
         cli_db: Option<&str>,
+        cli_prefs: Option<&str>,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
         let mut rt = Self {
@@ -144,6 +148,7 @@ impl Runtime {
             rx,
             db: HashMap::new(),
             files: HashMap::new(),
+            prefs: None,
         };
         match open_workspace(cli_config, cli_db) {
             Ok(ws) => {
@@ -160,6 +165,7 @@ impl Runtime {
                     imported_from: ws.imported_from.clone(),
                     update_config: ws.store.update_config().map_err(|e| e.to_string()),
                     ui_prefs: ws.store.ui_prefs().unwrap_or_default(),
+                    prefs: rt.open_prefs(ws.store.path(), cli_prefs, &ws.store),
                 };
                 rt.ssh = Some(ssh);
                 rt.ws = Some(ws);
@@ -359,6 +365,10 @@ impl Runtime {
             Effect::SaveUpdateConfig(cfg) => Some(Msg::UpdateSettingsSaved(
                 self.with_store(|s| s.set_update_config(&cfg)).map(|()| cfg),
             )),
+            Effect::SavePrefs(p) => match &self.prefs {
+                Some((w, _)) if w.send(p).is_ok() => None,
+                _ => Some(Msg::PrefsSaved(Err("preference.db is not open".into()))),
+            },
             Effect::SaveUiPrefs(p) => {
                 Some(Msg::UiPrefsSaved(self.with_store(|s| s.set_ui_prefs(&p))))
             }
@@ -412,6 +422,49 @@ impl Runtime {
     }
 
     /// Close every database connection and its SSH tunnel (app exit).
+    /// Open `preference.db`, bring in the old `ui_workspace` layout once,
+    /// read the workspaces and start its writer thread.
+    fn open_prefs(
+        &mut self,
+        db: &Path,
+        cli: Option<&str>,
+        store: &store::Store,
+    ) -> Result<WorkspacePrefs, String> {
+        let path = prefs::prefs_path(db, cli);
+        let p = Prefs::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let legacy = store.ui_prefs().map(|u| u.workspace).unwrap_or_default();
+        p.import_legacy(&legacy).map_err(|e| e.to_string())?;
+        let loaded = p.load().map_err(|e| e.to_string())?;
+        let (wtx, wrx) = mpsc::channel::<WorkspacePrefs>();
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let handle = thread::spawn(move || {
+            while let Ok(mut next) = wrx.recv() {
+                // Only the newest state matters.
+                while let Ok(newer) = wrx.try_recv() {
+                    next = newer;
+                }
+                if let Err(e) = p.save(&next) {
+                    let _ = tx.send(Msg::PrefsSaved(Err(e.to_string())));
+                    ctx.request_repaint();
+                }
+            }
+        });
+        self.prefs = Some((wtx, handle));
+        Ok(loaded)
+    }
+
+    /// On exit: write workspaces that are still waiting for the autosave,
+    /// and wait for the writer.
+    pub fn flush_prefs(&mut self, m: &telepad_app::Model) {
+        if let Some((w, handle)) = self.prefs.take() {
+            if m.prefs_dirty && m.prefs_ok {
+                let _ = w.send(m.wss.clone());
+            }
+            drop(w);
+            let _ = handle.join();
+        }
+    }
+
     pub fn shutdown(&mut self) {
         for (_, w) in self.db.drain() {
             cancel(&w.cancel);

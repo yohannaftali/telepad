@@ -19,6 +19,21 @@ use crate::state::{
 
 /// Apply `msg` to `state` at time `now`; return the effects to run.
 pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
+    if let Msg::Wk(wk) = msg {
+        let mut fx = workspaces(state, wk, now);
+        let State {
+            model: m,
+            drafts: d,
+        } = state;
+        let mut ws = std::mem::take(&mut m.ws);
+        ws.sync(m);
+        ws.sync_keys(d.keys.is_some());
+        m.ws = ws;
+        if m.db_path.is_some() {
+            autosave(m, d, now, &mut fx);
+        }
+        return fx;
+    }
     let mut fx = Vec::new();
     let State {
         model: m,
@@ -32,27 +47,28 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             imported_from,
             update_config,
             ui_prefs,
+            prefs,
         } => {
             d.compact_host_list = ui_prefs.compact_host_list;
             d.group_by_status = ui_prefs.group_by_status;
             d.overview_cards = ui_prefs.overview_cards;
             d.theme = ui_prefs.theme;
-            m.ws.restore(&ui_prefs.workspace);
+            m.ws_legacy = ui_prefs.workspace.clone();
             m.ws.sidebar_collapsed = ui_prefs.sidebar_collapsed;
-            m.ws_saved = (m.ws.save(), m.ws.sidebar_collapsed);
-            // Pages of the saved layout that hold a session start it again.
-            if m.ws.is_open(crate::workspace::Win::Keys) {
-                d.keys = Some(KeysDraft::default());
+            match prefs {
+                Ok(p) => {
+                    m.wss = p;
+                    m.prefs_ok = true;
+                }
+                Err(e) => {
+                    m.wss = Default::default();
+                    m.prefs_ok = false;
+                    say(m, now, format!("Workspaces are not saved: {e}"));
+                }
             }
-            if m.ws.is_open(crate::workspace::Win::HostSync) {
-                let (effects, _) = crate::hostsync::update(
-                    &mut m.host_sync,
-                    &mut d.host_sync,
-                    &[],
-                    crate::hostsync::HsMsg::Open,
-                );
-                fx.extend(effects.into_iter().map(Effect::HostSync));
-            }
+            restore_current(m);
+            m.ws_saved = (m.ws.save(None), m.ws.sidebar_collapsed);
+            fx.extend(start_page_sessions(m, d));
             if let Some(src) = imported_from {
                 say(
                     m,
@@ -295,29 +311,32 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         Msg::SetCompactHostList(compact) => {
             if d.compact_host_list != compact {
                 d.compact_host_list = compact;
-                fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(m)));
             }
         }
         Msg::SetGroupByStatus(group) => {
             if d.group_by_status != group {
                 d.group_by_status = group;
-                fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(m)));
             }
         }
         Msg::SetOverviewCards(cards) => {
             if d.overview_cards != cards {
                 d.overview_cards = cards;
-                fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(m)));
             }
         }
         Msg::SetSort(sort) => d.sort = sort,
         Msg::SetTheme(theme) => {
             if d.theme != theme {
                 d.theme = theme;
-                fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(m)));
             }
         }
         Msg::UiPrefsSaved(Ok(())) => {}
+        Msg::PrefsSaved(Ok(())) => {}
+        Msg::PrefsSaved(Err(e)) => say(m, now, format!("Cannot save the workspaces: {e}")),
+        Msg::Wk(_) => {}
         Msg::UiPrefsSaved(Err(e)) => say(m, now, format!("Cannot save view settings: {e}")),
         Msg::SelectAlias(alias) => {
             m.selected = m.hosts.iter().position(|h| h.entry.alias == alias);
@@ -866,19 +885,255 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
     if hosts_changed && d.keys.is_some() && m.auth_keys.is_empty() {
         fx.extend(load_keys(m, None));
     }
+    // The host window of a restored layout, once the hosts are known.
+    if hosts_changed {
+        place_pending_host(m);
+    }
     // Session windows follow their sessions; save the layout when it changed.
     let mut ws = std::mem::take(&mut m.ws);
     ws.sync(m);
     ws.sync_keys(d.keys.is_some());
     m.ws = ws;
     if m.db_path.is_some() {
-        let now_saved = (m.ws.save(), m.ws.sidebar_collapsed);
-        if now_saved != m.ws_saved {
-            m.ws_saved = now_saved;
-            fx.push(Effect::SaveUiPrefs(d.ui_prefs(&m.ws)));
+        autosave(m, d, now, &mut fx);
+    }
+    fx
+}
+
+fn selected_alias(m: &Model) -> Option<&str> {
+    m.selected
+        .and_then(|i| m.hosts.get(i))
+        .map(|h| h.entry.alias.as_str())
+}
+
+/// Layout changes go to the current workspace (none while `<none>` is
+/// current) and are written at most once a second; the sidebar goes to
+/// `telepad.db` at once.
+fn autosave(m: &mut Model, d: &crate::Drafts, now: Instant, fx: &mut Vec<Effect>) {
+    let layout = m.ws.save(selected_alias(m));
+    if layout != m.ws_saved.0 {
+        m.ws_saved.0 = layout.clone();
+        let current = m.wss.current.clone();
+        if let Some(slot) = m.wss.layout_mut(&current)
+            && *slot != layout
+        {
+            *slot = layout;
+            m.prefs_dirty = true;
+        }
+    }
+    if m.ws.sidebar_collapsed != m.ws_saved.1 {
+        m.ws_saved.1 = m.ws.sidebar_collapsed;
+        fx.push(Effect::SaveUiPrefs(d.ui_prefs(m)));
+    }
+    let due = m
+        .prefs_written
+        .is_none_or(|t| now.saturating_duration_since(t) >= Duration::from_secs(1));
+    if m.prefs_dirty && due {
+        write_prefs(m, now, fx);
+    }
+}
+
+fn write_prefs(m: &mut Model, now: Instant, fx: &mut Vec<Effect>) {
+    m.prefs_dirty = false;
+    if m.prefs_ok {
+        m.prefs_written = Some(now);
+        fx.push(Effect::SavePrefs(m.wss.clone()));
+    }
+}
+
+/// Open the windows of the current workspace (`<own>` never used yet: the
+/// Hosts page, maximized; `<none>`: nothing).
+fn restore_current(m: &mut Model) {
+    use telepad_core::prefs::Current;
+    let layout = m.wss.layout(&m.wss.current).map(str::to_string);
+    match (&m.wss.current, layout) {
+        (Current::None, _) | (_, None) => m.ws.restore(""),
+        (Current::Own, Some(l)) => m.ws.restore_or_default(&l),
+        (Current::Custom(_), Some(l)) => m.ws.restore(&l),
+    }
+}
+
+/// Pages of a restored layout that hold a session start it again.
+fn start_page_sessions(m: &mut Model, d: &mut crate::Drafts) -> Vec<Effect> {
+    let mut fx = Vec::new();
+    if m.ws.is_open(crate::workspace::Win::Keys) {
+        d.keys = Some(KeysDraft::default());
+        if !m.hosts.is_empty() {
+            fx.extend(load_keys(m, None));
+        }
+    }
+    if m.ws.is_open(crate::workspace::Win::HostSync) && m.host_sync.is_none() {
+        let db: Vec<_> = m.hosts.iter().map(|h| h.entry.clone()).collect();
+        let (effects, _) = crate::hostsync::update(
+            &mut m.host_sync,
+            &mut d.host_sync,
+            &db,
+            crate::hostsync::HsMsg::Open,
+        );
+        fx.extend(effects.into_iter().map(Effect::HostSync));
+    }
+    fx
+}
+
+/// Select the host of a restored layout and put its window back; a host
+/// that no longer exists is left out.
+fn place_pending_host(m: &mut Model) {
+    let Some(p) = m.ws.pending_host.take() else {
+        return;
+    };
+    if let Some(i) = m.hosts.iter().position(|h| h.entry.alias == p.alias) {
+        m.selected = Some(i);
+        m.ws.place_host(p);
+    }
+}
+
+/// The workspace list (#94). Switching closes every window first (their
+/// sessions end); unsaved editor tabs stop it and ask instead.
+fn workspaces(state: &mut State, wk: crate::workspace::WkMsg, now: Instant) -> Vec<Effect> {
+    use crate::workspace::WkMsg;
+    use telepad_core::prefs::Current;
+    let mut fx = Vec::new();
+    match wk {
+        WkMsg::Switch(to) => {
+            let m = &state.model;
+            if to == m.wss.current {
+                return fx;
+            }
+            if let Current::Custom(l) = &to
+                && !m.wss.custom.iter().any(|(x, _)| x == l)
+            {
+                return fx;
+            }
+            if !switch_to(state, to, now, &mut fx) {
+                return fx;
+            }
+        }
+        WkMsg::Save => {
+            let m = &mut state.model;
+            if m.wss.current != Current::None {
+                let layout = m.ws.save(selected_alias(m));
+                let current = m.wss.current.clone();
+                if let Some(slot) = m.wss.layout_mut(&current) {
+                    *slot = layout;
+                }
+                m.ws_saved.0 = m.ws.save(selected_alias(m));
+                write_prefs(m, now, &mut fx);
+                say(m, now, format!("Workspace {} saved", current.label()));
+            }
+        }
+        WkMsg::AskAdd => state.drafts.ws_add = Some(Default::default()),
+        WkMsg::CancelAdd => state.drafts.ws_add = None,
+        WkMsg::Add(label) => {
+            let m = &mut state.model;
+            match m.wss.check_label(&label) {
+                Err(e) => {
+                    let d = state.drafts.ws_add.get_or_insert_with(Default::default);
+                    d.label = label;
+                    d.error = Some(e);
+                }
+                Ok(l) => {
+                    let layout = m.ws.save(selected_alias(m));
+                    m.wss.custom.push((l.clone(), layout.clone()));
+                    m.wss.sort();
+                    m.wss.current = Current::Custom(l.clone());
+                    m.ws_saved.0 = layout;
+                    state.drafts.ws_add = None;
+                    write_prefs(m, now, &mut fx);
+                    say(m, now, format!("Workspace {l} added"));
+                }
+            }
+        }
+        WkMsg::AskDelete(label) => state.drafts.ws_delete = Some(label),
+        WkMsg::CancelDelete => state.drafts.ws_delete = None,
+        WkMsg::Delete(label) => {
+            state.drafts.ws_delete = None;
+            if state.model.wss.current == Current::Custom(label.clone())
+                && !switch_to(state, Current::Own, now, &mut fx)
+            {
+                return fx;
+            }
+            let m = &mut state.model;
+            let before = m.wss.custom.len();
+            m.wss.custom.retain(|(l, _)| *l != label);
+            if m.wss.custom.len() != before {
+                write_prefs(m, now, &mut fx);
+                say(m, now, format!("Workspace {label} deleted"));
+            }
         }
     }
     fx
+}
+
+/// Close every window and open the windows of `to`; `false` when unsaved
+/// editor tabs stopped it (their question is shown).
+fn switch_to(
+    state: &mut State,
+    to: telepad_core::prefs::Current,
+    now: Instant,
+    fx: &mut Vec<Effect>,
+) -> bool {
+    use crate::files::FmMsg;
+    let unsaved: Vec<crate::files::FmId> = state
+        .model
+        .files
+        .iter()
+        .filter(|s| {
+            state
+                .drafts
+                .files
+                .get(&s.id)
+                .is_some_and(|d| crate::editor::has_unsaved(&s.editor, &d.editor))
+        })
+        .map(|s| s.id)
+        .collect();
+    if !unsaved.is_empty() {
+        for id in unsaved {
+            fx.extend(update(state, Msg::Files(FmMsg::Close(id)), now));
+        }
+        say(
+            &mut state.model,
+            now,
+            "Unsaved editor changes: save or discard them, then pick the workspace again",
+        );
+        return false;
+    }
+    // The current layout is already in its workspace (autosave). Closing
+    // the windows below must not change it: nothing is current meanwhile.
+    state.model.wss.current = telepad_core::prefs::Current::None;
+    let files: Vec<_> = state.model.files.iter().map(|s| s.id).collect();
+    for id in files {
+        fx.extend(update(state, Msg::Files(FmMsg::Close(id)), now));
+    }
+    let dbs: Vec<_> = state.model.db.iter().map(|s| s.id).collect();
+    for id in dbs {
+        fx.extend(update(state, Msg::Db(crate::db::DbMsg::Close(id)), now));
+    }
+    if state.model.host_sync.is_some() {
+        fx.extend(update(
+            state,
+            Msg::HostSync(crate::hostsync::HsMsg::Close),
+            now,
+        ));
+    }
+    if state.drafts.keys.is_some() {
+        fx.extend(update(state, Msg::KeysClose, now));
+    }
+    let State {
+        model: m,
+        drafts: d,
+    } = state;
+    m.selected = None;
+    m.wss.current = to;
+    restore_current(m);
+    place_pending_host(m);
+    fx.extend(start_page_sessions(m, d));
+    let mut ws = std::mem::take(&mut m.ws);
+    ws.sync(m);
+    ws.sync_keys(d.keys.is_some());
+    m.ws = ws;
+    m.ws_saved.0 = m.ws.save(selected_alias(m));
+    write_prefs(m, now, fx);
+    true
 }
 
 fn say(m: &mut Model, now: Instant, text: impl Into<String>) {

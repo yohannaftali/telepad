@@ -23,6 +23,7 @@ mod sensors;
 mod text_editor;
 mod update_window;
 mod workspace;
+mod workspaces;
 
 use std::time::Instant;
 
@@ -76,6 +77,7 @@ pub fn draw(root: &mut egui::Ui, m: &Model, d: &mut Drafts, now: Instant) -> Vec
     confirm::delete_confirm(&ctx, m, &mut out);
     update_window::update_window(&ctx, m, d, &mut out);
     host_sync::host_sync_dialogs(&ctx, m, d, &mut out);
+    workspaces::dialogs(&ctx, d, &mut out);
     out
 }
 

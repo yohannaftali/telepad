@@ -452,7 +452,7 @@ pub fn extract_executables(zip_data: &[u8], dir: &Path) -> Result<NewExecutables
 }
 
 /// Replace `telepad-check` next to the running exe, then the running exe
-/// itself. `telepad.db`, `config` and `.env` are never touched.
+/// itself. `telepad.db`, `preference.db`, `config` and `.env` are never touched.
 fn install_executables(new: &NewExecutables) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("cannot find the running exe: {e}"))?;
     let name = exe
