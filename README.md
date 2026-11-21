@@ -56,7 +56,7 @@ Releases are built for Windows (x86_64), macOS (Apple silicon and Intel) and Lin
 
 Your hosts and settings live in `%APPDATA%\Telepad\telepad.db`, and uninstalling keeps
 them. To import an existing OpenSSH config on the first start, put it there as `config`, or
-use **☰ → Import ~/.ssh/config**.
+use **Host Management → Import → From ~/.ssh/config**.
 
 ### Windows (portable zip)
 
@@ -93,7 +93,7 @@ choose **More info → Run anyway**.
 
 Hosts and settings live in `~/Library/Application Support/Telepad/telepad.db`; put an
 OpenSSH config there as `config` to import it on the first start, or use
-**☰ → Import ~/.ssh/config**. A portable zip (`telepad-<version>-macos-<arch>.zip`)
+**Host Management → Import → From ~/.ssh/config**. A portable zip (`telepad-<version>-macos-<arch>.zip`)
 is also published; it keeps its data next to the program and needs the same `xattr` step
 for its folder.
 
@@ -151,8 +151,8 @@ systems and NAS devices work and missing tools only hide that section.
    ```
 
 2. Start Telepad. On the first start the hosts from `config` are imported into
-   `telepad.db`, and every host is checked once. No config? Use **☰ → Add one host…** or
-   **☰ → Import ~/.ssh/config**.
+   `telepad.db`, and every host is checked once. No config? Open **Host Management** in the sidebar and use **Add host…**
+   or **Import → From ~/.ssh/config**.
 3. The **Hosts** page shows every host: status, OS, CPU, memory, disks, Docker. Click a
    row for the host's own window (details, sensors, ports, containers).
 4. **Right-click** a host for its menu: **Open SSH** (a terminal logged in to it),

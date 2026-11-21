@@ -73,6 +73,52 @@ fn body(ui: &mut egui::Ui, m: &Model, hs: &HostSync, d: &mut HostSyncDraft, out:
             .weak()
             .small(),
         );
+        // Add / import / export (#93; they left the ☰ menu): straight into
+        // Telepad's database, not pending like "Add to Telepad…" below.
+        cols[0].horizontal_wrapped(|ui| {
+            if act_small(ui, true, Act::Add, &il(icons::PLUS, "Add host…"))
+                .on_hover_text("Add one host to Telepad now (the host editor)")
+                .clicked()
+            {
+                out.push(Msg::AddHost);
+            }
+            ui.menu_button(il(icons::IMPORT, "Import"), |ui| {
+                for (icon, text, tip, msg) in [
+                    (
+                        icons::IMPORT,
+                        "From a file…",
+                        "An OpenSSH config or a Telepad JSON export",
+                        Msg::Import,
+                    ),
+                    (
+                        icons::IMPORT,
+                        "From ~/.ssh/config",
+                        "Your own OpenSSH client config, in one click",
+                        Msg::ImportSshConfig,
+                    ),
+                    (
+                        icons::COPY,
+                        "From pasted text…",
+                        "Paste a config, JSON or one host per line",
+                        Msg::PasteImport,
+                    ),
+                ] {
+                    if ui.button(il(icon, text)).on_hover_text(tip).clicked() {
+                        out.push(msg);
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Import hosts into Telepad");
+            if ui
+                .small_button(il(icons::EXPORT, "Export…"))
+                .on_hover_text("Telepad's hosts as JSON (re-importable) or an OpenSSH config")
+                .clicked()
+            {
+                out.push(Msg::Export);
+            }
+        });
         cols[1].horizontal(|ui| {
             ui.label(RichText::new(il(icons::DESKTOP, "OpenSSH config")).strong());
             if let Some(f) = &hs.file {
