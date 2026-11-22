@@ -60,6 +60,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/model.rs` | Report data types (serde `Serialize`) and formatting helpers |
 | `src/update.rs` | Self-update: GitHub `releases/latest` over HTTPS (`ureq`), SemVer check, SHA-256 from the release's `.sha256`, replace both exes (`self_replace`), relaunch |
 | `src/platform.rs` | Everything OS-specific: ssh binary lookup, hidden console, open terminal / RDP / URL, ping |
+| `src/history.rs` | `history.db` (#100): transfer / file operation / SQL log `Entry` (kind, host, target, title, detail, outcome, rows, bytes, duration, method), `History::open` (trim to 90 days / 50 000 rows), `add`, `list(Scope)`, `clear`, `mask_secrets` (password literals), `format_utc`, `to_csv`, `history_path` |
 | `src/prefs.rs` | `preference.db` (#94): named workspaces (`WorkspacePrefs`: `<own>` layout, custom (label, layout), `Current`), `check_label`, `prefs_path`, one-time `import_legacy` of `ui_workspace`, `PRAGMA user_version` |
 
 ### telepad-app (Model–View–Update)
@@ -79,7 +80,9 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/editor.rs` | Editor of a file window (#64): `FileEditor` (tabs, active, unsaved question), `EdTab` (path, language, line endings, `Stamp`, saved text, conflict), `EdDraft` (texts, find bar), `EdMsg`, `update` (open, save, conflict, close / unsaved) |
 | `src/tests_editor.rs` | Behaviour tests for the editor |
 | `src/tests_db.rs` | Behaviour tests for the database windows |
-| `src/workspace.rs` | Main window workspace (#77, WinBox style): `Win` (page), `Group` (one inner window: tabs, rect, minimized / maximized), `Workspace` (`open` / `close`, `sync` with the sessions, `update(WsMsg)`, `save` / `restore` of a layout incl. `host:<alias>`, `pending_host`, `open_windows` for the #92 picker), `WkMsg` (named workspaces #94: switch / add / save / delete, handled in `update.rs`), `tile_rects` / `stack_rects` (Arrange) |
+| `src/workspace.rs` | Main window workspace (#77, WinBox style): `Win` (page), `Group` (one inner window: tabs, rect, minimized / maximized), `Workspace` (`open` / `close`, `sync` with the sessions, `update(WsMsg)`, `save` / `restore` of a layout incl. `host:` / `files:` / `editor:` / `db:` session tabs (#99, `layout`, `pending`, `esc`), `open_windows` for the #92 picker), `WkMsg` (named workspaces #94: switch / add / save / delete; leave question #99: `LeaveYes` / `LeaveBack` / `AskQuit`, handled in `update.rs` with `leave_losses`), `tile_rects` / `stack_rects` (Arrange) |
+| `src/tests_leave.rs` | Behaviour tests for #99 (windows reopened with a workspace, leave question, background transfers) |
+| `src/tests_history.rs` | Behaviour tests for #100 (transfer / file operation / SQL log entries) |
 | `src/tests_workspace.rs` | Behaviour tests for the workspace |
 | `src/tests_keys.rs` | Behaviour tests for the Authorized keys page |
 
@@ -167,7 +170,7 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
 - SSH: `BatchMode=yes` (never prompts), `StrictHostKeyChecking=accept-new`
   (trust on first use; changed keys still rejected).
 - Self-update downloads only from `https://github.com/<repo>/releases/download/`, verifies the
-  SHA-256 before anything is replaced, and never touches `telepad.db`, `preference.db`, `config` or `.env`.
+  SHA-256 before anything is replaced, and never touches `telepad.db`, `preference.db`, `history.db`, `config` or `.env`.
 - UI text may use any character, but the GUI test `every_character_in_the_ui_has_a_glyph` must
   pass (proportional text falls back to Hack; Phosphor holds the icons).
 - Test data uses documentation addresses (`192.0.2.0/24`, `198.51.100.0/24`) and made-up
@@ -187,6 +190,7 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
 | Fallback key for hosts without IdentityFile | `SSH_IDENTITY_FILE` in `.env` next to `config` |
 | ssh binary override | `TELEPAD_SSH` env var (default: Windows `System32\OpenSSH\ssh.exe`, else `ssh`) |
 | View settings | `settings` table `ui_overview_cards`, `ui_theme`, `ui_sidebar_collapsed`; `ui_workspace` is only read once (imported into `preference.db` as `<own>`, #94); `ui_compact_host_list` / `ui_group_by_status` are kept but unused since the host list went (#77) |
+| History (#100) | `history.db` next to `telepad.db` (`--history <path>` / `TELEPAD_HISTORY`): `entries` table, one writer / reader thread in the runtime, flushed on exit; file windows (History tab) and database windows (SQL log) load their scope on open |
 | Workspaces (#94) | `preference.db` next to `telepad.db` (`--prefs <path>` / `TELEPAD_PREFS`): `workspaces` table (label, kind `own` / `custom`, layout `x,y,w,h|minimized|maximized|active|tab;tab` per window, position, updated) + `prefs` (`current`, `legacy_imported`); written by a writer thread, autosave ≤ 1 / s, flushed on exit |
 | File window folders | `settings` table `files_paths:<alias>` (`local
 remote`, last folders per host) |
@@ -194,7 +198,7 @@ remote`, last folders per host) |
 | Database connections | `db_connections` table (user, database, save-password and read-only flags per `DbTarget::key`); passwords in the OS password store (service "Telepad database") |
 | Update source | `settings` table `update_enabled` / `update_repo` / `update_auto_install` (☰ ▸ Software update…); check via the github.com `releases/latest` redirect (API only as fallback: 60 req/h per IP); default `yohannaftali/telepad` |
 
-`.env`, `config`, `telepad.db`, `preference.db` and `telepad.ssh_config` are git-ignored: never commit an inventory.
+`.env`, `config`, `telepad.db`, `preference.db`, `history.db` and `telepad.ssh_config` are git-ignored: never commit an inventory.
 
 ## Validate
 

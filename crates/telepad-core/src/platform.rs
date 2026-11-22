@@ -52,6 +52,35 @@ fn open_url_impl(url: &str) -> std::io::Result<()> {
     Command::new("xdg-open").arg(url).spawn().map(|_| ())
 }
 
+/// Show a local folder in the system's file manager (#100: a history
+/// line's folder). Only an existing folder; no shell involved.
+pub fn open_folder(path: &std::path::Path) -> Result<(), String> {
+    let dir = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .filter(|p| p.is_dir())
+            .map(std::path::Path::to_path_buf)
+            .ok_or_else(|| format!("{} does not exist any more", path.display()))?
+    };
+    open_folder_impl(&dir).map_err(|e| format!("cannot open {}: {e}", dir.display()))
+}
+
+#[cfg(target_os = "windows")]
+fn open_folder_impl(dir: &std::path::Path) -> std::io::Result<()> {
+    Command::new("explorer.exe").arg(dir).spawn().map(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn open_folder_impl(dir: &std::path::Path) -> std::io::Result<()> {
+    Command::new("open").arg(dir).spawn().map(|_| ())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_folder_impl(dir: &std::path::Path) -> std::io::Result<()> {
+    Command::new("xdg-open").arg(dir).spawn().map(|_| ())
+}
+
 /// Per-user data folder for an installed Telepad: `%APPDATA%\Telepad` on Windows,
 /// `~/Library/Application Support/Telepad` on macOS, `$XDG_DATA_HOME/telepad`
 /// (or `~/.local/share/telepad`) elsewhere.

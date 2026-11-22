@@ -588,6 +588,36 @@ you clicked last, never while you are typing in a field.
 - On a host **without SFTP** the host side's actions are disabled (*Needs SFTP on the
   host*); copying and this computer's side still work.
 
+### Transfer history
+
+The transfer panel at the bottom of a file window has two tabs: **Transfers** (what runs
+now) and **History (_n_)**: everything Telepad copied or changed on this host, also in
+earlier sessions — newest on top.
+
+| Line | Shows |
+|---|---|
+| Uploads / downloads | time (UTC), direction, what → where (hover for every path), done / failed / cancelled, size, duration, method (SFTP, `scp -O`, rsync), skipped and failed files with the reason |
+| File operations | New folder / New file, Rename, Delete (each path), Permissions (mode), editor **Save**; "(this computer)" for the local side |
+
+**Filter** (any words), **All / Uploads / Downloads**, **Not done only** (failed and
+cancelled), **Export…** (the lines shown as CSV), **Clear…** (asks first; this host's
+lines only). The folder button of a transfer line shows its local folder in the system's
+file manager.
+
+```mermaid
+flowchart LR
+    act["Upload / Download,<br/>New, Rename, Delete,<br/>Permissions, Save"] --> done["Finished<br/>(done / failed / cancelled)"]
+    done --> win["History tab<br/>of the file window"]
+    done --> db[("history.db<br/>next to telepad.db")]
+    db --> win
+```
+
+The history is kept in **`history.db`** next to `telepad.db` (`--history <path>` /
+`TELEPAD_HISTORY` for another file): the last 90 days, at most 50 000 lines (older ones go
+when Telepad starts). It holds paths, sizes and results only — never file contents,
+passwords or keys. If the file cannot be written, Telepad says so in the status bar and
+keeps working without history.
+
 ### Editor
 
 **Edit** / F4 or a double-click on a file opens it in the host's **Editor** window, which
@@ -840,6 +870,23 @@ cannot reach the database address, the dialog says so.
 
 Closing the window, **Reconnect**, or quitting Telepad stops the SSH tunnel.
 
+### SQL log
+
+Like HeidiSQL, the bottom of a database window is the **SQL log**: every statement this
+connection ran that changed data or structure, also from earlier sessions, newest last.
+
+| Logged | Shows |
+|---|---|
+| Grid **Post** | each UPDATE / INSERT / DELETE with its values written in, rows changed, or **rolled back** with the server's error (the whole post is one transaction) |
+| Structure changes | the ALTER / CREATE / DROP / TRUNCATE / RENAME you saw before **Run**, done or failed |
+| Query tab | each statement that changes something (UPDATE, INSERT, DELETE, ALTER, CREATE, GRANT, …), rows affected, milliseconds, error. SELECT / SHOW / DESCRIBE / EXPLAIN only with **Log SELECT too** |
+
+Every line has the time (UTC), the database / schema and a copy button; **Filter**,
+**Copy all**, **Export…** (CSV) and **Clear…** (asks first; this connection only) are at
+the top of the panel. Drag its top edge to make it taller. Passwords in `IDENTIFIED BY`,
+`PASSWORD '…'` and `PASSWORD('…')` are written as `'***'`; connection passwords are never
+logged. The log is kept in `history.db` with the [transfer history](#transfer-history).
+
 ## Fan speeds and BMC temperatures (IPMI)
 
 CPU temperatures work without setup. Fans and inlet/exhaust temperatures on physical
@@ -904,6 +951,7 @@ telepad.exe                              # GUI
 telepad.exe --db D:\other\telepad.db     # use another database
 telepad.exe --config D:\ssh\config       # import from this config on first start
 telepad.exe --prefs D:\other\preference.db  # workspaces from another file
+telepad.exe --history D:\other\history.db   # transfer history and SQL log elsewhere
 telepad-check.exe                        # check all monitored hosts once, text
 telepad-check.exe web01 nas01 --json     # selected hosts, JSON
 telepad-check.exe --check-update         # newer release on GitHub?
@@ -919,6 +967,7 @@ is available and 2 when the check failed.
 | First-run import | `--config <path>`, `TELEPAD_CONFIG`, `./config`, `config` next to the exe, or `config` in the data folder; only read while the database is empty |
 | Generated ssh config | `telepad.ssh_config` next to the database (do not edit: rewritten on every change) |
 | Workspaces | `--prefs <path>`, `TELEPAD_PREFS`, else `preference.db` next to the database |
+| Transfer history and SQL log | `--history <path>`, `TELEPAD_HISTORY`, else `history.db` next to the database (90 days, 50 000 lines) |
 | Fallback key for hosts without IdentityFile | `SSH_IDENTITY_FILE=` in a `.env` file next to `config` |
 | ssh binary | `TELEPAD_SSH` (default: Windows `System32\OpenSSH\ssh.exe`, else `ssh` on `PATH`) |
 

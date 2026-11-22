@@ -11,6 +11,7 @@ use telepad_core::db::{
     Cell, DatabaseInfo, DbTarget, Engine, Grid, Login, Profile, ResultSet, Secret, ServerInfo,
     Statement, TableInfo, TableKind, TableRef, TableSummary, detect, sql,
 };
+use telepad_core::history::{Entry as LogEntry, Kind as LogKind, Outcome};
 use telepad_core::model::HostReport;
 
 pub type DbId = u64;
@@ -201,6 +202,19 @@ pub struct DbSession {
     /// Reopened from a workspace: connect once the profile is loaded, when a
     /// password is saved (else the connect form waits for the user).
     pub auto_connect: bool,
+    /// SQL log (#100): this connection's history, oldest first (earlier
+    /// sessions from `history.db`, then what ran now).
+    pub log: Vec<telepad_core::history::Entry>,
+    /// Statements sent and not answered yet, logged when they are.
+    pub running_log: Option<RunningLog>,
+}
+
+/// What a running Post / structure change sent, for the SQL log (#100).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningLog {
+    pub title: String,
+    pub statements: Vec<String>,
+    pub database: String,
 }
 
 impl DbSession {
@@ -329,6 +343,11 @@ pub struct DbDraft {
     pub rename: Option<String>,
     /// Full value shown in the viewer: title and text.
     pub viewer: Option<(String, String)>,
+    /// SQL log panel (#100): filter text, also log SELECT / SHOW …,
+    /// Clear waiting for its confirmation.
+    pub log_filter: String,
+    pub log_select: bool,
+    pub log_clear: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -421,6 +440,18 @@ pub enum DbEffect {
         id: DbId,
         key: String,
     },
+    /// Write one SQL log entry to `history.db` (#100).
+    Log(telepad_core::history::Entry),
+    /// This connection's history → [`DbMsg::LogLoaded`].
+    LoadLog {
+        id: DbId,
+        key: String,
+    },
+    ClearLog {
+        key: String,
+    },
+    /// Save the entries as CSV (native save dialog).
+    ExportLog(Vec<telepad_core::history::Entry>),
 }
 
 #[derive(Debug, Clone)]
@@ -589,6 +620,14 @@ pub enum DbMsg {
         result: Result<(), String>,
         after: AfterDdl,
     },
+    LogLoaded {
+        id: DbId,
+        result: Result<Vec<telepad_core::history::Entry>, String>,
+    },
+    /// Clear the SQL log of this connection (asked first in the window).
+    LogClear(DbId),
+    /// Export the shown (filtered) SQL log.
+    LogExport(DbId),
 }
 
 /// Databases on a host: in its running containers, then installed on it.
@@ -772,6 +811,10 @@ pub fn update(
                 ..Default::default()
             },
         );
+        fx.push(DbEffect::LoadLog {
+            id,
+            key: target.key(),
+        });
         fx.push(DbEffect::LoadProfile { id, target, host });
         return fx;
     }
@@ -792,6 +835,30 @@ pub fn update(
     let engine = s.engine();
     match msg {
         DbMsg::Open(_) | DbMsg::Restore { .. } | DbMsg::Close(_) => {}
+        DbMsg::LogLoaded { result, .. } => match result {
+            Ok(mut v) => {
+                // Entries of this session written meanwhile stay after them.
+                v.extend(s.log.drain(..).filter(|e| e.at.is_none()));
+                s.log = v;
+            }
+            Err(e) => s.notice = Some(format!("SQL log not available: {e}")),
+        },
+        DbMsg::LogClear(_) => {
+            d.log_clear = false;
+            s.log.clear();
+            fx.push(DbEffect::ClearLog {
+                key: s.target.key(),
+            });
+        }
+        DbMsg::LogExport(_) => {
+            let shown: Vec<_> = s
+                .log
+                .iter()
+                .filter(|e| log_matches(e, &d.log_filter))
+                .cloned()
+                .collect();
+            fx.push(DbEffect::ExportLog(shown));
+        }
         DbMsg::Loaded {
             profile,
             store,
@@ -1245,6 +1312,13 @@ pub fn update(
         },
         DbMsg::Posted { result, .. } => {
             s.data.loading = false;
+            if let Some(run) = s.running_log.take() {
+                let (outcome, rows, error) = match &result {
+                    Ok(n) => (Outcome::Done, Some(*n), String::new()),
+                    Err(e) => (Outcome::RolledBack, None, e.clone()),
+                };
+                log_sql(s, d, &mut fx, &run, outcome, rows, error, None);
+            }
             match result {
                 Ok(n) => {
                     s.data.edits = Edits::default();
@@ -1320,6 +1394,36 @@ pub fn update(
             }
         }
         DbMsg::QueryDone { tab, results, .. } => {
+            let (db, schema) = s.current.clone().unwrap_or_default();
+            for r in &results {
+                if !d.log_select && sql::is_read_only(engine, &r.statement) {
+                    continue;
+                }
+                let run = RunningLog {
+                    title: sql_title(&r.statement),
+                    statements: vec![r.statement.clone()],
+                    database: if schema.is_empty() {
+                        db.clone()
+                    } else {
+                        format!("{db}.{schema}")
+                    },
+                };
+                let outcome = if r.error.is_some() {
+                    Outcome::Failed
+                } else {
+                    Outcome::Done
+                };
+                log_sql(
+                    s,
+                    d,
+                    &mut fx,
+                    &run,
+                    outcome,
+                    r.affected,
+                    r.error.clone().unwrap_or_default(),
+                    Some(r.millis),
+                );
+            }
             if let Some(q) = s.queries.get_mut(tab) {
                 q.running = false;
                 q.shown = 0;
@@ -1337,6 +1441,15 @@ pub fn update(
             }) => run_query(s, tab, statements, &mut fx),
             Some(DbConfirm::Post { statements }) => {
                 if let Some(t) = &s.data.table {
+                    s.running_log = Some(RunningLog {
+                        title: format!(
+                            "Grid changes in {}: {} statement(s)",
+                            t.table,
+                            statements.len()
+                        ),
+                        statements: statements.iter().map(|st| st.display(engine)).collect(),
+                        database: t.database.clone(),
+                    });
                     s.data.loading = true;
                     job(
                         &mut fx,
@@ -1369,6 +1482,11 @@ pub fn update(
                 }
                 d.typed.clear();
                 s.ddl_running = true;
+                s.running_log = Some(RunningLog {
+                    title: title.clone(),
+                    statements: statements.clone(),
+                    database: database.clone(),
+                });
                 job(
                     &mut fx,
                     id,
@@ -1496,6 +1614,13 @@ pub fn update(
         }
         DbMsg::DdlDone { result, after, .. } => {
             s.ddl_running = false;
+            if let Some(run) = s.running_log.take() {
+                let (outcome, error) = match &result {
+                    Ok(()) => (Outcome::Done, String::new()),
+                    Err(e) => (Outcome::Failed, e.clone()),
+                };
+                log_sql(s, d, &mut fx, &run, outcome, None, error, None);
+            }
             match result {
                 Ok(()) => {
                     s.error = None;
@@ -1687,6 +1812,7 @@ fn msg_id(msg: &DbMsg) -> DbId {
         | NewTable { id, .. }
         | TruncateTable { id, .. }
         | DropTable { id, .. }
+        | LogLoaded { id, .. }
         | DdlDone { id, .. } => *id,
         Connect(id)
         | Close(id)
@@ -1711,6 +1837,8 @@ fn msg_id(msg: &DbMsg) -> DbId {
         | NewTableSave(id)
         | RenameTable(id)
         | RenameCancel(id)
+        | LogClear(id)
+        | LogExport(id)
         | RenameSave(id) => *id,
     }
 }
@@ -1744,4 +1872,53 @@ pub fn unsaved(s: &DbSession, d: &DbDraft) -> Vec<String> {
         v.push("Connect form with a typed password".into());
     }
     v
+}
+
+/// First words of a statement for the log's title line: `UPDATE `items``.
+pub fn sql_title(statement: &str) -> String {
+    let one: String = statement.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one.chars().count() > 80 {
+        format!("{}…", one.chars().take(79).collect::<String>())
+    } else {
+        one
+    }
+}
+
+/// An SQL log line matches the filter text (every word, any case).
+pub fn log_matches(e: &LogEntry, filter: &str) -> bool {
+    crate::state::matches_query(
+        &format!("{} {} {} {}", e.title, e.detail, e.database, e.error),
+        filter,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn log_sql(
+    s: &mut DbSession,
+    d: &DbDraft,
+    fx: &mut Vec<DbEffect>,
+    run: &RunningLog,
+    outcome: Outcome,
+    rows: Option<u64>,
+    error: String,
+    millis: Option<u64>,
+) {
+    let e = LogEntry {
+        at: None,
+        kind: LogKind::Sql,
+        host: s.target.host.clone(),
+        target: s.target.key(),
+        title: telepad_core::history::mask_secrets(&run.title),
+        detail: telepad_core::history::mask_secrets(&run.statements.join(";\n")),
+        outcome,
+        error,
+        rows,
+        duration_ms: millis,
+        method: s.engine().as_str().to_string(),
+        user: d.user.trim().to_string(),
+        database: run.database.clone(),
+        ..Default::default()
+    };
+    s.log.push(e.clone());
+    fx.push(DbEffect::Log(e));
 }

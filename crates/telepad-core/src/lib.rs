@@ -6,6 +6,7 @@ pub mod db;
 pub mod docker_actions;
 pub mod eol;
 pub mod files;
+pub mod history;
 pub mod hostsync;
 pub mod model;
 pub mod parse;

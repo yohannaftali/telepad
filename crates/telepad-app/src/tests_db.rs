@@ -41,10 +41,12 @@ fn state() -> State {
     s
 }
 
+/// Effects of one message, without the SQL log's (tested in `tests_history`).
 fn send(s: &mut State, m: DbMsg) -> Vec<DbEffect> {
     update(s, Msg::Db(m), Instant::now())
         .into_iter()
         .filter_map(|e| match e {
+            Effect::Db(DbEffect::Log(_) | DbEffect::LoadLog { .. }) => None,
             Effect::Db(d) => Some(d),
             _ => None,
         })

@@ -43,6 +43,8 @@ mod tests_editor;
 #[cfg(test)]
 mod tests_files;
 #[cfg(test)]
+mod tests_history;
+#[cfg(test)]
 mod tests_hostsync;
 #[cfg(test)]
 mod tests_keys;

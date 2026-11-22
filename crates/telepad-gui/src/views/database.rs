@@ -229,6 +229,11 @@ fn browser(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>
             }
         });
     });
+    egui::Panel::bottom(("db-log", id))
+        .resizable(true)
+        .default_size(130.0)
+        .min_size(28.0)
+        .show(ui, |ui| sql_log(ui, s, d, out));
     egui::Panel::left(("db-tree", id))
         .resizable(true)
         .default_size(270.0)
@@ -1909,4 +1914,101 @@ fn confirm(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>
     if modal.should_close() {
         send(out, DbMsg::ConfirmCancel(id));
     }
+}
+
+/// SQL log (#100, HeidiSQL style): what this connection changed, newest
+/// last, also from earlier sessions.
+fn sql_log(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) {
+    let id = s.id;
+    let shown: Vec<_> = s
+        .log
+        .iter()
+        .filter(|e| telepad_app::db::log_matches(e, &d.log_filter))
+        .collect();
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(format!("{} SQL log ({})", icons::CODE, s.log.len())).strong())
+            .on_hover_text(
+                "Statements that changed data or structure, as they ran (passwords masked)",
+            );
+        ui.add(
+            egui::TextEdit::singleline(&mut d.log_filter)
+                .hint_text(format!("{} Filter", icons::SEARCH))
+                .desired_width(160.0),
+        );
+        ui.checkbox(&mut d.log_select, "Log SELECT too")
+            .on_hover_text("Also log read-only statements of the Query tab from now on");
+        if ui
+            .button(il(icons::COPY, "Copy all"))
+            .on_hover_text("The SQL of the lines shown")
+            .clicked()
+        {
+            let text = shown
+                .iter()
+                .map(|e| {
+                    format!(
+                        "-- {} {}\n{};",
+                        crate::views::files::when(e.at),
+                        e.title,
+                        e.detail
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            ui.ctx().copy_text(text);
+        }
+        if ui.button(il(icons::EXPORT, "Export…")).clicked() {
+            send(out, DbMsg::LogExport(id));
+        }
+        if d.log_clear {
+            ui.label("Clear this connection's log?");
+            if act_button(ui, true, Act::Danger, &il(icons::TRASH, "Clear")).clicked() {
+                send(out, DbMsg::LogClear(id));
+            }
+            if ui.button("Cancel").clicked() {
+                d.log_clear = false;
+            }
+        } else if act_button(
+            ui,
+            !s.log.is_empty(),
+            Act::Danger,
+            &il(icons::TRASH, "Clear…"),
+        )
+        .clicked()
+        {
+            d.log_clear = true;
+        }
+    });
+    egui::ScrollArea::vertical()
+        .id_salt(("db-log-scroll", id))
+        .auto_shrink([false, false])
+        .stick_to_bottom(true)
+        .show(ui, |ui| {
+            if shown.is_empty() {
+                ui.label(RichText::new("Nothing logged yet: grid posts, structure changes and statements of the Query tab that change data show here.").weak());
+            }
+            for e in shown {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(crate::views::files::when(e.at)).weak().small().monospace());
+                    let (text, color) = crate::views::files::outcome_text(e.outcome);
+                    ui.colored_label(color, text);
+                    if let Some(r) = e.rows {
+                        ui.label(RichText::new(format!("{r} row(s)")).weak().small());
+                    }
+                    if let Some(ms) = e.duration_ms {
+                        ui.label(RichText::new(format!("{ms} ms")).weak().small());
+                    }
+                    if !e.database.is_empty() {
+                        ui.label(RichText::new(&e.database).weak().small());
+                    }
+                    if ui.small_button(icons::COPY).on_hover_text("Copy this SQL").clicked() {
+                        ui.ctx().copy_text(e.detail.clone());
+                    }
+                });
+                ui.label(RichText::new(&e.detail).monospace().small());
+                if !e.error.is_empty() {
+                    ui.colored_label(red(), RichText::new(&e.error).small());
+                }
+                ui.separator();
+            }
+        });
 }

@@ -21,6 +21,7 @@ use telepad_core::authorized_keys;
 use telepad_core::collector::{self, Collector, SshSettings};
 use telepad_core::db::client::{CancelSlot, Session};
 use telepad_core::db::{detect, secret, tunnel};
+use telepad_core::history;
 use telepad_core::prefs::{self, Prefs, WorkspacePrefs};
 use telepad_core::store;
 use telepad_core::update::{self, Updater, relaunch};
@@ -42,6 +43,27 @@ pub struct Runtime {
     files: HashMap<FmId, FileWorker>,
     /// `preference.db` writer (#94): writes off the UI thread, latest first.
     prefs: Option<(Sender<WorkspacePrefs>, thread::JoinHandle<()>)>,
+    /// `history.db` (#100): one thread writes and reads it, in order.
+    history: Option<(Sender<HistCmd>, thread::JoinHandle<()>)>,
+}
+
+/// Work for the `history.db` thread (#100).
+enum HistCmd {
+    Add(Box<history::Entry>),
+    Load(history::Scope, HistReply),
+    Clear(history::Scope),
+}
+
+/// Which window gets the entries it asked for.
+enum HistReply {
+    Files(FmId),
+    Db(DbId),
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 struct FileWorker {
@@ -137,6 +159,7 @@ impl Runtime {
         cli_config: Option<&str>,
         cli_db: Option<&str>,
         cli_prefs: Option<&str>,
+        cli_history: Option<&str>,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
         let mut rt = Self {
@@ -149,6 +172,7 @@ impl Runtime {
             db: HashMap::new(),
             files: HashMap::new(),
             prefs: None,
+            history: None,
         };
         match open_workspace(cli_config, cli_db) {
             Ok(ws) => {
@@ -167,9 +191,13 @@ impl Runtime {
                     ui_prefs: ws.store.ui_prefs().unwrap_or_default(),
                     prefs: rt.open_prefs(ws.store.path(), cli_prefs, &ws.store),
                 };
+                let history_error = rt.open_history(ws.store.path(), cli_history).err();
                 rt.ssh = Some(ssh);
                 rt.ws = Some(ws);
                 rt.dispatch(state, started);
+                if let Some(e) = history_error {
+                    rt.dispatch(state, Msg::Notice(format!("History is not kept: {e}")));
+                }
                 if let Ok(alias) = std::env::var("TELEPAD_SELECT") {
                     rt.dispatch(state, Msg::SelectAlias(alias));
                 }
@@ -453,6 +481,92 @@ impl Runtime {
         Ok(loaded)
     }
 
+    /// Open `history.db` (trimmed to 90 days / 50 000 entries) and start
+    /// its thread.
+    fn open_history(&mut self, db: &Path, cli: Option<&str>) -> Result<(), String> {
+        let path = history::history_path(db, cli);
+        let h = history::History::open(&path, unix_now())
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let (htx, hrx) = mpsc::channel::<HistCmd>();
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let handle = thread::spawn(move || {
+            let mut failed = false;
+            while let Ok(cmd) = hrx.recv() {
+                match cmd {
+                    HistCmd::Add(e) => {
+                        if let Err(e) = h.add(&e, unix_now())
+                            && !failed
+                        {
+                            failed = true;
+                            let _ = tx.send(Msg::Notice(format!("Cannot write the history: {e}")));
+                            ctx.request_repaint();
+                        }
+                    }
+                    HistCmd::Load(scope, reply) => {
+                        let result = h
+                            .list(&scope, history::LOAD_LIMIT)
+                            .map_err(|e| e.to_string());
+                        let msg = match reply {
+                            HistReply::Files(id) => Msg::Files(FmMsg::HistoryLoaded { id, result }),
+                            HistReply::Db(id) => Msg::Db(DbMsg::LogLoaded { id, result }),
+                        };
+                        let _ = tx.send(msg);
+                        ctx.request_repaint();
+                    }
+                    HistCmd::Clear(scope) => {
+                        if let Err(e) = h.clear(&scope) {
+                            let _ = tx.send(Msg::Notice(format!("Cannot clear the history: {e}")));
+                            ctx.request_repaint();
+                        }
+                    }
+                }
+            }
+        });
+        self.history = Some((htx, handle));
+        Ok(())
+    }
+
+    fn history_send(&self, cmd: HistCmd) -> Option<Msg> {
+        let (tx, _) = self.history.as_ref()?;
+        let _ = tx.send(cmd);
+        None
+    }
+
+    /// Ask for a window's history; without `history.db` the window says so.
+    fn history_load(&self, scope: history::Scope, reply: HistReply) -> Option<Msg> {
+        if self.history.is_some() {
+            return self.history_send(HistCmd::Load(scope, reply));
+        }
+        let result = Err("history.db is not open".to_string());
+        Some(match reply {
+            HistReply::Files(id) => Msg::Files(FmMsg::HistoryLoaded { id, result }),
+            HistReply::Db(id) => Msg::Db(DbMsg::LogLoaded { id, result }),
+        })
+    }
+
+    /// Save history entries as CSV where the user says (native dialog).
+    fn history_export(entries: &[history::Entry], name: &str) -> Option<Msg> {
+        let path = rfd::FileDialog::new()
+            .set_title("Export history")
+            .set_file_name(name)
+            .add_filter("CSV", &["csv"])
+            .save_file()?;
+        Some(Msg::Notice(
+            match std::fs::write(&path, history::to_csv(entries)) {
+                Ok(()) => format!("{} entries written to {}", entries.len(), path.display()),
+                Err(e) => format!("Cannot write {}: {e}", path.display()),
+            },
+        ))
+    }
+
+    /// On exit: wait until the history thread wrote everything sent to it.
+    pub fn flush_history(&mut self) {
+        if let Some((tx, handle)) = self.history.take() {
+            drop(tx);
+            let _ = handle.join();
+        }
+    }
+
     /// On exit: write workspaces that are still waiting for the autosave,
     /// and wait for the writer.
     pub fn flush_prefs(&mut self, m: &telepad_app::Model) {
@@ -482,6 +596,19 @@ impl Runtime {
         use telepad_core::files::{self as cf, fallback, rsync as crsync, sftp::Sftp, transfer};
         let fm = |m: FmMsg| Msg::Files(m);
         match e {
+            FmEffect::Log(entry) => self.history_send(HistCmd::Add(Box::new(entry))),
+            FmEffect::LoadHistory { id, alias } => {
+                self.history_load(history::Scope::Files(alias), HistReply::Files(id))
+            }
+            FmEffect::ClearHistory { alias } => {
+                self.history_send(HistCmd::Clear(history::Scope::Files(alias)))
+            }
+            FmEffect::ExportHistory(entries) => {
+                Self::history_export(&entries, "telepad-file-history.csv")
+            }
+            FmEffect::OpenFolder(path) => telepad_core::platform::open_folder(Path::new(&path))
+                .err()
+                .map(Msg::Notice),
             FmEffect::Connect { id, host } => {
                 let ssh = self.ssh.clone()?;
                 let remembered = self
@@ -1016,6 +1143,14 @@ impl Runtime {
 
     fn run_db(&mut self, e: DbEffect) -> Option<Msg> {
         match e {
+            DbEffect::Log(entry) => self.history_send(HistCmd::Add(Box::new(entry))),
+            DbEffect::LoadLog { id, key } => {
+                self.history_load(history::Scope::Db(key), HistReply::Db(id))
+            }
+            DbEffect::ClearLog { key } => {
+                self.history_send(HistCmd::Clear(history::Scope::Db(key)))
+            }
+            DbEffect::ExportLog(entries) => Self::history_export(&entries, "telepad-sql-log.csv"),
             DbEffect::LoadProfile { id, target, host } => {
                 let key = target.key();
                 let profile = self
