@@ -394,6 +394,48 @@ list for the same actions. Every change regenerates `telepad.ssh_config` immedia
 SSH connection to the host. It pings it and tests the RDP port (3389, or the Port you
 set); the host is up if either answers. **RDP** opens Remote Desktop (`mstsc` on Windows).
 
+### Remote Desktop settings
+
+The editor's **Remote Desktop settings** section (open for RDP-only hosts, folded for SSH
+hosts) keeps how Remote Desktop should connect, so **Open RDP** starts with them every
+time. Tick **Save Remote Desktop settings for this host**; untick it to forget them.
+
+| Field | Meaning |
+|---|---|
+| **Address**, **Port** | empty: HostName and 3389 (an RDP-only host's own Port) |
+| **User / domain** | the login Remote Desktop fills in (`DOMAIN\user`) |
+| **Display** | Full screen, a Window of a set size, or Fit the window (follows its size); **All monitors**; colour depth |
+| **Bring along** | Clipboard, Printers, Drives (`*` = all, or letters such as `C:;D:`) |
+| **Sound** | played here, on the remote computer, or off |
+| **Session** | Admin session (`/admin`), network detection |
+| **RD Gateway** | a gateway host, used always or only when needed |
+| **Server check** | what Remote Desktop does when it cannot verify the server: warn, refuse, or connect |
+
+**Import .rdp…** reads a file saved by Remote Desktop Connection (UTF-16 as `mstsc`
+writes it, or UTF-8) into the section; lines Telepad has no field for are kept as they
+are and listed under the section (**Drop them** removes them). A saved password in the
+file is ignored. **Export .rdp…** saves the section as a `.rdp` file for another
+computer. Settings travel with Telepad's JSON export / import, follow a renamed host and
+go when it is deleted. They are never written to an OpenSSH config.
+
+```mermaid
+flowchart LR
+    s[("telepad.db<br/>rdp_settings")] --> open["Open RDP"]
+    open -->|Windows| m["temporary .rdp<br/>→ mstsc"]
+    open -->|macOS| w["temporary .rdp<br/>→ Windows App"]
+    open -->|Linux| x["xfreerdp arguments<br/>(Remmina: the file)"]
+```
+
+On Windows and macOS **Open RDP** writes a temporary `.rdp` file readable only by you,
+starts the client with it and removes it half a minute later. On Linux the settings
+become `xfreerdp` arguments; what `xfreerdp` cannot do (single drive letters, the server
+check, extra lines) is named in the status bar. SSH hosts with saved settings get **Open
+RDP** in their right-click menu too.
+
+**Passwords**: Telepad stores none — not in `telepad.db`, not in the `.rdp` file. Remote
+Desktop asks for it, and on Windows *Remember me* keeps it in Windows' Credential Manager
+as usual.
+
 When an SSH check fails, the error says whether the host still answers ping, so a
 machine that is down looks different from one where only SSH is broken.
 

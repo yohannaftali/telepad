@@ -242,6 +242,10 @@ impl Runtime {
                     .sync_ssh_config()
                     .err()
                     .map(|e| format!("Cannot write {}: {e}", ws.ssh_config.display()));
+                // Remote Desktop settings come with the hosts (#102).
+                let _ = self.tx.send(Msg::RdpLoaded(
+                    ws.store.rdp_all().map_err(|e| e.to_string()),
+                ));
                 Some(Msg::HostsLoaded {
                     hosts: ws.store.hosts().map_err(|e| e.to_string()),
                     ssh_config_error,
@@ -340,11 +344,79 @@ impl Runtime {
                 } else {
                     &h.hostname
                 };
-                let text = match platform::open_rdp(host, h.port) {
-                    Ok(()) => format!("Opened Remote Desktop to {}", h.alias),
-                    Err(e) => e,
+                // RDP-only hosts keep their RDP port in `port`.
+                let port = if h.access == telepad_core::config::Access::Rdp {
+                    h.port
+                } else {
+                    3389
+                };
+                let saved = self
+                    .ws
+                    .as_ref()
+                    .and_then(|ws| ws.store.rdp_all().ok())
+                    .and_then(|mut m| m.remove(&h.alias));
+                let text = match saved {
+                    Some(r) => match platform::open_rdp_with(&r, host, port, &h.alias) {
+                        Ok(not) if not.is_empty() => {
+                            format!("Opened Remote Desktop to {} with its settings", h.alias)
+                        }
+                        Ok(not) => format!(
+                            "Opened Remote Desktop to {}; not available in this client: {}",
+                            h.alias,
+                            not.join(", ")
+                        ),
+                        Err(e) => e,
+                    },
+                    None => match platform::open_rdp(host, port) {
+                        Ok(()) => format!("Opened Remote Desktop to {}", h.alias),
+                        Err(e) => e,
+                    },
                 };
                 Some(Msg::Notice(text))
+            }
+            Effect::SaveRdp { alias, settings } => {
+                let ws = self.ws.as_ref()?;
+                let r = ws
+                    .store
+                    .set_rdp(&alias, settings.as_ref())
+                    .map_err(|e| e.to_string());
+                let _ = self.tx.send(Msg::RdpLoaded(
+                    ws.store.rdp_all().map_err(|e| e.to_string()),
+                ));
+                Some(Msg::RdpSaved(r))
+            }
+            Effect::PickRdpFile => {
+                let path = rfd::FileDialog::new()
+                    .set_title("Remote Desktop file")
+                    .add_filter("Remote Desktop", &["rdp"])
+                    .pick_file()?;
+                let r = std::fs::metadata(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|m| {
+                        if m.len() > 1 << 20 {
+                            Err("too large for a .rdp file".to_string())
+                        } else {
+                            std::fs::read(&path).map_err(|e| e.to_string())
+                        }
+                    })
+                    .map(|b| {
+                        telepad_core::rdp::RdpSettings::parse(&telepad_core::rdp::decode_file(&b))
+                    })
+                    .map_err(|e| format!("Cannot read {}: {e}", path.display()));
+                Some(Msg::RdpPicked(r))
+            }
+            Effect::ExportRdp { alias, text } => {
+                let path = rfd::FileDialog::new()
+                    .set_title("Save Remote Desktop file")
+                    .set_file_name(format!("{alias}.rdp"))
+                    .add_filter("Remote Desktop", &["rdp"])
+                    .save_file()?;
+                Some(Msg::Notice(
+                    match std::fs::write(&path, telepad_core::rdp::encode_file(&text)) {
+                        Ok(()) => format!("Saved {}", path.display()),
+                        Err(e) => format!("Cannot write {}: {e}", path.display()),
+                    },
+                ))
             }
             Effect::OpenBmcSetup(h) => {
                 let s = self.ssh.as_ref()?;

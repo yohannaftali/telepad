@@ -174,6 +174,7 @@ pub fn host_block(h: &HostEntry) -> String {
             ..h.clone()
         }],
         global: String::new(),
+        ..Default::default()
     };
     let text = config::to_ssh_config(&inv);
     text.lines()

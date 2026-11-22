@@ -351,16 +351,71 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         }
         Msg::Edit(i) => {
             if let Some(h) = m.hosts.get(i) {
-                d.editor = Some(Editor::new(h.entry.clone()));
+                let mut ed = Editor::new(h.entry.clone());
+                ed.set_rdp(m.rdp.get(&h.entry.alias));
+                d.editor = Some(ed);
                 fx.push(Effect::FindKeys);
             }
         }
         Msg::Clone(i) => {
             if let Some(h) = m.hosts.get(i) {
-                d.editor = Some(Editor::clone_of(&h.entry));
+                let mut ed = Editor::clone_of(&h.entry);
+                // The copy's settings are new for the clone (saved with it).
+                ed.set_rdp(m.rdp.get(&h.entry.alias));
+                ed.rdp_saved = None;
+                d.editor = Some(ed);
                 fx.push(Effect::FindKeys);
             }
         }
+        Msg::OpenRdp(i) => {
+            if let Some(h) = m.hosts.get(i) {
+                fx.push(Effect::OpenRdp(h.entry.clone()));
+            }
+        }
+        Msg::RdpLoaded(Ok(map)) => m.rdp = map,
+        Msg::RdpLoaded(Err(e)) => say(m, now, format!("Remote Desktop settings: {e}")),
+        Msg::EditorRdpImport => fx.push(Effect::PickRdpFile),
+        Msg::RdpPicked(Ok(r)) => {
+            if let Some(ed) = &mut d.editor {
+                let saved = ed.rdp_saved.clone();
+                ed.set_rdp(Some(&r));
+                ed.rdp_saved = saved;
+                if ed.entry.hostname.trim().is_empty() && !r.address.is_empty() {
+                    ed.entry.hostname = r.address.clone();
+                }
+                say(
+                    m,
+                    now,
+                    "Remote Desktop settings read from the file; Save keeps them",
+                );
+            }
+        }
+        Msg::RdpPicked(Err(e)) => say(m, now, e),
+        Msg::EditorRdpExport => {
+            if let Some(ed) = &mut d.editor {
+                match (ed.build(), ed.build_rdp()) {
+                    (Ok(e), Ok(r)) => {
+                        let host = if e.hostname.is_empty() {
+                            e.alias.clone()
+                        } else {
+                            e.hostname.clone()
+                        };
+                        let port = if e.access == Access::Rdp {
+                            e.port
+                        } else {
+                            3389
+                        };
+                        fx.push(Effect::ExportRdp {
+                            alias: e.alias.clone(),
+                            text: r.unwrap_or_default().render(&host, port),
+                        });
+                    }
+                    (Err(x), _) | (_, Err(x)) => ed.error = Some(x),
+                }
+            }
+        }
+        Msg::RdpSaved(Ok(())) => {}
+        Msg::RdpSaved(Err(e)) => say(m, now, format!("Remote Desktop settings not saved: {e}")),
         Msg::KeysFound(keys) => {
             if let Some(ed) = &mut d.editor {
                 ed.key_choices = keys;
@@ -381,9 +436,13 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         Msg::CancelDelete => m.pending_delete = None,
         Msg::EditorSave => {
             if let Some(ed) = &mut d.editor {
-                match ed.build() {
-                    Ok(entry) => fx.push(Effect::SaveHost(entry)),
-                    Err(e) => ed.error = Some(e),
+                match (ed.build(), ed.build_rdp()) {
+                    (Ok(entry), Ok(rdp)) => {
+                        // Written after the host itself (Msg::HostSaved).
+                        ed.rdp_pending = (rdp != ed.rdp_saved).then_some(rdp);
+                        fx.push(Effect::SaveHost(entry));
+                    }
+                    (Err(e), _) | (_, Err(e)) => ed.error = Some(e),
                 }
             }
         }
@@ -758,7 +817,12 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             }
         }
         Msg::HostSaved(Ok((id, alias))) => {
-            d.editor = None;
+            if let Some(settings) = d.editor.take().and_then(|ed| ed.rdp_pending) {
+                fx.push(Effect::SaveRdp {
+                    alias: alias.clone(),
+                    settings,
+                });
+            }
             m.select_after_load = Some(id);
             say(m, now, format!("Saved {alias}"));
             fx.push(Effect::LoadHosts);

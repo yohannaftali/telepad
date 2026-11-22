@@ -137,6 +137,10 @@ pub struct Inventory {
     pub hosts: Vec<HostEntry>,
     /// Raw OpenSSH text appended after the host blocks.
     pub global: String,
+    /// Saved Remote Desktop settings by alias (#102; JSON only, never in
+    /// an OpenSSH config).
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub rdp: std::collections::BTreeMap<String, crate::rdp::RdpSettings>,
 }
 
 #[derive(Debug, thiserror::Error)]

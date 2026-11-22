@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::config::{self, Access, HostEntry, Inventory};
 use crate::update::UpdateConfig;
 
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 const JSON_FORMAT: &str = "telepad/hosts";
 
 #[derive(Debug, thiserror::Error)]
@@ -123,6 +123,14 @@ const DB_CONNECTIONS: &str = "CREATE TABLE IF NOT EXISTS db_connections (
     updated_at    TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );";
 
+/// Saved Remote Desktop settings per host (#102), as JSON. Follows the
+/// host's alias (rename) and goes with the host (delete). No password.
+const RDP_SETTINGS: &str = "CREATE TABLE IF NOT EXISTS rdp_settings (
+    alias      TEXT PRIMARY KEY REFERENCES hosts(alias) ON UPDATE CASCADE ON DELETE CASCADE,
+    settings   TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);";
+
 #[derive(Serialize)]
 struct JsonFile {
     format: String,
@@ -176,9 +184,20 @@ impl Store {
 PRAGMA user_version = 3;
 COMMIT;"
             ))?;
+            v = 3;
+        }
+        if v == 3 {
+            // v4: saved Remote Desktop settings (#102).
+            conn.execute_batch(&format!(
+                "BEGIN;
+{RDP_SETTINGS}
+PRAGMA user_version = 4;
+COMMIT;"
+            ))?;
         } else if v == 0 {
             conn.execute_batch(&format!(
                 "{DB_CONNECTIONS}
+{RDP_SETTINGS}
 PRAGMA user_version = {SCHEMA_VERSION};"
             ))?;
         } else if v > SCHEMA_VERSION {
@@ -387,7 +406,51 @@ PRAGMA user_version = {SCHEMA_VERSION};"
         Ok(Inventory {
             hosts: self.hosts()?,
             global: self.global()?,
+            rdp: self.rdp_all()?,
         })
+    }
+
+    /// Saved Remote Desktop settings of every host (#102), by alias. A row
+    /// that does not read (hand-edited) is left out.
+    pub fn rdp_all(
+        &self,
+    ) -> Result<std::collections::BTreeMap<String, crate::rdp::RdpSettings>, StoreError> {
+        let mut st = self
+            .conn
+            .prepare("SELECT alias, settings FROM rdp_settings")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = std::collections::BTreeMap::new();
+        for row in rows {
+            let (alias, json) = row?;
+            if let Ok(s) = serde_json::from_str(&json) {
+                out.insert(alias, s);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Save (`Some`) or forget (`None`) a host's Remote Desktop settings.
+    pub fn set_rdp(
+        &self,
+        alias: &str,
+        settings: Option<&crate::rdp::RdpSettings>,
+    ) -> Result<(), StoreError> {
+        match settings {
+            Some(s) => {
+                s.validate().map_err(StoreError::Invalid)?;
+                self.conn.execute(
+                    "INSERT INTO rdp_settings(alias, settings) VALUES(?1, ?2)
+                     ON CONFLICT(alias) DO UPDATE SET settings = excluded.settings,
+                       updated_at = CURRENT_TIMESTAMP",
+                    params![alias, serde_json::to_string(s)?],
+                )?;
+            }
+            None => {
+                self.conn
+                    .execute("DELETE FROM rdp_settings WHERE alias = ?1", params![alias])?;
+            }
+        }
+        Ok(())
     }
 
     /// Insert (no id) or update (id) one host. Returns its id.
@@ -565,6 +628,10 @@ PRAGMA user_version = {SCHEMA_VERSION};"
             h.validate()
                 .map_err(|e| StoreError::Invalid(format!("{}: {e}", h.alias)))?;
         }
+        for (alias, r) in &inv.rdp {
+            r.validate()
+                .map_err(|e| StoreError::Invalid(format!("{alias} (Remote Desktop): {e}")))?;
+        }
         let summary = self.preview_import(inv, mode)?;
         let tx = self.conn.transaction()?;
         if mode == ImportMode::Replace {
@@ -606,6 +673,16 @@ PRAGMA user_version = {SCHEMA_VERSION};"
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 params![inv.global],
             )?;
+        }
+        for (alias, r) in &inv.rdp {
+            if inv.hosts.iter().any(|h| &h.alias == alias) {
+                tx.execute(
+                    "INSERT INTO rdp_settings(alias, settings) VALUES(?1, ?2)
+                     ON CONFLICT(alias) DO UPDATE SET settings = excluded.settings,
+                       updated_at = CURRENT_TIMESTAMP",
+                    params![alias, serde_json::to_string(r)?],
+                )?;
+            }
         }
         tx.commit()?;
         Ok(summary)
@@ -773,7 +850,15 @@ fn parse_json_import(t: &str) -> Result<Inventory, StoreError> {
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Inventory { hosts, global })
+    // Telepad's own export keeps Remote Desktop settings by alias (#102).
+    let rdp = match &v {
+        serde_json::Value::Object(o) => o
+            .get("rdp")
+            .and_then(|r| serde_json::from_value(r.clone()).ok())
+            .unwrap_or_default(),
+        _ => Default::default(),
+    };
+    Ok(Inventory { hosts, global, rdp })
 }
 
 /// Look up a key ignoring case, `_` and `-` (`IdentityFile` = `identity_file`).
@@ -962,6 +1047,7 @@ mod tests {
         let only = Inventory {
             hosts: vec![HostEntry::new("db")],
             global: String::new(),
+            ..Default::default()
         };
         let r = s.import(&only, ImportMode::Replace).unwrap();
         assert_eq!(r.removed, 2);
@@ -1106,7 +1192,8 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 3, "v1 -> v2 -> v3");
+        assert_eq!(v, 4, "v1 -> v2 -> v3 -> v4");
+        assert!(s.rdp_all().unwrap().is_empty(), "rdp_settings exists");
         assert_eq!(s.db_profile("x").unwrap(), None, "db_connections exists");
         drop(s);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1169,6 +1256,7 @@ mod tests {
         let inv = Inventory {
             hosts: vec![HostEntry::new("echo01"), bravo, HostEntry::new("foxtrot")],
             global: String::new(),
+            ..Default::default()
         };
         s.import(&inv, ImportMode::Merge).unwrap();
         assert_eq!(
@@ -1254,5 +1342,80 @@ mod tests {
             "no name or address"
         );
         assert!(parse_import("[1, 2]").is_err());
+    }
+
+    #[test]
+    fn rdp_settings_follow_their_host_and_travel_in_json() {
+        use crate::rdp::{RdpSettings, Screen};
+        let s = mem();
+        let mut w = HostEntry::new("win1");
+        w.hostname = "198.51.100.7".into();
+        w.access = Access::Rdp;
+        w.port = 3389;
+        let id = s.save_host(&w).unwrap();
+        let r = RdpSettings {
+            user: "ops".into(),
+            screen: Screen::Window {
+                width: 1600,
+                height: 900,
+            },
+            ..Default::default()
+        };
+        s.set_rdp("win1", Some(&r)).unwrap();
+        assert_eq!(s.rdp_all().unwrap().get("win1"), Some(&r));
+        assert!(
+            s.set_rdp(
+                "win1",
+                Some(&RdpSettings {
+                    color_depth: 9,
+                    ..Default::default()
+                })
+            )
+            .is_err(),
+            "validated"
+        );
+        // Rename: the settings follow.
+        w.id = Some(id);
+        w.alias = "win2".into();
+        s.save_host(&w).unwrap();
+        assert_eq!(s.rdp_all().unwrap().get("win2"), Some(&r));
+        // JSON export / import keeps them.
+        let json = export_json(&s.inventory().unwrap()).unwrap();
+        assert!(json.contains("\"rdp\""), "{json}");
+        let back = parse_import(&json).unwrap();
+        assert_eq!(back.rdp.get("win2"), Some(&r));
+        let mut other = mem();
+        other.import(&back, ImportMode::Merge).unwrap();
+        assert_eq!(other.rdp_all().unwrap().get("win2"), Some(&r));
+        // Delete: they go with the host.
+        s.delete_host(id).unwrap();
+        assert!(s.rdp_all().unwrap().is_empty());
+        // Forget.
+        other.set_rdp("win2", None).unwrap();
+        assert!(other.rdp_all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_v3_database_gets_the_rdp_table() {
+        let path = std::env::temp_dir().join(format!("telepad-v3-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let s = Store::open(&path).unwrap();
+            s.save_host(&HostEntry::new("a")).unwrap();
+            s.conn
+                .execute_batch("DROP TABLE rdp_settings; PRAGMA user_version = 3;")
+                .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        let v: i32 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        s.set_rdp("a", Some(&crate::rdp::RdpSettings::default()))
+            .unwrap();
+        assert_eq!(s.hosts().unwrap().len(), 1);
+        drop(s);
+        let _ = std::fs::remove_file(&path);
     }
 }

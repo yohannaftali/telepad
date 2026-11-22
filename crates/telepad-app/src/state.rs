@@ -76,6 +76,8 @@ pub struct Model {
     pub quit: bool,
     /// Key pairs on this computer (#101, My keys tab).
     pub my_keys: crate::mykeys::MyKeys,
+    /// Saved Remote Desktop settings by alias (#102).
+    pub rdp: std::collections::BTreeMap<String, telepad_core::rdp::RdpSettings>,
 }
 
 /// A key added to / revoked from several hosts.
@@ -446,6 +448,17 @@ pub struct Editor {
     pub cloned_from: Option<String>,
     /// Private keys found in ~/.ssh, offered next to the IdentityFile field.
     pub key_choices: Vec<String>,
+    /// Remote Desktop section (#102): on = settings are saved for the host.
+    pub rdp_on: bool,
+    pub rdp: telepad_core::rdp::RdpSettings,
+    /// Text fields bound to numbers (port, window width / height).
+    pub rdp_port: String,
+    pub rdp_width: String,
+    pub rdp_height: String,
+    /// What is saved now (to know whether Save changes it).
+    pub rdp_saved: Option<telepad_core::rdp::RdpSettings>,
+    /// Settings to write once the host itself is saved.
+    pub rdp_pending: Option<Option<telepad_core::rdp::RdpSettings>>,
 }
 
 impl Editor {
@@ -461,7 +474,62 @@ impl Editor {
             error: None,
             confirm_delete: false,
             key_choices: Vec::new(),
+            rdp_on: false,
+            rdp: Default::default(),
+            rdp_port: String::new(),
+            rdp_width: "1600".into(),
+            rdp_height: "900".into(),
+            rdp_saved: None,
+            rdp_pending: None,
         }
+    }
+
+    /// Fill the Remote Desktop section from saved settings (#102).
+    pub fn set_rdp(&mut self, saved: Option<&telepad_core::rdp::RdpSettings>) {
+        self.rdp_saved = saved.cloned();
+        self.rdp_on = saved.is_some();
+        let r = saved.cloned().unwrap_or_default();
+        self.rdp_port = if r.port == 0 {
+            String::new()
+        } else {
+            r.port.to_string()
+        };
+        if let telepad_core::rdp::Screen::Window { width, height } = r.screen {
+            self.rdp_width = width.to_string();
+            self.rdp_height = height.to_string();
+        }
+        self.rdp = r;
+    }
+
+    /// The Remote Desktop settings the form says (`None` = none saved).
+    pub fn build_rdp(&self) -> Result<Option<telepad_core::rdp::RdpSettings>, String> {
+        if !self.rdp_on {
+            return Ok(None);
+        }
+        let mut r = self.rdp.clone();
+        r.address = r.address.trim().to_string();
+        r.user = r.user.trim().to_string();
+        r.domain = r.domain.trim().to_string();
+        r.gateway = r.gateway.trim().to_string();
+        r.port = match self.rdp_port.trim() {
+            "" => 0,
+            p => p
+                .parse()
+                .map_err(|_| "Remote Desktop port must be 1-65535 (or empty)".to_string())?,
+        };
+        if let telepad_core::rdp::Screen::Window { .. } = r.screen {
+            let n = |s: &str| {
+                s.trim()
+                    .parse::<u16>()
+                    .map_err(|_| "Window size must be numbers".to_string())
+            };
+            r.screen = telepad_core::rdp::Screen::Window {
+                width: n(&self.rdp_width)?,
+                height: n(&self.rdp_height)?,
+            };
+        }
+        r.validate()?;
+        Ok(Some(r))
     }
 
     /// New host with the connection settings (User, Port, IdentityFile) of `src`.
