@@ -30,14 +30,20 @@ pub fn cards(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mut V
             for chunk in rows.chunks(per_row) {
                 ui.horizontal(|ui| {
                     for &i in chunk {
-                        card(ui, i, &m.hosts[i], out);
+                        card(
+                            ui,
+                            i,
+                            &m.hosts[i],
+                            m.rdp.contains_key(&m.hosts[i].entry.alias),
+                            out,
+                        );
                     }
                 });
             }
         });
 }
 
-fn card(ui: &mut egui::Ui, i: usize, h: &HostState, out: &mut Vec<Msg>) {
+fn card(ui: &mut egui::Ui, i: usize, h: &HostState, has_rdp: bool, out: &mut Vec<Msg>) {
     // Text must not take the right-click meant for the card's menu (#83).
     ui.style_mut().interaction.selectable_labels = false;
     let card = egui::Frame::group(ui.style())
@@ -130,5 +136,5 @@ fn card(ui: &mut egui::Ui, i: usize, h: &HostState, out: &mut Vec<Msg>) {
     // SSH, Files, databases, edit… on right-click (#83).
     card.response
         .interact(egui::Sense::click())
-        .context_menu(|ui| host_menu(ui, h, i, out));
+        .context_menu(|ui| host_menu(ui, h, i, has_rdp, out));
 }

@@ -117,6 +117,7 @@ pub fn editor_window(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
                     );
                     ui.end_row();
                 });
+            rdp_section(ui, ed, out);
             if let Some(e) = &ed.error {
                 ui.colored_label(usage_color(95.0), e);
             }
@@ -149,4 +150,194 @@ pub fn editor_window(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
     if !open {
         out.push(Msg::EditorClose);
     }
+}
+
+/// Saved Remote Desktop settings (#102): open for RDP-only hosts, optional
+/// for SSH hosts. No password field: mstsc asks for it (and can remember it).
+fn rdp_section(ui: &mut egui::Ui, ed: &mut telepad_app::Editor, out: &mut Vec<Msg>) {
+    use telepad_core::rdp::{Audio, AuthLevel, GatewayUse, Screen};
+    egui::CollapsingHeader::new(il(icons::MONITOR, "Remote Desktop settings"))
+        .id_salt("host-editor-rdp")
+        .default_open(ed.access == Access::Rdp || ed.rdp_on)
+        .show(ui, |ui| {
+            ui.checkbox(
+                &mut ed.rdp_on,
+                "Save Remote Desktop settings for this host (used by Open RDP)",
+            );
+            ui.horizontal(|ui| {
+                if ui
+                    .button(il(icons::IMPORT, "Import .rdp…"))
+                    .on_hover_text("Fill these settings from a .rdp file saved by Remote Desktop Connection (a saved password in it is ignored)")
+                    .clicked()
+                {
+                    out.push(Msg::EditorRdpImport);
+                }
+                if ui
+                    .add_enabled(ed.rdp_on, egui::Button::new(il(icons::EXPORT, "Export .rdp…")))
+                    .on_hover_text("Save these settings as a .rdp file")
+                    .clicked()
+                {
+                    out.push(Msg::EditorRdpExport);
+                }
+            });
+            if !ed.rdp_on {
+                ui.label(
+                    RichText::new("Off: Open RDP connects to HostName:Port with the client's defaults.")
+                        .weak()
+                        .small(),
+                );
+                return;
+            }
+            let r = &mut ed.rdp;
+            egui::Grid::new("rdp-grid")
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Address");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut r.address)
+                                .hint_text("empty: HostName")
+                                .desired_width(200.0),
+                        );
+                        ui.label("Port");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut ed.rdp_port)
+                                .hint_text("3389")
+                                .desired_width(60.0),
+                        );
+                    });
+                    ui.end_row();
+                    ui.label("User / domain");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut r.user)
+                                .hint_text("user")
+                                .desired_width(140.0),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut r.domain)
+                                .hint_text("domain")
+                                .desired_width(110.0),
+                        );
+                    });
+                    ui.end_row();
+                    ui.label("Display");
+                    ui.horizontal(|ui| {
+                        let window = matches!(r.screen, Screen::Window { .. });
+                        if ui.radio(r.screen == Screen::FullScreen, "Full screen").clicked() {
+                            r.screen = Screen::FullScreen;
+                        }
+                        if ui.radio(window, "Window").clicked() && !window {
+                            r.screen = Screen::Window {
+                                width: 1600,
+                                height: 900,
+                            };
+                        }
+                        if ui.radio(r.screen == Screen::Fit, "Fit the window").clicked() {
+                            r.screen = Screen::Fit;
+                        }
+                    });
+                    ui.end_row();
+                    if matches!(r.screen, Screen::Window { .. }) {
+                        ui.label("Size");
+                        ui.horizontal(|ui| {
+                            ui.add(egui::TextEdit::singleline(&mut ed.rdp_width).desired_width(60.0));
+                            ui.label("×");
+                            ui.add(egui::TextEdit::singleline(&mut ed.rdp_height).desired_width(60.0));
+                        });
+                        ui.end_row();
+                    }
+                    ui.label("");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut r.multimon, "All monitors");
+                        egui::ComboBox::from_id_salt("rdp-bpp")
+                            .selected_text(format!("{} bit colour", r.color_depth))
+                            .show_ui(ui, |ui| {
+                                for b in [32u8, 24, 16, 15] {
+                                    ui.selectable_value(&mut r.color_depth, b, format!("{b} bit"));
+                                }
+                            });
+                    });
+                    ui.end_row();
+                    ui.label("Bring along");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.checkbox(&mut r.clipboard, "Clipboard");
+                        ui.checkbox(&mut r.printers, "Printers");
+                        ui.label("Drives");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut r.drives)
+                                .hint_text("none, * or C:;D:")
+                                .desired_width(90.0),
+                        );
+                    });
+                    ui.end_row();
+                    ui.label("Sound");
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut r.audio, Audio::Local, "Here");
+                        ui.radio_value(&mut r.audio, Audio::Remote, "On the remote computer");
+                        ui.radio_value(&mut r.audio, Audio::Off, "Off");
+                    });
+                    ui.end_row();
+                    ui.label("Session");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut r.admin, "Admin session (/admin)");
+                        ui.checkbox(&mut r.autodetect, "Detect the network");
+                    });
+                    ui.end_row();
+                    ui.label("RD Gateway");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut r.gateway)
+                                .hint_text("gateway host")
+                                .desired_width(160.0),
+                        );
+                        egui::ComboBox::from_id_salt("rdp-gw")
+                            .selected_text(match r.gateway_use {
+                                GatewayUse::Never => "not used",
+                                GatewayUse::Always => "always",
+                                GatewayUse::Detect => "when needed",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut r.gateway_use, GatewayUse::Never, "not used");
+                                ui.selectable_value(&mut r.gateway_use, GatewayUse::Always, "always");
+                                ui.selectable_value(&mut r.gateway_use, GatewayUse::Detect, "when needed");
+                            });
+                    });
+                    ui.end_row();
+                    ui.label("Server check");
+                    egui::ComboBox::from_id_salt("rdp-auth")
+                        .selected_text(match r.auth_level {
+                            AuthLevel::Warn => "warn me",
+                            AuthLevel::Refuse => "do not connect",
+                            AuthLevel::Connect => "connect anyway",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut r.auth_level, AuthLevel::Warn, "warn me");
+                            ui.selectable_value(&mut r.auth_level, AuthLevel::Refuse, "do not connect");
+                            ui.selectable_value(&mut r.auth_level, AuthLevel::Connect, "connect anyway");
+                        });
+                    ui.end_row();
+                });
+            if !r.extra.is_empty() {
+                egui::CollapsingHeader::new(format!(
+                    "{} more line(s) from the imported file",
+                    r.extra.len()
+                ))
+                .id_salt("rdp-extra")
+                .show(ui, |ui| {
+                    for l in &r.extra {
+                        ui.label(RichText::new(l).monospace().small());
+                    }
+                    if ui.small_button("Drop them").clicked() {
+                        r.extra.clear();
+                    }
+                });
+            }
+            ui.label(
+                RichText::new("No password is stored: Remote Desktop asks for it (Windows can remember it in its Credential Manager).")
+                    .weak()
+                    .small(),
+            );
+        });
 }

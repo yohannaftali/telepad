@@ -1144,11 +1144,12 @@ fn buttons(ui: &mut egui::Ui, busy: bool, ok: &str, danger: bool) -> Option<()> 
     clicked
 }
 
-/// When a history line was written: UTC time, or "now" for this session's
-/// lines not read back yet.
+/// When a history line was written: UTC time, or "this session" for lines
+/// not read back from history.db yet (they get their time when the window
+/// opens again).
 pub fn when(at: Option<i64>) -> String {
     at.map(|t| format!("{} UTC", telepad_core::history::format_utc(t)))
-        .unwrap_or_else(|| "just now".into())
+        .unwrap_or_else(|| "this session".into())
 }
 
 pub fn outcome_text(o: Outcome) -> (&'static str, Color32) {

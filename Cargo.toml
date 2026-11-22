@@ -26,3 +26,46 @@ sha2 = "0.11.1"
 thiserror = "2.0.21"
 ureq = "3.5.2"
 zip = { version = "9.6.1", default-features = false, features = ["deflate"] }
+
+# Key generation / conversion in tests (#101) is slow unoptimised.
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
+
+[profile.dev.package.rsa]
+opt-level = 3
+
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.dev.package.bcrypt-pbkdf]
+opt-level = 3
+
+[profile.dev.package.blowfish]
+opt-level = 3
+
+[profile.dev.package.scrypt]
+opt-level = 3
+
+[profile.dev.package.salsa20]
+opt-level = 3
+
+[profile.dev.package.pbkdf2]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.sha1]
+opt-level = 3
+
+[profile.dev.package.hmac]
+opt-level = 3
+
+[profile.dev.package.aes]
+opt-level = 3
+
+[profile.dev.package.p12-keystore]
+opt-level = 3

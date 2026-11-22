@@ -580,6 +580,7 @@ fn import_previews_applies_and_keeps_dialog_on_failure() {
     let inv = Inventory {
         hosts: vec![HostEntry::new("web01")],
         global: String::new(),
+        ..Default::default()
     };
 
     update(

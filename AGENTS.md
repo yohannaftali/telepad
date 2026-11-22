@@ -62,6 +62,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/platform.rs` | Everything OS-specific: ssh binary lookup, hidden console, open terminal / RDP / URL, ping |
 | `src/history.rs` | `history.db` (#100): transfer / file operation / SQL log `Entry` (kind, host, target, title, detail, outcome, rows, bytes, duration, method), `History::open` (trim to 90 days / 50 000 rows), `add`, `list(Scope)`, `clear`, `mask_secrets` (password literals), `format_utc`, `to_csv`, `history_path` |
 | `src/local_keys.rs` | My keys (#101): `scan` (~/.ssh + IdentityFile paths) / `inspect` → `LocalKey` (format, type, fingerprint, comment, passphrase, permission warning), `detect` / `load` (OpenSSH, PPK v2 / v3 incl. Argon2id / AES, PKCS#1, SEC1, PKCS#8 plain / encrypted, DER, PKCS#12, JWK), `convert(Target)` incl. public-only, `unsupported` per key type, `generate` (ssh-keygen into a private folder, `protect` with the passphrase, move into place, never overwrite), `convert_file`; own RSA conversion (`to_rsa`: ssh-key 0.6.7's passes `p` twice); live checks `TELEPAD_TEST_KEYGEN`, `TELEPAD_TEST_PPK_DIR` / `TELEPAD_TEST_PUTTYGEN` |
+| `src/rdp.rs` | Remote Desktop settings (#102): `RdpSettings` (address, port, user / domain, `Screen`, multimon, colours, clipboard / drives / printers, `Audio`, admin, gateway, `AuthLevel`, autodetect, extra lines), `validate`, `render` (.rdp text) / `parse` (drops `password 51:b:`), `decode_file` / `encode_file` (UTF-16 LE BOM), `xfreerdp_args` |
 | `src/prefs.rs` | `preference.db` (#94): named workspaces (`WorkspacePrefs`: `<own>` layout, custom (label, layout), `Current`), `check_label`, `prefs_path`, one-time `import_legacy` of `ui_workspace`, `PRAGMA user_version` |
 
 ### telepad-app (Model–View–Update)
@@ -198,6 +199,7 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
 | File window folders | `settings` table `files_paths:<alias>` (`local
 remote`, last folders per host) |
 | Host Management file | `settings` table `hostsync_config_path` (default `~/.ssh/config`); writes keep a `config.telepad-*.bak` next to it |
+| Remote Desktop settings (#102) | `rdp_settings` table (alias → JSON, `ON UPDATE / DELETE CASCADE` with `hosts`), schema 4; in JSON export / import as `rdp`; Open RDP: `platform::open_rdp_with` (temporary owner-only `.rdp` → mstsc / `open`; Linux `xfreerdp` args); never a password |
 | Database connections | `db_connections` table (user, database, save-password and read-only flags per `DbTarget::key`); passwords in the OS password store (service "Telepad database") |
 | Update source | `settings` table `update_enabled` / `update_repo` / `update_auto_install` (☰ ▸ Software update…); check via the github.com `releases/latest` redirect (API only as fallback: 60 req/h per IP); default `yohannaftali/telepad` |
 

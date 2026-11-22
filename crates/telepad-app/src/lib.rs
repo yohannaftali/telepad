@@ -54,4 +54,6 @@ mod tests_leave;
 #[cfg(test)]
 mod tests_mykeys;
 #[cfg(test)]
+mod tests_rdp;
+#[cfg(test)]
 mod tests_workspace;

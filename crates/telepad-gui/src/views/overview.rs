@@ -127,7 +127,9 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
                             out.push(Msg::Select(Some(i)));
                         }
                         // SSH, Files, databases, edit… on right-click (#83).
-                        resp.context_menu(|ui| host_menu(ui, &m.hosts[i], i, out));
+                        resp.context_menu(|ui| {
+                            host_menu(ui, &m.hosts[i], i, m.rdp.contains_key(&m.hosts[i].entry.alias), out)
+                        });
                         if reorder {
                             drop_target(&row.response(), i, accent, out);
                         }

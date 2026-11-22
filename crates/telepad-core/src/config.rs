@@ -137,6 +137,10 @@ pub struct Inventory {
     pub hosts: Vec<HostEntry>,
     /// Raw OpenSSH text appended after the host blocks.
     pub global: String,
+    /// Saved Remote Desktop settings by alias (#102; JSON only, never in
+    /// an OpenSSH config).
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub rdp: std::collections::BTreeMap<String, crate::rdp::RdpSettings>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -211,6 +215,12 @@ pub fn parse_inventory(text: &str) -> Inventory {
                         note: note.clone(),
                         unmonitored,
                         access: if rdp { Access::Rdp } else { Access::Ssh },
+                        // A `Port` line below overrides it.
+                        port: if rdp {
+                            Access::Rdp.default_port()
+                        } else {
+                            Access::Ssh.default_port()
+                        },
                         ..HostEntry::new(a)
                     })
                     .collect();
@@ -437,5 +447,24 @@ Host a
         };
         assert!(!inv.hosts.is_empty());
         assert_eq!(parse_inventory(&to_ssh_config(&inv)), inv);
+    }
+
+    #[test]
+    fn rdp_only_hosts_default_to_the_rdp_port() {
+        let inv = parse_inventory(
+            "# telepad: rdp only
+Host desk
+  HostName 198.51.100.20
+
+# telepad: rdp only
+Host desk2
+  Port 3390
+
+Host web
+",
+        );
+        assert_eq!(inv.hosts[0].port, 3389);
+        assert_eq!(inv.hosts[1].port, 3390, "a Port line wins");
+        assert_eq!(inv.hosts[2].port, 22);
     }
 }

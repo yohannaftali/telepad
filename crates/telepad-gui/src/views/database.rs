@@ -231,7 +231,7 @@ fn browser(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>
     });
     egui::Panel::bottom(("db-log", id))
         .resizable(true)
-        .default_size(130.0)
+        .default_size(180.0)
         .min_size(28.0)
         .show(ui, |ui| sql_log(ui, s, d, out));
     egui::Panel::left(("db-tree", id))

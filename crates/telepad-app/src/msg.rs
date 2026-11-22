@@ -44,6 +44,17 @@ pub enum Msg {
     /// SSH terminal, or Remote Desktop for RDP-only hosts.
     Ssh(usize),
     CopySsh(usize),
+    /// Remote Desktop with the host's saved settings (#102), also for an
+    /// SSH host that has some.
+    OpenRdp(usize),
+    /// Saved Remote Desktop settings (with the hosts).
+    RdpLoaded(Result<std::collections::BTreeMap<String, telepad_core::rdp::RdpSettings>, String>),
+    /// Host editor: fill the Remote Desktop section from a `.rdp` file.
+    EditorRdpImport,
+    RdpPicked(Result<telepad_core::rdp::RdpSettings, String>),
+    /// Host editor: save the section as a `.rdp` file.
+    EditorRdpExport,
+    RdpSaved(Result<(), String>),
     BmcSetup(usize),
     /// Container action in a terminal (host index, container id).
     DockerAction {
@@ -231,6 +242,18 @@ pub enum Effect {
     Collect(Vec<collector::Job>),
     /// → [`Msg::HostSaved`]
     SaveHost(HostEntry),
+    /// Save / forget a host's Remote Desktop settings → [`Msg::RdpSaved`].
+    SaveRdp {
+        alias: String,
+        settings: Option<telepad_core::rdp::RdpSettings>,
+    },
+    /// Open a `.rdp` file → [`Msg::RdpPicked`].
+    PickRdpFile,
+    /// Save a `.rdp` file (UTF-16 as mstsc writes it).
+    ExportRdp {
+        alias: String,
+        text: String,
+    },
     /// → [`Msg::HostDeleted`]
     DeleteHost {
         id: i64,

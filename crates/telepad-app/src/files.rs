@@ -1786,7 +1786,11 @@ fn transfer_entry(t: &Transfer, mode: Mode, now: Instant) -> LogEntry {
     detail.push(format!("→ {}", t.dest));
     LogEntry {
         kind: LogKind::Transfer,
-        title: format!("{dir} {}", t.title),
+        title: if t.title.starts_with(dir) {
+            t.title.clone()
+        } else {
+            format!("{dir} {}", t.title)
+        },
         detail: detail.join("\n"),
         outcome,
         error,

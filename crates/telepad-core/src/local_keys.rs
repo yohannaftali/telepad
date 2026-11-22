@@ -1902,8 +1902,18 @@ mod tests {
         assert!(k.has_pub_file);
         let bytes = std::fs::read(&path).unwrap();
         assert!(load(&bytes, &path, Some("pw")).is_ok());
-        assert!(generate(GenType::Ed25519, &path, "x", "").is_err(), "never overwrites");
-        assert!(!dir.read_dir().unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with(".telepad-keygen")), "work folder removed");
+        assert!(
+            generate(GenType::Ed25519, &path, "x", "").is_err(),
+            "never overwrites"
+        );
+        assert!(
+            !dir.read_dir().unwrap().any(|e| e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".telepad-keygen")),
+            "work folder removed"
+        );
         let rsa = dir.join("id_rsa");
         generate(GenType::Rsa(3072), &rsa, "r", "").unwrap();
         assert_eq!(inspect(&rsa).kind, "RSA 3072");
@@ -1927,7 +1937,8 @@ mod tests {
                         for (pw, pass) in [("plain", None), ("pw", Some("pw"))] {
                             let p = out.join(format!("back-k{i}-v{v}-{pw}.ppk"));
                             let text = std::fs::read_to_string(&p).unwrap();
-                            let k = ppk_read(&text, pass).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+                            let k = ppk_read(&text, pass)
+                                .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
                             assert_eq!(fp(&k), want, "{}", p.display());
                         }
                     }
@@ -1937,12 +1948,22 @@ mod tests {
             let mut list = String::new();
             for (i, key) in keys().into_iter().enumerate() {
                 for (v, pass) in [(2, ""), (3, ""), (2, "pw"), (3, "pw")] {
-                    let name = format!("k{i}-v{v}-{}.ppk", if pass.is_empty() { "plain" } else { "pw" });
+                    let name = format!(
+                        "k{i}-v{v}-{}.ppk",
+                        if pass.is_empty() { "plain" } else { "pw" }
+                    );
                     std::fs::write(out.join(&name), ppk_write(&key, v, pass).unwrap()).unwrap();
-                    list.push_str(&format!("{name} {pass} {}
-", fp(&key)));
+                    list.push_str(&format!(
+                        "{name} {pass} {}
+",
+                        fp(&key)
+                    ));
                 }
-                std::fs::write(out.join(format!("k{i}.openssh")), &*convert(&key, Target::OpenSsh, "").unwrap()).unwrap();
+                std::fs::write(
+                    out.join(format!("k{i}.openssh")),
+                    &*convert(&key, Target::OpenSsh, "").unwrap(),
+                )
+                .unwrap();
             }
             std::fs::write(out.join("list.txt"), list).unwrap();
             return;

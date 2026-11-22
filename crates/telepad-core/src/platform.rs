@@ -414,6 +414,95 @@ fn open_rdp_impl(target: &str) -> std::io::Result<()> {
     Err(last)
 }
 
+/// Open Remote Desktop with saved settings (#102): Windows / macOS get a
+/// temporary `.rdp` file (owner-only, removed after the client read it);
+/// Linux gets `xfreerdp` arguments (Remmina the file). Returns what the
+/// client could not take, for a note.
+pub fn open_rdp_with(
+    settings: &crate::rdp::RdpSettings,
+    host: &str,
+    port: u16,
+    alias: &str,
+) -> Result<Vec<&'static str>, String> {
+    settings.validate()?;
+    let target_host = if settings.address.is_empty() {
+        host
+    } else {
+        settings.address.as_str()
+    };
+    if !target_host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || ".-_:[]".contains(c))
+        || target_host.is_empty()
+    {
+        return Err(format!("invalid RDP host '{target_host}'"));
+    }
+    let safe: String = alias
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let write_file = || -> Result<PathBuf, String> {
+        let dir = std::env::temp_dir().join("telepad-rdp");
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        restrict_dir_to_owner(&dir)?;
+        let file = dir.join(format!("{safe}-{}.rdp", std::process::id()));
+        std::fs::write(&file, crate::rdp::encode_file(&settings.render(host, port)))
+            .map_err(|e| format!("cannot write {}: {e}", file.display()))?;
+        restrict_to_owner(&file)?;
+        Ok(file)
+    };
+    // The client reads the file when it starts; remove it a little later.
+    let remove_later = |file: PathBuf| {
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            let _ = std::fs::remove_file(file);
+        });
+    };
+    #[cfg(target_os = "windows")]
+    {
+        let file = write_file()?;
+        Command::new("mstsc.exe")
+            .arg(&file)
+            .spawn()
+            .map_err(|e| format!("cannot start Remote Desktop: {e}"))?;
+        remove_later(file);
+        Ok(Vec::new())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let file = write_file()?;
+        Command::new("open")
+            .arg(&file)
+            .spawn()
+            .map_err(|e| format!("cannot open Windows App / Microsoft Remote Desktop: {e}"))?;
+        remove_later(file);
+        Ok(Vec::new())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let (args, not) = settings.xfreerdp_args(host, port);
+        for prog in ["xfreerdp3", "xfreerdp"] {
+            if Command::new(prog).args(&args).spawn().is_ok() {
+                return Ok(not);
+            }
+        }
+        let file = write_file()?;
+        Command::new("remmina")
+            .arg(&file)
+            .spawn()
+            .map_err(|e| format!("no RDP client found (xfreerdp, Remmina): {e}"))?;
+        remove_later(file);
+        Ok(Vec::new())
+    }
+}
+
 /// Open an interactive ssh session in a new terminal window.
 pub fn open_terminal(program: &std::path::Path, args: &[String]) -> Result<(), String> {
     open_terminal_impl(program, args).map_err(|e| format!("cannot open terminal: {e}"))
