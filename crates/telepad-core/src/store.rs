@@ -27,6 +27,7 @@ pub enum StoreError {
 pub struct Store {
     conn: Connection,
     path: PathBuf,
+    permission_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +143,7 @@ struct JsonFile {
 impl Store {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
+        let permission_warning = crate::platform::restrict_db_files(path).err();
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA foreign_keys = ON;
@@ -209,7 +211,13 @@ PRAGMA user_version = {SCHEMA_VERSION};"
         Ok(Self {
             conn,
             path: path.to_path_buf(),
+            permission_warning,
         })
+    }
+
+    /// Why the database file stays readable by others (#110), if it does.
+    pub fn permission_warning(&self) -> Option<&str> {
+        self.permission_warning.as_deref()
     }
 
     /// Saved database connection for a [`crate::db::DbTarget::key`].

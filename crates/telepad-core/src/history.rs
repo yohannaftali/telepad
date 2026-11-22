@@ -120,6 +120,7 @@ pub fn history_path(db: &Path, cli: Option<&str>) -> PathBuf {
 
 pub struct History {
     conn: Connection,
+    permission_warning: Option<String>,
 }
 
 impl History {
@@ -131,6 +132,7 @@ impl History {
             std::fs::create_dir_all(dir)?;
         }
         let conn = Connection::open(path)?;
+        let permission_warning = crate::platform::restrict_db_files(path).err();
         let v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if v > HISTORY_VERSION {
             return Err(StoreError::Invalid(format!(
@@ -161,9 +163,17 @@ impl History {
              CREATE INDEX IF NOT EXISTS entries_target ON entries(target);",
         )?;
         conn.pragma_update(None, "user_version", HISTORY_VERSION)?;
-        let h = History { conn };
+        let h = History {
+            conn,
+            permission_warning,
+        };
         h.trim(now)?;
         Ok(h)
+    }
+
+    /// Why the file stays readable by others (#110), if it does.
+    pub fn permission_warning(&self) -> Option<&str> {
+        self.permission_warning.as_deref()
     }
 
     /// Drop entries older than [`KEEP_DAYS`] and beyond [`KEEP_ROWS`].
@@ -448,6 +458,25 @@ mod tests {
         h.clear(&Scope::Files("web1".into())).unwrap();
         assert!(h.list(&Scope::Files("web1".into()), 10).unwrap().is_empty());
         assert_eq!(h.list(&Scope::Files("web2".into()), 10).unwrap().len(), 1);
+        drop(h);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_file_is_readable_by_its_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = temp("mode");
+        let h = History::open(&p, 1).unwrap();
+        h.add(&transfer("web1", "x"), 1).unwrap();
+        for suffix in ["", "-wal", "-shm"] {
+            let mut f = p.as_os_str().to_os_string();
+            f.push(suffix);
+            if let Ok(m) = std::fs::metadata(&f) {
+                assert_eq!(m.permissions().mode() & 0o777, 0o600, "{suffix}");
+            }
+        }
+        assert!(h.permission_warning().is_none());
         drop(h);
         let _ = std::fs::remove_file(&p);
     }

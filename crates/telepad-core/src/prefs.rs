@@ -115,6 +115,7 @@ pub fn prefs_path(db: &Path, cli: Option<&str>) -> PathBuf {
 pub struct Prefs {
     conn: Connection,
     path: PathBuf,
+    permission_warning: Option<String>,
 }
 
 impl Prefs {
@@ -154,7 +155,13 @@ impl Prefs {
         Ok(Self {
             conn,
             path: path.to_path_buf(),
+            permission_warning: crate::platform::restrict_db_files(path).err(),
         })
+    }
+
+    /// Why the file stays readable by others (#110), if it does.
+    pub fn permission_warning(&self) -> Option<&str> {
+        self.permission_warning.as_deref()
     }
 
     pub fn path(&self) -> &Path {
