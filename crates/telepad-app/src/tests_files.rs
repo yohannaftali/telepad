@@ -26,10 +26,12 @@ fn state() -> State {
     s
 }
 
+/// Effects of one message, without the history's (tested in `tests_history`).
 fn send(s: &mut State, m: FmMsg) -> Vec<FmEffect> {
     update(s, Msg::Files(m), Instant::now())
         .into_iter()
         .filter_map(|e| match e {
+            Effect::Files(FmEffect::Log(_) | FmEffect::LoadHistory { .. }) => None,
             Effect::Files(f) => Some(f),
             _ => None,
         })

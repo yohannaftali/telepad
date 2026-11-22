@@ -13,6 +13,8 @@ use telepad_core::files::ops::{Measure, Report, check_name};
 use telepad_core::files::transfer::{Decision, Direction, Event, Item, Source};
 use telepad_core::files::{Entry, Kind, local_join, local_parent, sftp};
 
+use telepad_core::history::{Entry as LogEntry, Kind as LogKind, Outcome};
+
 use crate::editor::{EdDraft, EdMsg, FileEditor, Load, TabId, Unsaved, has_unsaved};
 
 pub type FmId = u64;
@@ -271,6 +273,9 @@ pub struct FileSession {
     pub open_paths: Vec<(Side, String)>,
     /// One-line note shown in the window (e.g. a folder that is gone).
     pub notice: Option<String>,
+    /// History of this host's transfers and file operations (#100),
+    /// oldest first.
+    pub history: Vec<telepad_core::history::Entry>,
     next_transfer: u64,
 }
 
@@ -343,6 +348,13 @@ pub struct FileDraft {
     pub recursive: bool,
     /// The editor's texts and find bar.
     pub editor: EdDraft,
+    /// The History tab of the transfer panel is shown (#100), its filters
+    /// and whether Clear waits for its confirmation.
+    pub show_history: bool,
+    pub history_filter: String,
+    pub history_dir: Option<Direction>,
+    pub history_failed: bool,
+    pub history_clear: bool,
 }
 
 impl FileDraft {
@@ -505,6 +517,19 @@ pub enum FmMsg {
         side: Side,
     },
     DismissErrors(FmId),
+    HistoryLoaded {
+        id: FmId,
+        result: Result<Vec<telepad_core::history::Entry>, String>,
+    },
+    /// Clear this host's history (asked first in the window).
+    HistoryClear(FmId),
+    /// Export the shown (filtered) history.
+    HistoryExport(FmId),
+    /// Open the local folder of a history line.
+    HistoryOpenFolder {
+        id: FmId,
+        path: String,
+    },
     /// The editor window (#64).
     Editor {
         id: FmId,
@@ -577,6 +602,20 @@ pub enum FmEffect {
         op: FileOp,
     },
     CopyText(String),
+    /// Write one history entry to `history.db` (#100).
+    Log(telepad_core::history::Entry),
+    /// This host's history → [`FmMsg::HistoryLoaded`].
+    LoadHistory {
+        id: FmId,
+        alias: String,
+    },
+    ClearHistory {
+        alias: String,
+    },
+    /// Save entries as CSV (native save dialog).
+    ExportHistory(Vec<telepad_core::history::Entry>),
+    /// Show a local folder in the system's file manager.
+    OpenFolder(String),
     /// Read and decode a file for the editor → [`EdMsg::Loaded`].
     Load {
         id: FmId,
@@ -785,6 +824,10 @@ pub fn update(
             ..Default::default()
         });
         drafts.insert(id, FileDraft::default());
+        fx.push(FmEffect::LoadHistory {
+            id,
+            alias: host.alias.clone(),
+        });
         fx.push(FmEffect::Connect { id, host });
         return fx;
     }
@@ -825,6 +868,10 @@ pub fn update(
             ..Default::default()
         });
         drafts.insert(id, FileDraft::default());
+        fx.push(FmEffect::LoadHistory {
+            id,
+            alias: host.alias.clone(),
+        });
         fx.push(FmEffect::Connect { id, host });
         return fx;
     }
@@ -844,6 +891,10 @@ pub fn update(
             ..Default::default()
         });
         drafts.insert(id, FileDraft::default());
+        fx.push(FmEffect::LoadHistory {
+            id,
+            alias: host.alias.clone(),
+        });
         fx.push(FmEffect::Connect { id, host });
         return fx;
     }
@@ -852,6 +903,23 @@ pub fn update(
         return fx;
     };
     if let FmMsg::Editor { msg, .. } = msg {
+        if let EdMsg::Saved { tab, result } = &msg
+            && let Some(t) = sessions[pos].editor.tab(*tab)
+        {
+            let (outcome, error) = match result {
+                Ok(_) => (Outcome::Done, String::new()),
+                Err(e) => (Outcome::Failed, format!("{e:?}")),
+            };
+            let e = file_entry(
+                &sessions[pos],
+                LogKind::FileOp,
+                format!("Save {}", side_label(t.side, &t.path)),
+                t.path.clone(),
+                outcome,
+                error,
+            );
+            log(&mut sessions[pos], &mut fx, e);
+        }
         let d = drafts.entry(id).or_default();
         if crate::editor::update(&mut sessions[pos], d, msg, &mut fx) {
             close_session(sessions, drafts, pos, &mut fx);
@@ -1176,6 +1244,8 @@ pub fn update(
             transfer, result, ..
         } => {
             let mut refresh = None;
+            let mut entry = None;
+            let mode = s.mode;
             if let Some(t) = s.transfer_mut(transfer) {
                 t.current.clear();
                 t.state = match result {
@@ -1191,6 +1261,14 @@ pub fn update(
                     Direction::Upload => Side::Remote,
                     Direction::Download => Side::Local,
                 });
+                entry = Some(transfer_entry(t, mode, now));
+            }
+            if let Some(e) = entry {
+                let e = LogEntry {
+                    host: s.host.alias.clone(),
+                    ..e
+                };
+                log(s, &mut fx, e);
             }
             if let Some(side) = refresh {
                 let p = s.pane(side).path.clone();
@@ -1247,6 +1325,25 @@ pub fn update(
         }
         FmMsg::OpDone { side, result, .. } => {
             let path = s.pane(side).path.clone();
+            if let Some(dl) = s.dialog.as_ref().filter(|dl| dl.side == side) {
+                let (title, detail) = op_text(dl, &d.name, d.mode);
+                let (outcome, error) = match &result {
+                    Ok((r, _)) if r.errors.is_empty() => (Outcome::Done, String::new()),
+                    Ok((r, _)) => (Outcome::Failed, r.errors.join("\n")),
+                    Err(e) => (Outcome::Failed, e.clone()),
+                };
+                if !matches!(dl.kind, DialogKind::Properties { .. }) {
+                    let e = file_entry(
+                        s,
+                        LogKind::FileOp,
+                        side_label(side, &title),
+                        detail,
+                        outcome,
+                        error,
+                    );
+                    log(s, &mut fx, e);
+                }
+            }
             match result {
                 Ok((report, select)) => {
                     s.dialog = None;
@@ -1287,6 +1384,26 @@ pub fn update(
             s.op_errors.clear();
             s.notice = None;
         }
+        FmMsg::HistoryLoaded { result, .. } => match result {
+            Ok(mut v) => {
+                v.extend(s.history.drain(..).filter(|e| e.at.is_none()));
+                s.history = v;
+            }
+            Err(e) => s.notice = Some(format!("History not available: {e}")),
+        },
+        FmMsg::HistoryClear(_) => {
+            d.history_clear = false;
+            s.history.clear();
+            fx.push(FmEffect::ClearHistory {
+                alias: s.host.alias.clone(),
+            });
+        }
+        FmMsg::HistoryExport(_) => {
+            fx.push(FmEffect::ExportHistory(
+                history_shown(s, d).into_iter().cloned().collect(),
+            ));
+        }
+        FmMsg::HistoryOpenFolder { path, .. } => fx.push(FmEffect::OpenFolder(path)),
         FmMsg::RsyncRun { transfer, .. } => {
             if let Some(t) = s.transfer_mut(transfer)
                 && matches!(t.state, TState::Previewed(_))
@@ -1531,7 +1648,8 @@ fn msg_id(m: &FmMsg) -> FmId {
     use FmMsg::*;
     match m {
         Open(_) | Restore { .. } | OpenFile { .. } => 0,
-        Discard(id) | Background(id) => *id,
+        Discard(id) | Background(id) | HistoryClear(id) | HistoryExport(id) => *id,
+        HistoryLoaded { id, .. } | HistoryOpenFolder { id, .. } => *id,
         Connected { id, .. }
         | Navigate { id, .. }
         | Enter { id, .. }
@@ -1596,4 +1714,144 @@ pub fn unsaved(s: &FileSession, d: &FileDraft) -> Vec<String> {
         ));
     }
     v
+}
+
+fn log(s: &mut FileSession, fx: &mut Vec<FmEffect>, e: LogEntry) {
+    s.history.push(e.clone());
+    fx.push(FmEffect::Log(e));
+}
+
+fn side_label(side: Side, text: &str) -> String {
+    match side {
+        Side::Local => format!("{text} (this computer)"),
+        Side::Remote => text.to_string(),
+    }
+}
+
+fn file_entry(
+    s: &FileSession,
+    kind: LogKind,
+    title: String,
+    detail: String,
+    outcome: Outcome,
+    error: String,
+) -> LogEntry {
+    LogEntry {
+        kind,
+        host: s.host.alias.clone(),
+        title,
+        detail,
+        outcome,
+        error,
+        method: match s.mode {
+            Mode::Sftp => "SFTP".into(),
+            Mode::Fallback => "sh".into(),
+        },
+        ..Default::default()
+    }
+}
+
+/// A finished transfer as a history entry (#100); `host` is set by the caller.
+fn transfer_entry(t: &Transfer, mode: Mode, now: Instant) -> LogEntry {
+    let dir = match t.direction {
+        Direction::Upload => "Upload",
+        Direction::Download => "Download",
+    };
+    let (outcome, error, files) = match &t.state {
+        TState::Done {
+            copied,
+            skipped,
+            failed,
+        } => {
+            let mut why = Vec::new();
+            if *skipped > 0 {
+                why.push(format!("{skipped} skipped (exists)"));
+            }
+            if *failed > 0 {
+                why.push(format!("{failed} failed"));
+            }
+            why.extend(t.errors.iter().cloned());
+            let outcome = if *failed > 0 {
+                Outcome::Failed
+            } else {
+                Outcome::Done
+            };
+            (outcome, why.join("\n"), Some(*copied as u64))
+        }
+        TState::Cancelled => (Outcome::Cancelled, String::new(), None),
+        TState::Failed(e) => (Outcome::Failed, e.clone(), None),
+        _ => (Outcome::Done, String::new(), None),
+    };
+    let mut detail: Vec<String> = t.sources.iter().map(|(p, _)| p.clone()).collect();
+    detail.push(format!("→ {}", t.dest));
+    LogEntry {
+        kind: LogKind::Transfer,
+        title: format!("{dir} {}", t.title),
+        detail: detail.join("\n"),
+        outcome,
+        error,
+        bytes: Some(t.bytes_done),
+        files,
+        duration_ms: t
+            .started
+            .map(|st| now.saturating_duration_since(st).as_millis() as u64),
+        method: if t.rsync {
+            "rsync".into()
+        } else {
+            match mode {
+                Mode::Sftp => "SFTP".into(),
+                Mode::Fallback => "scp -O".into(),
+            }
+        },
+        ..Default::default()
+    }
+}
+
+/// Title and detail lines of a file operation dialog, for the history.
+fn op_text(dl: &Dialog, name: &str, mode: u32) -> (String, String) {
+    let at = |n: &str| join(dl.side, &dl.dir, n);
+    let names = |items: &[Entry]| {
+        items
+            .iter()
+            .map(|e| at(&e.name))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    match &dl.kind {
+        DialogKind::NewFolder => (format!("New folder {}", name.trim()), at(name.trim())),
+        DialogKind::NewFile => (format!("New file {}", name.trim()), at(name.trim())),
+        DialogKind::Rename { from } => (
+            format!("Rename {from} → {}", name.trim()),
+            format!("{}\n→ {}", at(from), at(name.trim())),
+        ),
+        DialogKind::Delete { items, .. } => {
+            (format!("Delete {} item(s)", items.len()), names(items))
+        }
+        DialogKind::Permissions { items } => (
+            format!("Permissions {:o} on {} item(s)", mode, items.len()),
+            names(items),
+        ),
+        DialogKind::Properties { .. } => (String::new(), String::new()),
+    }
+}
+
+/// The History tab's lines (#100) after its filters, oldest first.
+pub fn history_shown<'a>(s: &'a FileSession, d: &FileDraft) -> Vec<&'a LogEntry> {
+    s.history
+        .iter()
+        .filter(|e| {
+            crate::state::matches_query(
+                &format!("{} {} {}", e.title, e.detail, e.error),
+                &d.history_filter,
+            )
+        })
+        .filter(|e| match d.history_dir {
+            None => true,
+            Some(Direction::Upload) => e.kind == LogKind::Transfer && e.title.starts_with("Upload"),
+            Some(Direction::Download) => {
+                e.kind == LogKind::Transfer && e.title.starts_with("Download")
+            }
+        })
+        .filter(|e| !d.history_failed || e.outcome != Outcome::Done)
+        .collect()
 }

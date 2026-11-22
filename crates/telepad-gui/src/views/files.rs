@@ -11,13 +11,14 @@ use egui_extras::{Column, TableBuilder};
 use telepad_app::editor::EdMsg;
 use telepad_app::files::{
     DialogKind, FileDraft, FileSession, FmMsg, Mode, OpKind, Pane, Side, SortCol, Status, TState,
-    op_blocked, other, parse_mode,
+    history_shown, op_blocked, other, parse_mode,
 };
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::db::human_size;
 use telepad_core::files::ops::Measure;
 use telepad_core::files::transfer::{Decision, Direction};
 use telepad_core::files::{Entry, Kind, perm_text, time_text};
+use telepad_core::history::{Entry as HistEntry, Kind as HistKind, Outcome};
 
 use crate::icons::{self, label as il};
 use crate::widgets::{Act, act_button, act_small, act_text, usage_color};
@@ -609,13 +610,35 @@ fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Ms
             );
         }
         ui.separator();
-        ui.label(RichText::new("Transfers").strong());
-        if s.transfers.iter().any(|t| t.state.finished())
+        if ui
+            .selectable_label(!d.show_history, RichText::new("Transfers").strong())
+            .clicked()
+        {
+            d.show_history = false;
+        }
+        if ui
+            .selectable_label(
+                d.show_history,
+                RichText::new(format!("History ({})", s.history.len())).strong(),
+            )
+            .on_hover_text(
+                "Every transfer and file operation on this host, also from earlier sessions",
+            )
+            .clicked()
+        {
+            d.show_history = true;
+        }
+        if !d.show_history
+            && s.transfers.iter().any(|t| t.state.finished())
             && ui.small_button("Clear finished").clicked()
         {
             send(out, FmMsg::ClearFinished(id));
         }
     });
+    if d.show_history {
+        history_view(ui, s, d, out);
+        return;
+    }
     egui::ScrollArea::vertical()
         .id_salt(("files-queue-scroll", id))
         .auto_shrink([false, false])
@@ -1119,4 +1142,136 @@ fn buttons(ui: &mut egui::Ui, busy: bool, ok: &str, danger: bool) -> Option<()> 
         }
     });
     clicked
+}
+
+/// When a history line was written: UTC time, or "now" for this session's
+/// lines not read back yet.
+pub fn when(at: Option<i64>) -> String {
+    at.map(|t| format!("{} UTC", telepad_core::history::format_utc(t)))
+        .unwrap_or_else(|| "just now".into())
+}
+
+pub fn outcome_text(o: Outcome) -> (&'static str, Color32) {
+    match o {
+        Outcome::Done => ("done", green()),
+        Outcome::Failed => ("failed", red()),
+        Outcome::Cancelled => ("cancelled", crate::widgets::pal().amber),
+        Outcome::RolledBack => ("rolled back", red()),
+    }
+}
+
+/// The local folder of a transfer line (download target / upload source).
+fn local_folder(e: &HistEntry) -> Option<String> {
+    if e.kind != HistKind::Transfer {
+        return None;
+    }
+    let lines: Vec<&str> = e.detail.lines().collect();
+    if e.title.starts_with("Download") {
+        lines
+            .iter()
+            .find_map(|l| l.strip_prefix("→ "))
+            .map(str::to_string)
+    } else {
+        lines.first().map(|s| s.to_string())
+    }
+}
+
+/// History tab of the transfer panel (#100).
+fn history_view(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>) {
+    let id = s.id;
+    ui.horizontal_wrapped(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(&mut d.history_filter)
+                .hint_text(format!("{} Filter", icons::SEARCH))
+                .desired_width(180.0),
+        );
+        egui::ComboBox::from_id_salt(("files-history-dir", id))
+            .selected_text(match d.history_dir {
+                None => "All",
+                Some(Direction::Upload) => "Uploads",
+                Some(Direction::Download) => "Downloads",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut d.history_dir, None, "All");
+                ui.selectable_value(&mut d.history_dir, Some(Direction::Upload), "Uploads");
+                ui.selectable_value(&mut d.history_dir, Some(Direction::Download), "Downloads");
+            });
+        ui.checkbox(&mut d.history_failed, "Not done only")
+            .on_hover_text("Failed and cancelled lines only");
+        ui.separator();
+        if ui
+            .button(il(icons::EXPORT, "Export…"))
+            .on_hover_text("The lines shown, as CSV")
+            .clicked()
+        {
+            send(out, FmMsg::HistoryExport(id));
+        }
+        if d.history_clear {
+            ui.label("Clear this host's history?");
+            if act_button(ui, true, Act::Danger, &il(icons::TRASH, "Clear")).clicked() {
+                send(out, FmMsg::HistoryClear(id));
+            }
+            if ui.button("Cancel").clicked() {
+                d.history_clear = false;
+            }
+        } else if act_button(
+            ui,
+            !s.history.is_empty(),
+            Act::Danger,
+            &il(icons::TRASH, "Clear…"),
+        )
+        .clicked()
+        {
+            d.history_clear = true;
+        }
+    });
+    let shown = history_shown(s, d);
+    egui::ScrollArea::vertical()
+        .id_salt(("files-history-scroll", id))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            if shown.is_empty() {
+                ui.label(RichText::new("Nothing here yet: transfers, new / rename / delete / permissions and editor saves are listed as they happen.").weak());
+            }
+            for e in shown.iter().rev() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(when(e.at)).weak().small().monospace());
+                    let icon = match e.kind {
+                        HistKind::Transfer if e.title.starts_with("Upload") => icons::ARROW_RIGHT,
+                        HistKind::Transfer => icons::ARROW_LEFT,
+                        _ => icons::FOLDER,
+                    };
+                    ui.label(format!("{icon} {}", e.title)).on_hover_text(&e.detail);
+                    let (text, color) = outcome_text(e.outcome);
+                    ui.colored_label(color, text);
+                    let mut info = Vec::new();
+                    if let Some(b) = e.bytes.filter(|b| *b > 0) {
+                        info.push(human_size(b));
+                    }
+                    if let Some(ms) = e.duration_ms {
+                        info.push(format!("{:.1} s", ms as f64 / 1000.0));
+                    }
+                    if !e.method.is_empty() {
+                        info.push(e.method.clone());
+                    }
+                    ui.label(RichText::new(info.join(" · ")).weak().small());
+                    if !e.error.is_empty() {
+                        ui.label(RichText::new(first_line(&e.error)).color(red()).small())
+                            .on_hover_text(&e.error);
+                    }
+                    if let Some(dir) = local_folder(e)
+                        && ui
+                            .small_button(icons::FOLDER)
+                            .on_hover_text(format!("Show {dir} in the file manager"))
+                            .clicked()
+                    {
+                        send(out, FmMsg::HistoryOpenFolder { id, path: dir });
+                    }
+                });
+            }
+        });
+}
+
+fn first_line(s: &str) -> &str {
+    s.lines().next().unwrap_or(s)
 }
