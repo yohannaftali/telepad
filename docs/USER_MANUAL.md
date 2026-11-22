@@ -463,7 +463,7 @@ time. Tick **Save Remote Desktop settings for this host**; untick it to forget t
 |---|---|
 | **Address**, **Port** | empty: HostName and 3389 (an RDP-only host's own Port) |
 | **User / domain** | the login Remote Desktop fills in (`DOMAIN\user`) |
-| **Display** | Full screen, a Window of a set size, or Fit the window (follows its size); **All monitors**; colour depth |
+| **Display** | Full screen, a Window of a set size, or **Fit the window** (the remote desktop takes the window's size); **All monitors**; **Scale to the window** (`smart sizing`: the remote desktop keeps its size, e.g. 1920 × 1080, and is shrunk or stretched to fit); colour depth |
 | **Bring along** | Clipboard, Printers, Drives (`*` = all, or letters such as `C:;D:`) |
 | **Sound** | played here, on the remote computer, or off |
 | **Session** | Admin session (`/admin`), network detection |
