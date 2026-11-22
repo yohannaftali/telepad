@@ -260,6 +260,17 @@ pub struct FileSession {
     /// A remote file (relative to the home folder) to open in the editor once
     /// connected (#85: Edit file of Authorized keys).
     pub pending_edit: Option<String>,
+    /// Left with transfers running when the workspace changed (#99): no
+    /// window, the transfers go on; shown again when its host's files are
+    /// opened, closed when the last transfer ends.
+    pub background: bool,
+    /// Folders to show once connected (from a workspace), instead of the
+    /// remembered ones.
+    pub start_paths: Option<(String, String)>,
+    /// Files to open in the editor once connected (from a workspace).
+    pub open_paths: Vec<(Side, String)>,
+    /// One-line note shown in the window (e.g. a folder that is gone).
+    pub notice: Option<String>,
     next_transfer: u64,
 }
 
@@ -278,6 +289,30 @@ impl FileSession {
     }
     pub fn transfer(&self, id: u64) -> Option<&Transfer> {
         self.transfers.iter().find(|t| t.id == id)
+    }
+
+    /// (local, remote) folders shown, or the ones it will show.
+    pub fn folders(&self) -> (String, String) {
+        if self.local.path.is_empty() && self.remote.path.is_empty() {
+            return self.start_paths.clone().unwrap_or_default();
+        }
+        (self.local.path.clone(), self.remote.path.clone())
+    }
+
+    /// Transfers that keep running without the user (planning or copying).
+    pub fn running_transfers(&self) -> usize {
+        self.transfers
+            .iter()
+            .filter(|t| matches!(t.state, TState::Planning | TState::Running))
+            .count()
+    }
+
+    /// Transfers waiting for the user (overwrite question, rsync preview).
+    pub fn waiting_transfers(&self) -> usize {
+        self.transfers
+            .iter()
+            .filter(|t| matches!(t.state, TState::Asking | TState::Previewed(_)))
+            .count()
     }
     fn transfer_mut(&mut self, id: u64) -> Option<&mut Transfer> {
         self.transfers.iter_mut().find(|t| t.id == id)
@@ -338,6 +373,17 @@ pub type Connection = (Mode, String, Option<(String, String)>);
 pub enum FmMsg {
     /// "Open files…" of a host.
     Open(String),
+    /// Reopen from a workspace (#99): these folders, these editor files.
+    Restore {
+        alias: String,
+        folders: Option<(String, String)>,
+        edit: Vec<(Side, String)>,
+    },
+    /// Close without asking (the workspace was left: unsaved text goes).
+    Discard(FmId),
+    /// Leave the window with its running transfers in the background (#99):
+    /// editor tabs, dialogs and waiting transfers are dropped.
+    Background(FmId),
     /// Open a remote file (path relative to the login's home) of a host in the
     /// editor, connecting its file window first when needed (#85).
     OpenFile {
@@ -742,8 +788,49 @@ pub fn update(
         fx.push(FmEffect::Connect { id, host });
         return fx;
     }
+    if let FmMsg::Restore {
+        alias,
+        folders,
+        edit,
+    } = msg
+    {
+        if let Some(s) = sessions.iter_mut().find(|s| s.host.alias == alias) {
+            s.background = false;
+            let id = s.id;
+            if s.status == Status::Ready {
+                let d = drafts.entry(id).or_default();
+                for (side, path) in edit {
+                    crate::editor::update(
+                        s,
+                        d,
+                        crate::editor::EdMsg::OpenPath { side, path },
+                        &mut fx,
+                    );
+                }
+            } else {
+                s.open_paths.extend(edit);
+            }
+            return fx;
+        }
+        let Some(host) = host_entry(&alias) else {
+            return fx;
+        };
+        *next_id += 1;
+        let id = *next_id;
+        sessions.push(FileSession {
+            id,
+            host: host.clone(),
+            start_paths: folders,
+            open_paths: edit,
+            ..Default::default()
+        });
+        drafts.insert(id, FileDraft::default());
+        fx.push(FmEffect::Connect { id, host });
+        return fx;
+    }
     if let FmMsg::Open(alias) = msg {
-        if sessions.iter().any(|s| s.host.alias == alias) {
+        if let Some(s) = sessions.iter_mut().find(|s| s.host.alias == alias) {
+            s.background = false;
             return fx;
         }
         let Some(host) = host_entry(&alias) else {
@@ -771,6 +858,33 @@ pub fn update(
         }
         return fx;
     }
+    if let FmMsg::Discard(_) = msg {
+        close_session(sessions, drafts, pos, &mut fx);
+        return fx;
+    }
+    if let FmMsg::Background(_) = msg {
+        let s = &mut sessions[pos];
+        if s.running_transfers() == 0 {
+            close_session(sessions, drafts, pos, &mut fx);
+            return fx;
+        }
+        for t in s.transfers.iter_mut() {
+            if matches!(t.state, TState::Asking | TState::Previewed(_)) {
+                t.state = TState::Cancelled;
+            }
+        }
+        s.ask = None;
+        s.dialog = None;
+        s.editor = Default::default();
+        s.pending_edit = None;
+        s.open_paths.clear();
+        s.background = true;
+        if let Some(d) = drafts.get_mut(&id) {
+            d.editor = Default::default();
+            d.name.clear();
+        }
+        return fx;
+    }
     if let FmMsg::Close(_) = msg {
         // Unsaved editor tabs: ask first (the window stays open).
         let d = drafts.entry(id).or_default();
@@ -785,7 +899,13 @@ pub fn update(
     let s = &mut sessions[pos];
     let d = drafts.entry(id).or_default();
     match msg {
-        FmMsg::Open(_) | FmMsg::OpenFile { .. } | FmMsg::Close(_) | FmMsg::Editor { .. } => {}
+        FmMsg::Open(_)
+        | FmMsg::Restore { .. }
+        | FmMsg::Discard(_)
+        | FmMsg::Background(_)
+        | FmMsg::OpenFile { .. }
+        | FmMsg::Close(_)
+        | FmMsg::Editor { .. } => {}
         FmMsg::Connected {
             result, local_home, ..
         } => match result {
@@ -794,9 +914,22 @@ pub fn update(
                 s.mode = mode;
                 s.error = None;
                 s.remote_home = home.clone();
-                let (l, r) = remembered.unwrap_or((local_home, home));
+                let (l, r) = s
+                    .start_paths
+                    .take()
+                    .filter(|(l, r)| !l.is_empty() && !r.is_empty())
+                    .or(remembered)
+                    .unwrap_or((local_home, home));
                 list(&mut fx, s, d, Side::Local, l);
                 list(&mut fx, s, d, Side::Remote, r);
+                for (side, path) in std::mem::take(&mut s.open_paths) {
+                    crate::editor::update(
+                        s,
+                        d,
+                        crate::editor::EdMsg::OpenPath { side, path },
+                        &mut fx,
+                    );
+                }
                 if let Some(rel) = s.pending_edit.take() {
                     let path = sftp::join(&s.remote_home, &rel);
                     crate::editor::update(
@@ -863,6 +996,23 @@ pub fn update(
                     let names: BTreeSet<String> =
                         p.entries.iter().map(|e| e.name.clone()).collect();
                     d.selected_mut(side).retain(|n| names.contains(n));
+                }
+                Err(e) if p.path.is_empty() => {
+                    // A folder saved in the workspace is gone (#99): the home
+                    // folder instead, with a note.
+                    let home = match side {
+                        Side::Local => telepad_core::files::local_home(),
+                        Side::Remote => s.remote_home.clone(),
+                    };
+                    let gone = d.path_mut(side).clone();
+                    if !home.is_empty() && home != gone {
+                        s.notice = Some(format!(
+                            "{gone} cannot be opened ({e}); showing the home folder"
+                        ));
+                        list(&mut fx, s, d, side, home);
+                    } else {
+                        s.pane_mut(side).error = Some(e);
+                    }
                 }
                 Err(e) => {
                     // Keep showing the folder that worked; the path bar goes back to it.
@@ -1133,7 +1283,10 @@ pub fn update(
                 fx.push(FmEffect::CopyText(text));
             }
         }
-        FmMsg::DismissErrors(_) => s.op_errors.clear(),
+        FmMsg::DismissErrors(_) => {
+            s.op_errors.clear();
+            s.notice = None;
+        }
         FmMsg::RsyncRun { transfer, .. } => {
             if let Some(t) = s.transfer_mut(transfer)
                 && matches!(t.state, TState::Previewed(_))
@@ -1377,7 +1530,8 @@ fn confirm(s: &mut FileSession, d: &FileDraft, fx: &mut Vec<FmEffect>) {
 fn msg_id(m: &FmMsg) -> FmId {
     use FmMsg::*;
     match m {
-        Open(_) | OpenFile { .. } => 0,
+        Open(_) | Restore { .. } | OpenFile { .. } => 0,
+        Discard(id) | Background(id) => *id,
         Connected { id, .. }
         | Navigate { id, .. }
         | Enter { id, .. }
@@ -1403,4 +1557,43 @@ fn msg_id(m: &FmMsg) -> FmId {
         Retry(id) | Close(id) | AskCancel(id) | ClearFinished(id) | Confirm(id)
         | CloseDialog(id) | DismissErrors(id) => *id,
     }
+}
+
+/// What closing this window would throw away (#99), one line each.
+pub fn unsaved(s: &FileSession, d: &FileDraft) -> Vec<String> {
+    let mut v = Vec::new();
+    let dirty: Vec<String> = s
+        .editor
+        .tabs
+        .iter()
+        .filter(|t| d.editor.dirty(t))
+        .map(|t| {
+            t.path
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(&t.path)
+                .to_string()
+        })
+        .collect();
+    if !dirty.is_empty() {
+        v.push(format!("Unsaved editor text: {}", dirty.join(", ")));
+    }
+    if let Some(dl) = &s.dialog {
+        let what = match dl.kind {
+            DialogKind::NewFolder => "New folder",
+            DialogKind::NewFile => "New file",
+            DialogKind::Rename { .. } => "Rename",
+            DialogKind::Delete { .. } => "Delete",
+            DialogKind::Properties { .. } => "Properties",
+            DialogKind::Permissions { .. } => "Permissions",
+        };
+        v.push(format!("{what} dialog, not done"));
+    }
+    let waiting = s.waiting_transfers();
+    if waiting > 0 {
+        v.push(format!(
+            "{waiting} transfer(s) waiting for your answer, cancelled"
+        ));
+    }
+    v
 }

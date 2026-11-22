@@ -72,6 +72,8 @@ pub struct Model {
     /// `ui_workspace` from `telepad.db` as loaded; kept as it is (the
     /// layouts live in `preference.db` now).
     pub ws_legacy: String,
+    /// Telepad may close now (#99: nothing to lose, or the user said Yes).
+    pub quit: bool,
 }
 
 /// A key added to / revoked from several hosts.
@@ -136,6 +138,22 @@ pub struct Drafts {
     pub ws_delete: Option<String>,
     /// Size of the workspace area as last drawn (for Tile / Stack).
     pub ws_area: [f32; 2],
+    /// The leave question (#99): what would be lost by leaving.
+    pub ws_leave: Option<LeaveAsk>,
+}
+
+/// Leaving the workspace would throw work away (#99): the list shown before
+/// Yes / Back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaveAsk {
+    /// Workspace to go to; `None`: Telepad closes.
+    pub to: Option<telepad_core::prefs::Current>,
+    /// Custom workspace deleted after leaving it.
+    pub delete: Option<String>,
+    /// (window, what is lost).
+    pub items: Vec<(String, String)>,
+    /// File transfers that keep running in the background.
+    pub background: usize,
 }
 
 /// "Add workspace" dialog: the label being typed and why it was refused.
@@ -343,6 +361,7 @@ impl Default for Drafts {
             ws_add: None,
             ws_delete: None,
             ws_area: [1200.0, 700.0],
+            ws_leave: None,
         }
     }
 }

@@ -59,9 +59,11 @@ back to the front if it is already open. Each window has a title bar:
   brings them back. Maximized windows are un-maximized first.
 - Telepad remembers the windows of the current [workspace](#workspaces) — pages (Hosts,
   Docker / Podman, Kubernetes, Docker Swarm, Authorized keys, Host Management) and the host
-  window, with place, size, tabs, minimized / maximized — and opens them again on the next
-  start. File, editor and database windows are not reopened (they need a connection, a
-  password or unsaved text). The first start shows the Hosts page, maximized.
+  window, file windows with both folders, editor windows with their files, database
+  windows with their database / schema, each with place, size, tabs, minimized /
+  maximized — and opens them again on the next start and when you switch back to the
+  workspace (see [What comes back](#what-comes-back)). The first start shows the Hosts
+  page, maximized.
 
 ### Workspaces
 
@@ -78,12 +80,61 @@ picker):
 | **Save** (foot of the list) | Saves the windows of the current workspace now. Not needed normally: every change (open, close, move, resize, tabs, minimize, maximize, Arrange) is saved automatically within a second. Not available on &lt;none&gt; |
 | **Add…** (foot of the list) | A new workspace with the windows that are open now; it becomes the current one. Its name: 1–40 characters on one line, not &lt;none&gt; / &lt;own&gt;, not used yet (case does not matter) |
 
-Picking another workspace closes the windows of the current one — file and database
-windows end their connection, as when you close them — and opens the windows of the one
-you picked. If an editor has unsaved changes, Telepad asks about them first and stays on the
-current workspace: answer the question, then pick the workspace again. The current
-workspace is remembered for the next start. The [window picker](#window-layout) lists only
-the windows of the current workspace.
+Picking another workspace closes the windows of the current one and opens the windows
+of the one you picked. The current workspace is remembered for the next start. The
+[window picker](#window-layout) lists only the windows of the current workspace.
+
+```mermaid
+flowchart LR
+    pick["Pick another workspace<br/>(or close Telepad)"] --> lost{"Unsaved, uncommitted<br/>or unapplied work?"}
+    lost -- no --> go["Windows close,<br/>the picked workspace opens"]
+    lost -- yes --> ask["One list: what will be lost<br/>Yes / Back"]
+    ask -- Back --> stay["Stay: nothing closed,<br/>nothing reset"]
+    ask -- Yes --> go
+    go --> bg["Running file transfers<br/>go on in the background"]
+```
+
+#### Before leaving: what is lost
+
+Leaving a workspace resets its windows, so half-made changes never follow you into
+another workspace where the same hosts, keys or settings may be edited again. When
+something would be lost, **one question** lists it, window by window:
+
+| Window | Listed when |
+|---|---|
+| File window / editor | editor tabs with unsaved text; an open New folder / Rename / Delete / Permissions dialog; a transfer waiting for your answer (overwrite question, rsync preview), which is cancelled |
+| Database | grid changes not posted, structure editor changes not run, a new table or rename not done, SQL waiting for **Run**, query tabs with text, a connect form with a typed password |
+| Host Management | changes not applied to either side, an open host form — the page reloads both sides when it comes back |
+| Authorized keys | a pasted key, chosen servers, an add / revoke not confirmed — the form is empty when it comes back |
+| Dialogs | the host editor, an import, changed Software update settings |
+
+**Yes** drops all of it and goes to the other workspace. **Back** (or **Escape**) stays:
+nothing is closed or reset, so you can save, post or apply first. Nothing is saved,
+posted or applied for you. With nothing to lose, Telepad switches without asking.
+Closing Telepad asks the same question; there, running file transfers are listed too,
+because they stop when Telepad closes.
+
+#### File transfers keep running
+
+Uploads and downloads are never stopped by a workspace switch. A file window with
+transfers running stays in the background: the status bar shows
+"_N_ file transfer(s) running in the background", and opening the same host's files in
+any workspace (or switching back) shows the window again with the transfers, their
+progress and results. When the last transfer ends, the background window closes and the
+status bar says so.
+
+#### What comes back
+
+| Window | Saved | When it comes back |
+|---|---|---|
+| File window | the host, both folders | connects again (SFTP, else the fallback) and lists the saved folders. A folder that is gone shows the home folder with a note |
+| Editor | its files (side and path only — never the text) | each file is read again from the computer or the host. A file that is gone or unreadable shows its error in its tab |
+| Database | the connection (host, container or port, engine) and the database / schema | waits until its host has been checked, finds the database again (a container's address may change) and connects with the saved user and the password from the system's password store. Without a saved password it opens on the connect form. A database that is gone is left out, with a note in the status bar |
+| Host window, pages | as before | as before |
+
+A host that was deleted from the inventory is left out (note in the status bar); one that
+cannot be reached opens its windows with the usual connect error and **Retry**.
+Passwords, file contents and keys are never written to `preference.db`.
 
 Workspaces are kept in **`preference.db`** next to `telepad.db` (another file with
 `--prefs <path>` or `TELEPAD_PREFS`), apart from the host inventory. If it cannot be opened

@@ -2,6 +2,30 @@
 
 Newest first.
 
+## [2026-11-22] — feat(rdp): saved Remote Desktop settings per host, open with a generated .rdp, import / export .rdp
+- Issue #102 created on GitHub
+- Scope: telepad-core (store, rdp, platform), telepad-app (host editor), telepad-gui
+- Labels: enhancement (windows, macos, linux)
+
+## [2026-11-22] — feat(keys): My keys tab — list local keys, generate key pairs, convert between OpenSSH, PuTTY and other formats
+- Issue #101 created on GitHub
+- Scope: telepad-core (local_keys, platform), telepad-app (keys), telepad-gui (Authorized keys page)
+- Labels: enhancement (windows, macos, linux)
+
+## [2026-11-22] — feat(history): log file transfers and database commits (HeidiSQL-style SQL log)
+- Issue #100 created on GitHub
+- Scope: telepad-core (history store), telepad-app (files, db), telepad-gui (log panels)
+- Labels: enhancement (windows, macos, linux)
+
+## [2026-11-22] — feat(ui): workspaces reopen file, database and editor windows; reset unsaved settings on leave, transfers keep running
+- Updated: leave question (Save all / Discard / Cancel) for unsaved, uncommitted or running work
+- Updated: unapplied Host Management and Authorized keys changes discarded, both pages reset on leave
+- Updated: leaving always discards and resets unsaved / uncommitted / unapplied work (settings too, so the same config is not edited twice); one modal lists it, Yes switches, Back stays in the previous workspace (Save all dropped)
+- Updated: file transfers are not cancelled on leave; they keep running in the background and show in the same host's File window in the new workspace; only settings and opened files are reset
+- Issue #99 created on GitHub
+- Scope: telepad-app (workspace), telepad-core (prefs), telepad-gui (runtime)
+- Labels: enhancement (windows, macos, linux)
+
 ## [2026-11-21] — Telepad 0.9.2
 - **Window picker** (#92): the top bar shows the window in front and how many are open;
   click it to search every open window (minimized ones too) and bring one to the front.
