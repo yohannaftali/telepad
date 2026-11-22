@@ -343,6 +343,16 @@ pub fn format_utc(secs: i64) -> String {
 }
 
 /// Entries as CSV (header line, RFC 4180 quoting), for Export.
+/// Text cells that a spreadsheet would read as a formula (#111) get a
+/// leading `'`: file names and error text come from hosts, SQL from users.
+fn defuse(s: &str) -> std::borrow::Cow<'_, str> {
+    if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{s}").into()
+    } else {
+        s.into()
+    }
+}
+
 pub fn to_csv(entries: &[Entry]) -> String {
     let q = |s: &str| {
         if s.contains([',', '"', '\n', '\r']) {
@@ -351,29 +361,31 @@ pub fn to_csv(entries: &[Entry]) -> String {
             s.to_string()
         }
     };
+    let t = |s: &str| q(&defuse(s));
     let n = |v: Option<u64>| v.map(|v| v.to_string()).unwrap_or_default();
     let mut out = String::from(
         "time_utc,kind,host,target,title,detail,outcome,error,rows,bytes,files,duration_ms,method,user,database\n",
     );
     for e in entries {
+        // Times, kinds, outcomes and numbers are Telepad's own; the rest is text.
         let fields = [
-            e.at.map(format_utc).unwrap_or_default(),
-            e.kind.as_str().to_string(),
-            e.host.clone(),
-            e.target.clone(),
-            e.title.clone(),
-            e.detail.clone(),
-            e.outcome.as_str().to_string(),
-            e.error.clone(),
-            n(e.rows),
-            n(e.bytes),
-            n(e.files),
-            n(e.duration_ms),
-            e.method.clone(),
-            e.user.clone(),
-            e.database.clone(),
+            q(&e.at.map(format_utc).unwrap_or_default()),
+            q(e.kind.as_str()),
+            t(&e.host),
+            t(&e.target),
+            t(&e.title),
+            t(&e.detail),
+            q(e.outcome.as_str()),
+            t(&e.error),
+            q(&n(e.rows)),
+            q(&n(e.bytes)),
+            q(&n(e.files)),
+            q(&n(e.duration_ms)),
+            t(&e.method),
+            t(&e.user),
+            t(&e.database),
         ];
-        out.push_str(&fields.iter().map(|f| q(f)).collect::<Vec<_>>().join(","));
+        out.push_str(&fields.join(","));
         out.push('\n');
     }
     out
@@ -505,6 +517,29 @@ mod tests {
             "only the keyword itself"
         );
         assert_eq!(mask_secrets("SELECT 'é' -- ü"), "SELECT 'é' -- ü");
+    }
+
+    #[test]
+    fn csv_cells_that_look_like_formulas_are_defused() {
+        let csv = to_csv(&[Entry {
+            at: Some(0),
+            title: "=HYPERLINK(\"http://example.invalid\",\"x\")".into(),
+            detail: "-- cleanup\nDELETE FROM t".into(),
+            error: "@SUM(1)".into(),
+            user: "+ops".into(),
+            rows: Some(3),
+            ..Default::default()
+        }]);
+        let row = csv.lines().nth(1).unwrap();
+        assert!(
+            row.contains("\"'=HYPERLINK(\"\"http://example.invalid\"\""),
+            "{row}"
+        );
+        assert!(csv.contains("\"'-- cleanup"), "{csv}");
+        assert!(csv.contains(",'@SUM(1),"), "{csv}");
+        assert!(csv.contains(",'+ops,"), "{csv}");
+        assert!(csv.contains(",3,"), "numbers unchanged: {csv}");
+        assert!(row.starts_with("1970-01-01 00:00:00,"), "times unchanged");
     }
 
     #[test]
