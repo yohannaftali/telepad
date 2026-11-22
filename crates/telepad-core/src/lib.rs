@@ -8,6 +8,7 @@ pub mod eol;
 pub mod files;
 pub mod history;
 pub mod hostsync;
+pub mod local_keys;
 pub mod model;
 pub mod parse;
 pub mod platform;

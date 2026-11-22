@@ -14,6 +14,7 @@ mod files;
 mod host_sync;
 mod import;
 mod keys;
+mod mykeys;
 mod overview;
 mod panels;
 mod picker;

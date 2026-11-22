@@ -61,6 +61,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/update.rs` | Self-update: GitHub `releases/latest` over HTTPS (`ureq`), SemVer check, SHA-256 from the release's `.sha256`, replace both exes (`self_replace`), relaunch |
 | `src/platform.rs` | Everything OS-specific: ssh binary lookup, hidden console, open terminal / RDP / URL, ping |
 | `src/history.rs` | `history.db` (#100): transfer / file operation / SQL log `Entry` (kind, host, target, title, detail, outcome, rows, bytes, duration, method), `History::open` (trim to 90 days / 50 000 rows), `add`, `list(Scope)`, `clear`, `mask_secrets` (password literals), `format_utc`, `to_csv`, `history_path` |
+| `src/local_keys.rs` | My keys (#101): `scan` (~/.ssh + IdentityFile paths) / `inspect` → `LocalKey` (format, type, fingerprint, comment, passphrase, permission warning), `detect` / `load` (OpenSSH, PPK v2 / v3 incl. Argon2id / AES, PKCS#1, SEC1, PKCS#8 plain / encrypted, DER, PKCS#12, JWK), `convert(Target)` incl. public-only, `unsupported` per key type, `generate` (ssh-keygen into a private folder, `protect` with the passphrase, move into place, never overwrite), `convert_file`; own RSA conversion (`to_rsa`: ssh-key 0.6.7's passes `p` twice); live checks `TELEPAD_TEST_KEYGEN`, `TELEPAD_TEST_PPK_DIR` / `TELEPAD_TEST_PUTTYGEN` |
 | `src/prefs.rs` | `preference.db` (#94): named workspaces (`WorkspacePrefs`: `<own>` layout, custom (label, layout), `Current`), `check_label`, `prefs_path`, one-time `import_legacy` of `ui_workspace`, `PRAGMA user_version` |
 
 ### telepad-app (Model–View–Update)
@@ -85,6 +86,8 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_history.rs` | Behaviour tests for #100 (transfer / file operation / SQL log entries) |
 | `src/tests_workspace.rs` | Behaviour tests for the workspace |
 | `src/tests_keys.rs` | Behaviour tests for the Authorized keys page |
+| `src/mykeys.rs` | My keys tab (#101): `MyKeys` (model), `MyKeysDraft` (selection, `GenForm`, `ConvertForm`; passphrases as `Secret`), `MkMsg` / `MkEffect`, `update`, `used_by` / `authorized_on` |
+| `src/tests_mykeys.rs` | Behaviour tests for the My keys tab |
 
 ### telepad-gui
 

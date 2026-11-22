@@ -74,6 +74,8 @@ pub struct Model {
     pub ws_legacy: String,
     /// Telepad may close now (#99: nothing to lose, or the user said Yes).
     pub quit: bool,
+    /// Key pairs on this computer (#101, My keys tab).
+    pub my_keys: crate::mykeys::MyKeys,
 }
 
 /// A key added to / revoked from several hosts.
@@ -201,6 +203,8 @@ pub struct KeysDraft {
     /// Waiting for the user to type the action word.
     pub confirm: Option<KeyAction>,
     pub typed: String,
+    /// My keys tab (#101): selection and its dialogs.
+    pub mine: crate::mykeys::MyKeysDraft,
 }
 
 impl KeysDraft {
@@ -232,6 +236,8 @@ pub enum KeysTab {
     ByKey,
     /// Paste a key, pick hosts, confirm, see the results (#49).
     AddRevoke,
+    /// The key pairs on this computer: generate, convert (#101).
+    MyKeys,
 }
 
 /// One host's `authorized_keys` as last read.

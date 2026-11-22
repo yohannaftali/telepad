@@ -196,6 +196,8 @@ pub enum Msg {
     },
     /// Switch the page's view.
     AkTab(crate::state::KeysTab),
+    /// My keys tab (#101).
+    MyKeys(crate::mykeys::MkMsg),
     /// Shortcut from a list: put `line` in the key box, choose `aliases`, go to
     /// Add / revoke and ask for the confirmation word (when the key is valid).
     AkPrepare {
@@ -299,6 +301,8 @@ pub enum Effect {
     Db(crate::db::DbEffect),
     /// Host Management: read / pick / write the config, apply Telepad changes.
     HostSync(crate::hostsync::HsEffect),
+    /// My keys tab (#101).
+    MyKeys(crate::mykeys::MkEffect),
     /// File windows: connect, list, copy (worker threads per window).
     Files(crate::files::FmEffect),
 }
