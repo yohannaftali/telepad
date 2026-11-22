@@ -459,6 +459,12 @@ pub struct Editor {
     pub rdp_saved: Option<telepad_core::rdp::RdpSettings>,
     /// Settings to write once the host itself is saved.
     pub rdp_pending: Option<Option<telepad_core::rdp::RdpSettings>>,
+    /// Windows Credential Manager (#108): a password is saved for the
+    /// address (`None` while unknown), the two password fields, the result.
+    pub rdp_cred_saved: Option<bool>,
+    pub rdp_cred_pass: telepad_core::db::Secret,
+    pub rdp_cred_pass2: telepad_core::db::Secret,
+    pub rdp_cred_note: Option<Result<String, String>>,
 }
 
 impl Editor {
@@ -481,6 +487,39 @@ impl Editor {
             rdp_height: "900".into(),
             rdp_saved: None,
             rdp_pending: None,
+            rdp_cred_saved: None,
+            rdp_cred_pass: Default::default(),
+            rdp_cred_pass2: Default::default(),
+            rdp_cred_note: None,
+        }
+    }
+
+    /// The address Remote Desktop connects to (its credential's target).
+    pub fn rdp_address(&self) -> String {
+        let a = self.rdp.address.trim();
+        if !a.is_empty() {
+            return a.to_string();
+        }
+        let h = self.entry.hostname.trim();
+        if h.is_empty() {
+            self.entry.alias.trim().to_string()
+        } else {
+            h.to_string()
+        }
+    }
+
+    /// `DOMAIN\user` (or `user`) for the credential.
+    pub fn rdp_login(&self) -> String {
+        let (d, u) = (self.rdp.domain.trim(), self.rdp.user.trim());
+        let u = if u.is_empty() {
+            self.entry.user.trim()
+        } else {
+            u
+        };
+        if d.is_empty() || u.is_empty() {
+            u.to_string()
+        } else {
+            format!("{d}\\{u}")
         }
     }
 

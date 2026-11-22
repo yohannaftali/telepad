@@ -584,6 +584,127 @@ pub fn open_rdp_with(
     }
 }
 
+/// Remote Desktop passwords in Windows Credential Manager (#108): the
+/// `TERMSRV/<address>` domain credential mstsc uses. Telepad writes, checks
+/// and deletes it through the Win32 credential API; it never reads the
+/// password back. Other systems: not available (their clients keep their own).
+pub const RDP_CREDENTIALS: bool = cfg!(target_os = "windows");
+
+/// `TERMSRV/<host>` for an address (`host`, `host:port`, `[v6]:port`).
+pub fn rdp_credential_target(address: &str) -> String {
+    let a = address.trim();
+    let host = match a.rsplit_once(':') {
+        Some((h, p)) if p.parse::<u16>().is_ok() && (!h.contains(':') || h.ends_with(']')) => h,
+        _ => a,
+    };
+    format!("TERMSRV/{host}")
+}
+
+#[cfg(target_os = "windows")]
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Is a Remote Desktop password saved for this address?
+pub fn rdp_credential_saved(address: &str) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Security::Credentials::{
+            CRED_TYPE_DOMAIN_PASSWORD, CREDENTIALW, CredFree, CredReadW,
+        };
+        let target = wide(&rdp_credential_target(address));
+        let mut cred: *mut CREDENTIALW = std::ptr::null_mut();
+        // SAFETY: `target` is NUL-terminated; on success the buffer Windows
+        // allocated is freed at once, nothing in it is read.
+        unsafe {
+            if CredReadW(target.as_ptr(), CRED_TYPE_DOMAIN_PASSWORD, 0, &mut cred) != 0 {
+                CredFree(cred.cast());
+                return true;
+            }
+        }
+        false
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = address;
+        false
+    }
+}
+
+/// Save the Remote Desktop password for `address` (user `DOMAIN\user` or
+/// `user`). Replaces an existing one for the same address.
+pub fn save_rdp_credential(address: &str, user: &str, password: &str) -> Result<(), String> {
+    if user.trim().is_empty() || password.is_empty() {
+        return Err("User and password are needed".into());
+    }
+    if user.chars().any(char::is_control) {
+        return Err("The user must be one line".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Security::Credentials::{
+            CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_DOMAIN_PASSWORD, CREDENTIALW, CredWriteW,
+        };
+        let mut target = wide(&rdp_credential_target(address));
+        let mut user_w = wide(user.trim());
+        // The blob is the password in UTF-16, without the trailing NUL.
+        let mut blob: Vec<u8> = password.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let cred = CREDENTIALW {
+            Type: CRED_TYPE_DOMAIN_PASSWORD,
+            TargetName: target.as_mut_ptr(),
+            CredentialBlobSize: blob.len() as u32,
+            CredentialBlob: blob.as_mut_ptr(),
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            UserName: user_w.as_mut_ptr(),
+            ..Default::default()
+        };
+        // SAFETY: every pointer in `cred` points into a live, NUL-terminated
+        // (strings) or exactly sized (blob) buffer for the whole call.
+        let ok = unsafe { CredWriteW(&cred, 0) } != 0;
+        blob.iter_mut().for_each(|b| *b = 0);
+        if ok {
+            Ok(())
+        } else {
+            Err(format!(
+                "Windows did not save it: {}",
+                std::io::Error::last_os_error()
+            ))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = address;
+        Err("Saving the Remote Desktop password is for Windows only".into())
+    }
+}
+
+/// Delete the saved Remote Desktop password for `address` (none saved: Ok).
+pub fn forget_rdp_credential(address: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Security::Credentials::{CRED_TYPE_DOMAIN_PASSWORD, CredDeleteW};
+        if !rdp_credential_saved(address) {
+            return Ok(());
+        }
+        let target = wide(&rdp_credential_target(address));
+        // SAFETY: `target` is NUL-terminated and lives for the call.
+        let ok = unsafe { CredDeleteW(target.as_ptr(), CRED_TYPE_DOMAIN_PASSWORD, 0) } != 0;
+        if ok {
+            Ok(())
+        } else {
+            Err(format!(
+                "Windows did not delete it: {}",
+                std::io::Error::last_os_error()
+            ))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = address;
+        Ok(())
+    }
+}
+
 /// Open an interactive ssh session in a new terminal window.
 pub fn open_terminal(program: &std::path::Path, args: &[String]) -> Result<(), String> {
     open_terminal_impl(program, args).map_err(|e| format!("cannot open terminal: {e}"))
@@ -750,5 +871,41 @@ mod tests {
         let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
         std::fs::remove_file(&p).ok();
         assert_eq!(mode, 0o755);
+    }
+
+    #[test]
+    fn rdp_credential_targets_drop_the_port() {
+        assert_eq!(
+            super::rdp_credential_target("198.51.100.20"),
+            "TERMSRV/198.51.100.20"
+        );
+        assert_eq!(
+            super::rdp_credential_target("win1.example:3390"),
+            "TERMSRV/win1.example"
+        );
+        assert_eq!(
+            super::rdp_credential_target("[2001:db8::5]:3389"),
+            "TERMSRV/[2001:db8::5]"
+        );
+        assert_eq!(
+            super::rdp_credential_target("2001:db8::5"),
+            "TERMSRV/2001:db8::5"
+        );
+    }
+
+    /// Writes, checks and deletes a real credential for a documentation
+    /// address: run with `TELEPAD_TEST_CREDMAN=1` (Windows).
+    #[test]
+    fn rdp_credential_round_trip() {
+        if std::env::var_os("TELEPAD_TEST_CREDMAN").is_none() || !super::RDP_CREDENTIALS {
+            return;
+        }
+        let a = "192.0.2.199";
+        let _ = super::forget_rdp_credential(a);
+        assert!(!super::rdp_credential_saved(a));
+        super::save_rdp_credential(a, "LAB\\ops", "not-a-real-password").unwrap();
+        assert!(super::rdp_credential_saved(a));
+        super::forget_rdp_credential(a).unwrap();
+        assert!(!super::rdp_credential_saved(a));
     }
 }

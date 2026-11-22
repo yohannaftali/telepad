@@ -334,10 +334,75 @@ fn rdp_section(ui: &mut egui::Ui, ed: &mut telepad_app::Editor, out: &mut Vec<Ms
                     }
                 });
             }
-            ui.label(
-                RichText::new("No password is stored: Remote Desktop asks for it (Windows can remember it in its Credential Manager).")
-                    .weak()
-                    .small(),
-            );
+            rdp_password(ui, ed, out);
         });
+}
+
+/// Windows Credential Manager (#108): the password goes to Windows, never
+/// into Telepad's files.
+fn rdp_password(ui: &mut egui::Ui, ed: &mut telepad_app::Editor, out: &mut Vec<Msg>) {
+    if !telepad_core::platform::RDP_CREDENTIALS {
+        ui.label(
+            RichText::new("No password is stored: Remote Desktop asks for it and keeps it in its own keychain.")
+                .weak()
+                .small(),
+        );
+        return;
+    }
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Password").strong());
+        let state = match ed.rdp_cred_saved {
+            None => "checking…".to_string(),
+            Some(true) => format!(
+                "saved in Windows Credential Manager for {}",
+                ed.rdp_address()
+            ),
+            Some(false) => "not saved: Remote Desktop asks for it".to_string(),
+        };
+        ui.label(RichText::new(state).weak());
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(ed.rdp_cred_pass.expose_mut())
+                .password(true)
+                .hint_text("password")
+                .desired_width(140.0),
+        );
+        ui.add(
+            egui::TextEdit::singleline(ed.rdp_cred_pass2.expose_mut())
+                .password(true)
+                .hint_text("repeat")
+                .desired_width(140.0),
+        );
+        if act_button(
+            ui,
+            true,
+            Act::Add,
+            &il(icons::LOCK, "Save in Credential Manager"),
+        )
+        .on_hover_text(format!(
+            "Windows keeps it as TERMSRV/{} for {}; Telepad never stores it",
+            ed.rdp_address(),
+            ed.rdp_login()
+        ))
+        .clicked()
+        {
+            out.push(Msg::EditorRdpCredSave);
+        }
+        if ed.rdp_cred_saved == Some(true)
+            && act_button(ui, true, Act::Danger, &il(icons::TRASH, "Forget")).clicked()
+        {
+            out.push(Msg::EditorRdpCredForget);
+        }
+    });
+    match &ed.rdp_cred_note {
+        Some(Ok(t)) => {
+            ui.colored_label(crate::widgets::pal().green, t);
+        }
+        Some(Err(e)) => {
+            ui.colored_label(crate::widgets::pal().red, e);
+        }
+        None => {}
+    }
 }
