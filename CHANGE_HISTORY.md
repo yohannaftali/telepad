@@ -2,6 +2,15 @@
 
 Newest first.
 
+## [2026-11-22] — Post-release review of v0.9.3 (#99–#102)
+- Reviewed merges 11c452d, cec833e, fcff314, 35557a9 and release 377fca8 on `main`.
+- No telemetry: the only HTTP client is the update check (GitHub, `telepad/<version>`
+  user agent); other connections are TCP probes to the user's own hosts and the local
+  SSH tunnel. No `unsafe`, no new shell strings (arguments passed separately), no secrets
+  or key material in the tree (only PEM headers in tests), monitoring stays read-only.
+- Issues filed: #110 (database files `0644` on macOS / Linux), #111 (CSV formula
+  injection in history export), #112 (generated key ACL step after the move).
+
 ## [2026-11-22] — Telepad 0.9.3
 - **Workspaces** (#99): file windows (folders), editor windows (paths, never text) and
   database windows (connection, database / schema) come back with their workspace and on
