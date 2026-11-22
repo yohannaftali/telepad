@@ -353,6 +353,11 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             if let Some(h) = m.hosts.get(i) {
                 let mut ed = Editor::new(h.entry.clone());
                 ed.set_rdp(m.rdp.get(&h.entry.alias));
+                if telepad_core::platform::RDP_CREDENTIALS {
+                    fx.push(Effect::RdpCredCheck {
+                        address: ed.rdp_address(),
+                    });
+                }
                 d.editor = Some(ed);
                 fx.push(Effect::FindKeys);
             }
@@ -412,6 +417,58 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                     }
                     (Err(x), _) | (_, Err(x)) => ed.error = Some(x),
                 }
+            }
+        }
+        Msg::EditorRdpCredCheck => {
+            if let Some(ed) = &mut d.editor {
+                ed.rdp_cred_saved = None;
+                fx.push(Effect::RdpCredCheck {
+                    address: ed.rdp_address(),
+                });
+            }
+        }
+        Msg::EditorRdpCredSave => {
+            if let Some(ed) = &mut d.editor {
+                let login = ed.rdp_login();
+                ed.rdp_cred_note = if login.is_empty() {
+                    Some(Err(
+                        "Set the user first (Remote Desktop settings or User)".into()
+                    ))
+                } else if ed.rdp_cred_pass.is_empty() {
+                    Some(Err("Type the password".into()))
+                } else if ed.rdp_cred_pass != ed.rdp_cred_pass2 {
+                    Some(Err("The two passwords differ".into()))
+                } else {
+                    fx.push(Effect::RdpCredSave {
+                        address: ed.rdp_address(),
+                        user: login,
+                        password: std::mem::take(&mut ed.rdp_cred_pass),
+                    });
+                    ed.rdp_cred_pass2 = Default::default();
+                    None
+                };
+            }
+        }
+        Msg::EditorRdpCredForget => {
+            if let Some(ed) = &d.editor {
+                fx.push(Effect::RdpCredForget {
+                    address: ed.rdp_address(),
+                });
+            }
+        }
+        Msg::RdpCredState {
+            address,
+            saved,
+            result,
+        } => {
+            if let Some(ed) = &mut d.editor
+                && ed.rdp_address() == address
+            {
+                ed.rdp_cred_saved = Some(saved);
+                ed.rdp_cred_note = match result {
+                    Ok(t) if t.is_empty() => None,
+                    r => Some(r),
+                };
             }
         }
         Msg::RdpSaved(Ok(())) => {}

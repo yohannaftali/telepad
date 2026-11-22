@@ -399,6 +399,33 @@ impl Runtime {
                 ));
                 Some(Msg::RdpSaved(r))
             }
+            Effect::RdpCredCheck { address } => Some(Msg::RdpCredState {
+                saved: platform::rdp_credential_saved(&address),
+                address,
+                result: Ok(String::new()),
+            }),
+            Effect::RdpCredSave {
+                address,
+                user,
+                password,
+            } => {
+                let r = platform::save_rdp_credential(&address, &user, password.expose())
+                    .map(|()| format!("Saved in Windows Credential Manager for {user}"));
+                Some(Msg::RdpCredState {
+                    saved: platform::rdp_credential_saved(&address),
+                    address,
+                    result: r,
+                })
+            }
+            Effect::RdpCredForget { address } => {
+                let r = platform::forget_rdp_credential(&address)
+                    .map(|()| "Removed from Windows Credential Manager".to_string());
+                Some(Msg::RdpCredState {
+                    saved: platform::rdp_credential_saved(&address),
+                    address,
+                    result: r,
+                })
+            }
             Effect::PickRdpFile => {
                 let path = rfd::FileDialog::new()
                     .set_title("Remote Desktop file")

@@ -55,6 +55,16 @@ pub enum Msg {
     /// Host editor: save the section as a `.rdp` file.
     EditorRdpExport,
     RdpSaved(Result<(), String>),
+    /// Windows Credential Manager (#108): check / save / forget the
+    /// Remote Desktop password of the edited host.
+    EditorRdpCredCheck,
+    EditorRdpCredSave,
+    EditorRdpCredForget,
+    RdpCredState {
+        address: String,
+        saved: bool,
+        result: Result<String, String>,
+    },
     BmcSetup(usize),
     /// Container action in a terminal (host index, container id).
     DockerAction {
@@ -249,6 +259,18 @@ pub enum Effect {
     },
     /// Open a `.rdp` file → [`Msg::RdpPicked`].
     PickRdpFile,
+    /// Windows Credential Manager (#108) → [`Msg::RdpCredState`].
+    RdpCredCheck {
+        address: String,
+    },
+    RdpCredSave {
+        address: String,
+        user: String,
+        password: telepad_core::db::Secret,
+    },
+    RdpCredForget {
+        address: String,
+    },
     /// Save a `.rdp` file (UTF-16 as mstsc writes it).
     ExportRdp {
         alias: String,

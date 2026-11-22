@@ -491,9 +491,12 @@ become `xfreerdp` arguments; what `xfreerdp` cannot do (single drive letters, th
 check, extra lines) is named in the status bar. SSH hosts with saved settings get **Open
 RDP** in their right-click menu too.
 
-**Passwords**: Telepad stores none — not in `telepad.db`, not in the `.rdp` file. Remote
-Desktop asks for it, and on Windows *Remember me* keeps it in Windows' Credential Manager
-as usual.
+**Passwords**: Telepad stores none — not in `telepad.db`, not in the `.rdp` file. On
+Windows the section has **Password** fields and **Save in Credential Manager**: Windows
+keeps it as `TERMSRV/<address>` for the user (`DOMAIN\user`), exactly where Remote
+Desktop's own *Remember me* puts it, so **Open RDP** logs in without asking. The section
+shows whether one is saved; **Forget** removes it. Telepad never reads it back. On macOS
+and Linux the client asks and keeps it in its own keychain.
 
 When an SSH check fails, the error says whether the host still answers ping, so a
 machine that is down looks different from one where only SSH is broken.

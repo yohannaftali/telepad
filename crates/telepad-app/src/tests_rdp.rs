@@ -160,6 +160,67 @@ fn an_imported_rdp_file_fills_the_section_and_export_renders_it() {
 }
 
 #[test]
+fn the_rdp_password_goes_to_the_credential_manager_never_into_telepad() {
+    let mut s = state();
+    send(&mut s, Msg::Edit(0));
+    {
+        let ed = s.drafts.editor.as_mut().unwrap();
+        ed.rdp.domain = "LAB".into();
+        *ed.rdp_cred_pass.expose_mut() = "one".into();
+        *ed.rdp_cred_pass2.expose_mut() = "two".into();
+    }
+    assert!(send(&mut s, Msg::EditorRdpCredSave).is_empty());
+    assert!(
+        s.drafts
+            .editor
+            .as_ref()
+            .unwrap()
+            .rdp_cred_note
+            .clone()
+            .unwrap()
+            .is_err()
+    );
+    *s.drafts
+        .editor
+        .as_mut()
+        .unwrap()
+        .rdp_cred_pass2
+        .expose_mut() = "one".into();
+    let fx = send(&mut s, Msg::EditorRdpCredSave);
+    match &fx[..] {
+        [
+            Effect::RdpCredSave {
+                address,
+                user,
+                password,
+            },
+        ] => {
+            assert_eq!(address, "198.51.100.7");
+            assert_eq!(user, "LAB\\ops");
+            assert_eq!(password.expose(), "one");
+            assert_eq!(format!("{password:?}"), "\"***\"");
+        }
+        other => panic!("{other:?}"),
+    }
+    let ed = s.drafts.editor.as_ref().unwrap();
+    assert!(
+        ed.rdp_cred_pass.is_empty() && ed.rdp_cred_pass2.is_empty(),
+        "fields cleared"
+    );
+    send(
+        &mut s,
+        Msg::RdpCredState {
+            address: "198.51.100.7".into(),
+            saved: true,
+            result: Ok("Saved".into()),
+        },
+    );
+    assert_eq!(s.drafts.editor.as_ref().unwrap().rdp_cred_saved, Some(true));
+    let fx = send(&mut s, Msg::EditorRdpCredForget);
+    assert!(matches!(&fx[..], [Effect::RdpCredForget { address }] if address == "198.51.100.7"));
+}
+
+#[test]
 fn open_rdp_works_for_ssh_hosts_too() {
     let mut s = state();
     let fx = send(&mut s, Msg::OpenRdp(1));
