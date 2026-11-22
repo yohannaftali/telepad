@@ -52,6 +52,125 @@ fn open_url_impl(url: &str) -> std::io::Result<()> {
     Command::new("xdg-open").arg(url).spawn().map(|_| ())
 }
 
+/// `ssh-keygen` next to the OpenSSH client Telepad uses (#101).
+pub fn ssh_keygen_program() -> PathBuf {
+    let ssh = ssh_program();
+    let name = if cfg!(target_os = "windows") {
+        "ssh-keygen.exe"
+    } else {
+        "ssh-keygen"
+    };
+    match ssh.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() && dir.join(name).exists() => dir.join(name),
+        _ => PathBuf::from(name),
+    }
+}
+
+/// A private key others can read (#101). macOS / Linux: group / other mode
+/// bits; Windows: not checked here (ssh-keygen and the user profile set the
+/// ACL).
+pub fn private_key_permission_warning(
+    _path: &std::path::Path,
+    meta: &std::fs::Metadata,
+) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = meta.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            return Some(format!(
+                "mode {mode:o}: others can read it (ssh refuses such keys); chmod 600"
+            ));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = meta;
+    None
+}
+
+/// What to install when `ssh-keygen` is missing (#101).
+pub fn ssh_keygen_missing() -> String {
+    if cfg!(target_os = "windows") {
+        "ssh-keygen not found: add the Windows feature \"OpenSSH Client\" (Settings > System > Optional features)".into()
+    } else if cfg!(target_os = "macos") {
+        "ssh-keygen not found (it comes with macOS; check PATH or TELEPAD_SSH)".into()
+    } else {
+        "ssh-keygen not found: install the openssh-client package".into()
+    }
+}
+
+/// `user@computer`, the default comment of a new key.
+pub fn user_at_host() -> String {
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "me".into());
+    let host = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok()
+        .or_else(|| {
+            std::fs::read_to_string("/etc/hostname")
+                .ok()
+                .map(|s| s.trim().to_string())
+        })
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "computer".into());
+    format!("{user}@{host}")
+}
+
+/// A folder for keys: owner only (`0700` on macOS / Linux; Windows: the
+/// profile's own ACL, inherited).
+pub fn restrict_dir_to_owner(dir: &std::path::Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("cannot set the permissions of {}: {e}", dir.display()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
+/// Make a file readable by its owner only (#101: written private keys).
+/// macOS / Linux: mode 600. Windows: no inherited entries, full control for
+/// the current user only (`icacls`, arguments passed separately).
+pub fn restrict_to_owner(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("cannot set the permissions of {}: {e}", path.display()))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let user = std::env::var("USERNAME").map_err(|_| "USERNAME is not set".to_string())?;
+        let out = Command::new("icacls.exe")
+            .arg(path)
+            .args(["/inheritance:r", "/grant:r"])
+            .arg(format!("{user}:F"))
+            .creation_flags(0x0800_0000)
+            .output()
+            .map_err(|e| format!("icacls: {e}"))?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "cannot restrict {} to your user: {}",
+                path.display(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ))
+        }
+    }
+    #[cfg(not(any(unix, target_os = "windows")))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
 /// Show a local folder in the system's file manager (#100: a history
 /// line's folder). Only an existing folder; no shell involved.
 pub fn open_folder(path: &std::path::Path) -> Result<(), String> {

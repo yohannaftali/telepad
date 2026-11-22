@@ -690,7 +690,8 @@ away, using the access Telepad already has. It reads and changes only the
 
 When the page opens, Telepad reads that file on every SSH host (read-only, in parallel);
 **Refresh** reads them all again, the small ↻ next to a server only that one. The page has
-three tabs.
+four tabs; the last one, **My keys**, is about the keys on this computer (see
+[My keys](#my-keys-this-computer)).
 
 **Groups.** A `#` comment line names the group of the keys below it, until the next comment
 line (blank lines do not end a group; with several comment lines in a row, the last one is
@@ -756,6 +757,78 @@ Add creates `~/.ssh` (mode 700) and `authorized_keys` (mode 600) when they are m
 and never adds a key twice. Revoke removes every line with that key, whatever its comment
 or options. Other lines are never touched, and the file is rewritten through a temporary
 copy, so a failure leaves it as it was.
+
+### My keys (this computer)
+
+The **My keys** tab lists the key pairs on this computer: every private key in `~/.ssh`
+and every **IdentityFile** of your hosts (one that is missing is listed with the reason).
+`known_hosts`, `config`, `authorized_keys`, `.pub` and other files that are not keys are
+skipped. Nothing on this tab runs on a host.
+
+| Column / field | Shows |
+|---|---|
+| File, Type | the file name; Ed25519, ECDSA P-256 / P-384 / P-521, RSA with its size, DSA (legacy) |
+| Format | OpenSSH, PuTTY PPK v2 / v3, PEM (PKCS#1 / SEC1), PKCS#8 (plain / encrypted), DER, PKCS#12, JWK, OpenPGP (listed only) |
+| Passphrase | whether the file needs one to be used |
+| Detail (right) | path, fingerprint (`SHA256:…`, as `ssh-keygen -lf`), comment, whether the `.pub` is next to it, when it changed, which hosts **log in** with it (IdentityFile) and where it is **authorized** (from the lists of this page), a warning when others can read it (macOS / Linux) |
+
+Buttons for the selected key: **Copy public key** (only the public line ever goes to the
+clipboard), **Open folder**, **Add to hosts…** (opens **Add / revoke** with the key filled
+in — you still pick the hosts and type `add`), **Convert / export…**.
+
+**Generate key pair…** makes a new pair with the system's `ssh-keygen`:
+
+| Field | Default |
+|---|---|
+| Type | **Ed25519** (also ECDSA P-256 / 384 / 521, RSA 2048–8192, default 4096) |
+| File | `~/.ssh/id_ed25519` — or `id_ed25519_2`, `_3` … when that name is taken; the name follows the type until you change it |
+| Comment | `you@this-computer` |
+| Passphrase | empty is allowed, with a warning; type it twice |
+
+An existing file is never overwritten. The passphrase never appears on a command line:
+`ssh-keygen` writes the key into a private folder in `~/.ssh`, Telepad encrypts it there,
+then moves `id_…` and `id_….pub` into place. The private key is readable by your user only
+(Windows: only your account in its permissions; macOS / Linux: mode 600, `~/.ssh` 700).
+Without `ssh-keygen` (Windows: the *OpenSSH Client* optional feature) the dialog says what
+to install.
+
+**Convert / export…** writes the key in another format, as a **new file** you choose (the
+source is never changed):
+
+```mermaid
+flowchart LR
+    src["Key file<br/>OpenSSH · PPK · PEM · PKCS#8<br/>PKCS#12 · JWK · DER"] -->|passphrase if it has one| key(("key in memory"))
+    key --> o["OpenSSH"]
+    key --> p["PuTTY PPK v3 / v2"]
+    key --> pem["PEM PKCS#1 / SEC1"]
+    key --> p8["PKCS#8 (encrypted or not)"]
+    key --> der["DER"]
+    key --> p12["PKCS#12 (.p12 / .pfx)"]
+    key --> jwk["JWK"]
+    key --> pub["Public only: OpenSSH line,<br/>PEM, DER, JWK"]
+```
+
+| Target | Key types | Passphrase |
+|---|---|---|
+| OpenSSH | all | keep, new or none |
+| PuTTY PPK v3 (PuTTY 0.75+, WinSCP 5.20+) / v2 (older) | Ed25519, ECDSA, RSA, DSA | keep, new or none (v3: Argon2id, v2: AES as PuTTY does) |
+| PEM | RSA (PKCS#1), ECDSA P-256 / P-384 (SEC1); not Ed25519 | none (written in clear, with a warning) |
+| PKCS#8 | Ed25519, RSA, ECDSA P-256 / P-384 | keep, new or none |
+| DER | as PKCS#8 | none |
+| PKCS#12 | as PKCS#8 (key only, no certificate) | required |
+| JWK | Ed25519, RSA, ECDSA P-256 / P-384 | none |
+| Public key only | all of the above | — |
+
+A format that cannot hold the selected key is greyed out; hover it for the reason. An
+encrypted key asks for its passphrase first; a wrong one says so. Private output files are
+readable by your user only; an OpenSSH result gets its `.pub` next to it. **Import…** opens
+a key file from anywhere (for example a PuTTY `.ppk` from an old computer) in the same
+dialog, with OpenSSH as the target, so `ssh` and Telepad can use it. Telepad's PuTTY files
+were checked against PuTTY's own `puttygen` (0.83), both ways.
+
+OpenPGP (GPG) keys are listed but not converted; use `gpg --export-ssh-key` for an
+OpenSSH public key. Old PEM files encrypted with `Proc-Type: 4,ENCRYPTED` need
+`ssh-keygen -p -f <file>` once.
 
 ## Database browser (MariaDB / MySQL / PostgreSQL)
 

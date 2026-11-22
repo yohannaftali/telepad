@@ -498,7 +498,14 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             if let Some(k) = &mut d.keys {
                 k.tab = tab;
             }
+            if tab == crate::state::KeysTab::MyKeys
+                && m.my_keys.keys.is_none()
+                && !m.my_keys.loading
+            {
+                fx.extend(my_keys(m, d, crate::mykeys::MkMsg::Load));
+            }
         }
+        Msg::MyKeys(mk) => fx.extend(my_keys(m, d, mk)),
         Msg::AkPrepare {
             action,
             line,
@@ -1203,6 +1210,25 @@ fn close_finished_background(m: &mut Model, d: &mut crate::Drafts, now: Instant)
     fx
 }
 
+/// My keys tab (#101); Add to hosts fills the Add / revoke form.
+fn my_keys(m: &mut Model, d: &mut crate::Drafts, msg: crate::mykeys::MkMsg) -> Vec<Effect> {
+    let files: Vec<String> = m
+        .hosts
+        .iter()
+        .filter_map(|h| h.entry.identity_file.clone())
+        .filter(|f| !f.trim().is_empty())
+        .collect();
+    let k = d.keys.get_or_insert_with(KeysDraft::default);
+    let (fx, add) = crate::mykeys::update(&mut m.my_keys, &mut k.mine, files, msg);
+    if let Some(line) = add
+        && k.confirm.is_none()
+    {
+        k.text = line;
+        k.tab = crate::state::KeysTab::AddRevoke;
+    }
+    fx.into_iter().map(Effect::MyKeys).collect()
+}
+
 /// File transfers running in the background (#99), for the status bar.
 pub fn background_transfers(m: &Model) -> usize {
     m.files
@@ -1266,6 +1292,12 @@ pub fn leave_losses(state: &State, quit: bool) -> (Vec<(String, String)>, usize)
                 "Authorized keys".into(),
                 "Add / revoke waiting for confirmation".into(),
             ));
+        }
+        if k.mine.generate.is_some() {
+            v.push(("My keys".into(), "Generate key pair, not done".into()));
+        }
+        if k.mine.convert.as_ref().is_some_and(|c| c.done.is_none()) {
+            v.push(("My keys".into(), "Convert / export, not done".into()));
         }
     }
     if d.editor.is_some() {

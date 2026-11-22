@@ -437,6 +437,7 @@ impl Runtime {
             }
             Effect::Db(e) => self.run_db(e),
             Effect::HostSync(e) => self.run_hostsync(e),
+            Effect::MyKeys(e) => self.run_mykeys(e),
             Effect::Files(e) => self.run_files(e),
             Effect::OpenUrl(url) => platform::open_url(&url).err().map(Msg::Notice),
             Effect::Relaunch => match relaunch() {
@@ -557,6 +558,101 @@ impl Runtime {
                 Err(e) => format!("Cannot write {}: {e}", path.display()),
             },
         ))
+    }
+
+    /// My keys tab (#101): scan, ssh-keygen and conversions run on a thread;
+    /// the save / open dialogs here (modal by nature).
+    fn run_mykeys(&mut self, e: telepad_app::mykeys::MkEffect) -> Option<Msg> {
+        use telepad_app::mykeys::{MkEffect, MkMsg};
+        use telepad_core::local_keys;
+        let send = |tx: Sender<Msg>, ctx: egui::Context, m: MkMsg| {
+            let _ = tx.send(Msg::MyKeys(m));
+            ctx.request_repaint();
+        };
+        match e {
+            MkEffect::Scan { extra } => {
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                thread::spawn(move || {
+                    let dir = telepad_core::expand_home("~/.ssh");
+                    let extra: Vec<std::path::PathBuf> = extra
+                        .iter()
+                        .map(|f| telepad_core::expand_home(f.trim()))
+                        .collect();
+                    let keys = local_keys::scan(&dir, &extra);
+                    send(
+                        tx,
+                        ctx,
+                        MkMsg::Loaded {
+                            dir,
+                            user_host: telepad_core::platform::user_at_host(),
+                            result: Ok(keys),
+                        },
+                    );
+                });
+                None
+            }
+            MkEffect::Generate {
+                kind,
+                path,
+                comment,
+                pass,
+            } => {
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                thread::spawn(move || {
+                    let r = local_keys::generate(kind, &path, &comment, pass.expose());
+                    send(tx, ctx, MkMsg::Generated(r));
+                });
+                None
+            }
+            MkEffect::Convert {
+                source,
+                pass_in,
+                target,
+                pass_out,
+                suggest,
+            } => {
+                let mut dialog =
+                    rfd::FileDialog::new().set_title(format!("Save as {}", target.label()));
+                if let Some(dir) = suggest.parent().filter(|d| d.is_dir()) {
+                    dialog = dialog.set_directory(dir);
+                }
+                if let Some(name) = suggest.file_name() {
+                    dialog = dialog.set_file_name(name.to_string_lossy());
+                }
+                let Some(dest) = dialog.save_file() else {
+                    return Some(Msg::MyKeys(MkMsg::Converted(Err("Not saved".into()))));
+                };
+                let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                thread::spawn(move || {
+                    let r = local_keys::convert_file(
+                        &source,
+                        pass_in.expose(),
+                        target,
+                        pass_out.expose(),
+                        &dest,
+                    );
+                    send(tx, ctx, MkMsg::Converted(r));
+                });
+                None
+            }
+            MkEffect::PickImport { dir } => {
+                let mut dialog = rfd::FileDialog::new().set_title("Import a key file");
+                if dir.is_dir() {
+                    dialog = dialog.set_directory(&dir);
+                }
+                let path = dialog.pick_file()?;
+                Some(Msg::MyKeys(MkMsg::Picked(Some(local_keys::inspect(&path)))))
+            }
+            MkEffect::CopyText(text) => {
+                if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
+                    return Some(Msg::Notice(format!("Could not copy: {e}")));
+                }
+                Some(Msg::Notice("Public key copied".into()))
+            }
+            MkEffect::OpenFolder(path) => telepad_core::platform::open_folder(&path)
+                .err()
+                .map(Msg::Notice),
+        }
     }
 
     /// On exit: wait until the history thread wrote everything sent to it.

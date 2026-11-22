@@ -77,6 +77,10 @@ impl Secret {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+    /// For a password field to edit in place.
+    pub fn expose_mut(&mut self) -> &mut String {
+        &mut self.0
+    }
 }
 
 impl fmt::Debug for Secret {

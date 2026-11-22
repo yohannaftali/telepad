@@ -18,6 +18,7 @@ pub fn keys_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
             (KeysTab::ByServer, icons::DESKTOP, "By server"),
             (KeysTab::ByKey, icons::KEY, "By public key"),
             (KeysTab::AddRevoke, icons::PLUS, "Add / revoke"),
+            (KeysTab::MyKeys, icons::KEY, "My keys"),
         ] {
             if ui.selectable_label(k.tab == tab, il(icon, name)).clicked() {
                 out.push(Msg::AkTab(tab));
@@ -45,6 +46,7 @@ pub fn keys_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
     match k.tab {
         KeysTab::ByServer => by_server(ui, m, k, out),
         KeysTab::ByKey => by_key(ui, m, k, out),
+        KeysTab::MyKeys => super::mykeys::my_keys(ui, m, &mut k.mine, out),
         KeysTab::AddRevoke => {
             egui::ScrollArea::vertical()
                 .id_salt("keys-window")
