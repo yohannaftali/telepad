@@ -23,13 +23,21 @@ minimized, maximized, tabbed and arranged, kept in named workspaces like MikroTi
   folder / file, rename, delete, properties and permissions on both sides; a VS Code-like
   editor (tabs, syntax colours, find / replace, line endings kept, changed-on-host check)
 - **Authorized keys**: the keys in each host's `authorized_keys`, by server or by key,
-  and add or revoke one SSH public key on many hosts at once
+  and add or revoke one SSH public key on many hosts at once; **My keys** lists the key
+  pairs on this computer, generates new ones (`ssh-keygen`, Ed25519 by default) and converts
+  them between OpenSSH, PuTTY `.ppk`, PEM, PKCS#8, PKCS#12, JWK and DER
 - **Host Management**: add, import (OpenSSH config, JSON, pasted text) and export hosts;
   Telepad's hosts next to `~/.ssh/config` (or another config file); copy, edit or delete
   per host, merge / replace / sync, with a preview and a backup before the file is written
 - **Open database…**: a HeidiSQL-style window for MariaDB / MySQL / PostgreSQL in a
   container or on the host, through the SSH login (tree, data grid with editing, queries,
-  table structure); passwords optionally in the system password store
+  table structure); passwords optionally in the system password store; a **SQL log** of
+  everything that changed data or structure, like HeidiSQL
+- **History** of every upload, download and file change per host, kept for 90 days
+- **Remote Desktop settings** per host (screen, user, drives, gateway …) saved in Telepad,
+  imported from / exported to `.rdp` files, used by **Open RDP**
+- **Workspaces** bring back their file, editor and database windows, and ask before
+  anything unsaved is thrown away; uploads and downloads keep running across workspaces
 
 No agent is installed on the hosts, and monitoring never changes anything on them. The
 only changes are actions you start and confirm yourself (Docker actions, BMC setup,
@@ -39,6 +47,36 @@ and no web UI: it is one portable desktop app plus a headless `telepad-check`.
 ![Telepad: the Hosts page with the page sidebar](docs/images/hosts-dark.png)
 
 <sub>Screenshots use made-up host names and documentation addresses.</sub>
+
+### How it works
+
+```mermaid
+flowchart LR
+    subgraph pc["Your computer"]
+        tp["Telepad<br/>(one window)"]
+        ssh["OpenSSH client<br/>ssh · sftp · scp"]
+        db1[("telepad.db<br/>hosts, settings,<br/>RDP settings")]
+        db2[("preference.db<br/>workspaces")]
+        db3[("history.db<br/>transfers, SQL log")]
+        tp --> db1 & db2 & db3
+        tp --> ssh
+    end
+    subgraph hosts["Your hosts (nothing installed)"]
+        h1["Linux / BSD / NAS<br/>read-only sh script"]
+        h2["Databases<br/>through an SSH tunnel"]
+        h3["Windows<br/>Remote Desktop"]
+    end
+    ssh -- "every 60 s, read-only" --> h1
+    ssh -- "only when you open them" --> h2
+    tp -. "mstsc / Windows App / xfreerdp" .-> h3
+```
+
+| Telepad … | … never |
+|---|---|
+| reads the hosts with your own `ssh` login and keys | installs an agent or changes a host while monitoring |
+| changes something only after you saw it and confirmed (Docker action, key, SQL, file copy) | runs `sudo` in the background (only `sudo -n`, which never asks) |
+| keeps its data in three files next to each other | sends anything anywhere except to your hosts and, for updates, GitHub |
+| stores database passwords in the system password store, if you say so | stores a password in its own files |
 
 Releases are built for Windows (x86_64), macOS (Apple silicon and Intel) and Linux
 (x86_64 and ARM64). Windows is the first target; on macOS and Linux the desktop parts
@@ -110,7 +148,7 @@ for its folder.
 
 The Linux builds are made on Ubuntu 22.04 and need glibc 2.35 or newer.
 
-On every platform the folder must stay writable: `telepad.db` and `preference.db` are
+On every platform the folder must stay writable: `telepad.db`, `preference.db` and `history.db` are
 created next to the program, and in-app updates replace the programs in place.
 
 ### With Cargo (any platform)
@@ -199,6 +237,34 @@ Dark:
 
 ![The Hosts page in the light theme](docs/images/hosts-light.png)
 
+### Tour of 0.9.3
+
+**Workspaces keep everything, and ask first.** Switching workspace (or closing Telepad)
+lists what would be lost — unsaved editor text, database changes not posted, host or key
+changes not applied — in one question. **Yes** goes on, **Back** stays. File, editor and
+database windows come back when you return, at the same folders, files and database.
+
+![Leaving a workspace: one question lists what would be lost](docs/images/workspace-leave.png)
+
+**Transfers keep running** in the background while you work in another workspace, and the
+**History** tab of a file window lists every upload, download, rename, delete and save:
+
+![The History tab of a file window](docs/images/files-history.png)
+
+**SQL log** at the bottom of every database window, like HeidiSQL — passwords in
+`CREATE USER … IDENTIFIED BY` are masked:
+
+![SQL log of a database window](docs/images/sql-log.png)
+
+**My keys** (Authorized keys page): your key pairs, **Generate key pair…** and
+**Convert / export…** to PuTTY and other formats:
+
+![My keys: the key pairs on this computer](docs/images/my-keys.png)
+
+**Remote Desktop settings** per host, used by **Open RDP**:
+
+![Remote Desktop settings in the host editor](docs/images/rdp-settings.png)
+
 Make sure `ssh web01` works in a terminal first: Telepad uses exactly the same client,
 keys and options.
 
@@ -206,8 +272,10 @@ Everything else is in the [user manual](docs/USER_MANUAL.md).
 
 ## Documentation
 
-- [User manual](docs/USER_MANUAL.md): window layout, overview and host detail, adding and
-  importing hosts, RDP-only hosts, BMC sensors, updates, troubleshooting, command line
+- [User manual](docs/USER_MANUAL.md): how Telepad works, window layout and workspaces,
+  overview and host detail, adding and importing hosts, Remote Desktop settings, files and
+  their history, Authorized keys and My keys, the database browser and its SQL log, BMC
+  sensors, updates, troubleshooting, command line — with annotated screenshots
 - [Contributing](CONTRIBUTING.md): building from source, reporting bugs, making a change, releasing
 - [Security](SECURITY.md): security model and how to report a vulnerability
 - [AGENTS.md](AGENTS.md): architecture and conventions

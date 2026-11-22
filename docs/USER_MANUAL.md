@@ -3,7 +3,36 @@
 How to use Telepad once it is [installed](../README.md#install). For a first run see the
 [quick start](../README.md#quick-start).
 
-**Contents:** [Window layout](#window-layout) · [Workspaces](#workspaces) · [Overview](#overview) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
+**Contents:** [How Telepad works](#how-telepad-works) · [Window layout](#window-layout) · [Workspaces](#workspaces) · [Overview](#overview) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Files](#files-upload--download--manage--edit) · [Authorized keys](#authorized-keys-list-add-revoke) · [Database browser](#database-browser-mariadb--mysql--postgresql) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
+
+## How Telepad works
+
+Telepad runs on your computer only. It reaches your hosts with the same OpenSSH client and
+keys you use in a terminal, and keeps what it knows in three files next to each other.
+
+```mermaid
+flowchart TB
+    you(["You"]) --> ui["Telepad window<br/>sidebar · workspaces · inner windows"]
+    ui --> run["Background workers<br/>(the window never waits)"]
+    run -->|"ssh -F telepad.ssh_config … sh -s<br/>read-only, every 60 s"| hosts["Hosts"]
+    run -->|"sftp / scp / rsync,<br/>when you copy"| hosts
+    run -->|"ssh -N -L tunnel,<br/>when you open a database"| dbs["Databases on the hosts"]
+    run --> files[("telepad.db · preference.db · history.db")]
+    ui -->|"Open SSH / RDP"| apps["Terminal · Remote Desktop"]
+```
+
+| File | Holds | Never holds |
+|---|---|---|
+| `telepad.db` | hosts, settings, saved database connections, Remote Desktop settings | passwords (database passwords go to the system password store, if you tick it) |
+| `telepad.ssh_config` | the ssh config Telepad generates from `telepad.db` | — (rewritten on every change; do not edit) |
+| `preference.db` | workspaces: which windows, where, which folders / files / database | file contents, passwords |
+| `history.db` | transfers, file changes and SQL statements, 90 days | file contents, passwords (masked in SQL) |
+
+**What runs on a host.** Monitoring is one read-only shell script per round. Everything
+that changes a host is something you start and confirm: a Docker action (shown in a
+terminal), adding or revoking a key (you type `add` / `revoke`), a database change (you see
+the SQL and press **Run**), copying or changing files (Upload, Download, New, Rename,
+Delete, Save).
 
 ## Window layout
 
@@ -94,6 +123,13 @@ flowchart LR
     go --> bg["Running file transfers<br/>go on in the background"]
 ```
 
+![Leaving a workspace: one question lists what would be lost](images/workspace-leave.png)
+
+1. The **workspace** dropdown: picking another workspace (here `<none>`) starts the check.
+2. What would be lost, grouped by window.
+3. **Yes**: drop it and switch.
+4. **Back** (or Escape): stay, nothing changes.
+
 #### Before leaving: what is lost
 
 Leaving a workspace resets its windows, so half-made changes never follow you into
@@ -124,6 +160,14 @@ progress and results. When the last transfer ends, the background window closes 
 status bar says so.
 
 #### What comes back
+
+![Coming back: file, editor and database windows reopened](images/workspace-restored.png)
+
+1. The workspace you came back to.
+2. The file window, at its saved folders (its transfers still running).
+3. The editor, with its files read again from the host.
+4. The database window, connected again with the saved password, at its database.
+5. Its SQL log, read back from `history.db`.
 
 | Window | Saved | When it comes back |
 |---|---|---|
@@ -396,6 +440,15 @@ set); the host is up if either answers. **RDP** opens Remote Desktop (`mstsc` on
 
 ### Remote Desktop settings
 
+![Remote Desktop settings in the host editor](images/rdp-settings.png)
+
+1. **Save Remote Desktop settings for this host** (untick to forget them).
+2. **Import .rdp…** / **Export .rdp…**
+3. **Display**: full screen, a window of a set size, or fit the window.
+4. **Bring along**: clipboard, printers, drives.
+5. **RD Gateway**, used always or when needed.
+6. **Server check** and the note that no password is stored.
+
 The editor's **Remote Desktop settings** section (open for RDP-only hosts, folded for SSH
 hosts) keeps how Remote Desktop should connect, so **Open RDP** starts with them every
 time. Tick **Save Remote Desktop settings for this host**; untick it to forget them.
@@ -632,6 +685,14 @@ you clicked last, never while you are typing in a field.
 
 ### Transfer history
 
+![The History tab of a file window](images/files-history.png)
+
+1. **History (_n_)** next to **Transfers**.
+2. **Filter**, **All / Uploads / Downloads**, **Not done only**.
+3. **Export…** (CSV of the lines shown) and **Clear…**.
+4. One line per action: time (UTC), what → where, result, size, duration, method.
+5. Show the local folder of a transfer in the file manager.
+
 The transfer panel at the bottom of a file window has two tabs: **Transfers** (what runs
 now) and **History (_n_)**: everything Telepad copied or changed on this host, also in
 earlier sessions — newest on top.
@@ -802,6 +863,15 @@ copy, so a failure leaves it as it was.
 
 ### My keys (this computer)
 
+![My keys: the key pairs on this computer](images/my-keys.png)
+
+1. **Generate key pair…**
+2. **Import…** a key file in another format.
+3. The keys found (click one).
+4. Its details: type, format, passphrase, fingerprint, comment, which hosts use it.
+5. **Copy public key**, **Open folder**, **Add to hosts…**
+6. **Convert / export…**
+
 The **My keys** tab lists the key pairs on this computer: every private key in `~/.ssh`
 and every **IdentityFile** of your hosts (one that is missing is listed with the reason).
 `known_hosts`, `config`, `authorized_keys`, `.pub` and other files that are not keys are
@@ -830,12 +900,22 @@ in — you still pick the hosts and type `add`), **Convert / export…**.
 An existing file is never overwritten. The passphrase never appears on a command line:
 `ssh-keygen` writes the key into a private folder in `~/.ssh`, Telepad encrypts it there,
 then moves `id_…` and `id_….pub` into place. The private key is readable by your user only
-(Windows: only your account in its permissions; macOS / Linux: mode 600, `~/.ssh` 700).
+(Windows: your account, plus SYSTEM and Administrators as `ssh-keygen` sets them;
+macOS / Linux: mode 600, `~/.ssh` 700).
 Without `ssh-keygen` (Windows: the *OpenSSH Client* optional feature) the dialog says what
 to install.
 
 **Convert / export…** writes the key in another format, as a **new file** you choose (the
 source is never changed):
+
+![Convert / export dialog](images/my-keys-convert.png)
+
+1. The passphrase of the key, when it has one.
+2. The format to write (here PuTTY PPK v3).
+3. Greyed out: this key type has no such form (hover for the reason).
+4. Keep the passphrase, set a new one, or none.
+5. **Save as…** opens the save dialog; the result is shown in green.
+
 
 ```mermaid
 flowchart LR
@@ -986,6 +1066,16 @@ cannot reach the database address, the dialog says so.
 Closing the window, **Reconnect**, or quitting Telepad stops the SSH tunnel.
 
 ### SQL log
+
+![SQL log of a database window](images/sql-log.png)
+
+1. **SQL log (_n_)** and its filter.
+2. **Log SELECT too**: also log read-only statements of the Query tab.
+3. **Copy all** the SQL shown.
+4. **Export…** (CSV) and **Clear…**.
+5. Time (UTC), result, rows, milliseconds, database.
+6. A password in `IDENTIFIED BY` is written as `'***'`.
+7. Copy one statement.
 
 Like HeidiSQL, the bottom of a database window is the **SQL log**: every statement this
 connection ran that changed data or structure, also from earlier sessions, newest last.

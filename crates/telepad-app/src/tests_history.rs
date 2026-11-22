@@ -167,6 +167,7 @@ fn a_finished_transfer_is_logged_with_paths_size_and_method() {
     assert_eq!(e.kind, LogKind::Transfer);
     assert_eq!(e.host, "web1");
     assert!(e.title.starts_with("Upload"), "{}", e.title);
+    assert!(!e.title.starts_with("Upload Upload"), "{}", e.title);
     assert!(
         e.detail.contains("site.tar") && e.detail.contains("→ /srv/www"),
         "{}",

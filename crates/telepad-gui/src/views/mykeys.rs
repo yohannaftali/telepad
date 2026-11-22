@@ -88,7 +88,8 @@ pub fn my_keys(ui: &mut egui::Ui, m: &Model, d: &mut MyKeysDraft, out: &mut Vec<
     }
     egui::Panel::right("mykeys-detail")
         .resizable(true)
-        .default_size(360.0)
+        .min_size(340.0)
+        .default_size(460.0)
         .show(ui, |ui| {
             let sel = d
                 .selected

@@ -224,8 +224,17 @@ impl RdpSettings {
         l.push(format!("session bpp:i:{}", self.color_depth));
         l.push(format!("redirectclipboard:i:{}", u8::from(self.clipboard)));
         let drives = self.drives.trim();
-        if !drives.is_empty() {
-            l.push(format!("drivestoredirect:s:{drives}"));
+        if drives == "*" {
+            l.push("drivestoredirect:s:*".into());
+        } else if !drives.is_empty() {
+            // As mstsc writes them: `C:\;D:\;`.
+            let list: String = drives
+                .split(';')
+                .map(|d| d.trim().trim_end_matches('\\'))
+                .filter(|d| !d.is_empty())
+                .map(|d| format!("{d}\\;"))
+                .collect();
+            l.push(format!("drivestoredirect:s:{list}"));
         }
         l.push(format!("redirectprinters:i:{}", u8::from(self.printers)));
         l.push(format!(
@@ -324,7 +333,7 @@ impl RdpSettings {
                 "use multimon" => s.multimon = num() == 1,
                 "session bpp" => s.color_depth = (num() as u8).max(15),
                 "redirectclipboard" => s.clipboard = num() == 1,
-                "drivestoredirect" => s.drives = value.trim().to_string(),
+                "drivestoredirect" => s.drives = value.trim().trim_end_matches(';').to_string(),
                 "redirectprinters" => s.printers = num() == 1,
                 "audiomode" => {
                     s.audio = match num() {
@@ -500,6 +509,14 @@ mod tests {
         };
         let text = fit.render("h", 3389);
         assert!(text.contains("dynamic resolution:i:1") && text.contains("username:s:ops"));
+        let d = RdpSettings {
+            drives: "C:;d:\\".into(),
+            ..Default::default()
+        };
+        assert!(
+            d.render("h", 3389)
+                .contains("drivestoredirect:s:C:\\;d:\\;")
+        );
     }
 
     #[test]
