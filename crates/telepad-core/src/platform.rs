@@ -187,11 +187,19 @@ pub fn restrict_to_owner(path: &std::path::Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        let user = std::env::var("USERNAME").map_err(|_| "USERNAME is not set".to_string())?;
-        let out = Command::new("icacls.exe")
+        // By SID (#112): `%USERNAME%` does not resolve for every domain or
+        // Microsoft account, the SID of the logged-in user always does.
+        let who = current_user_sid().map_or_else(
+            || std::env::var("USERNAME").unwrap_or_default(),
+            |sid| format!("*{sid}"),
+        );
+        if who.is_empty() {
+            return Err("cannot tell who the current user is".into());
+        }
+        let out = Command::new(system32("icacls.exe"))
             .arg(path)
             .args(["/inheritance:r", "/grant:r"])
-            .arg(format!("{user}:F"))
+            .arg(format!("{who}:F"))
             .creation_flags(0x0800_0000)
             .output()
             .map_err(|e| format!("icacls: {e}"))?;
@@ -210,6 +218,38 @@ pub fn restrict_to_owner(path: &std::path::Path) -> Result<(), String> {
         let _ = path;
         Ok(())
     }
+}
+
+/// `%SystemRoot%\System32\<exe>`, so a same-named program elsewhere on
+/// PATH (Git for Windows' `whoami`, …) is never run instead.
+#[cfg(target_os = "windows")]
+fn system32(exe: &str) -> PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(|r| PathBuf::from(r).join("System32").join(exe))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| PathBuf::from(exe))
+}
+
+/// SID of the user Telepad runs as (`S-1-5-21-…`), from `whoami /user`.
+#[cfg(target_os = "windows")]
+pub fn current_user_sid() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    let out = Command::new(system32("whoami.exe"))
+        .args(["/user", "/fo", "csv", "/nh"])
+        .creation_flags(0x0800_0000)
+        .output()
+        .ok()?;
+    parse_whoami_sid(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// The SID column of `whoami /user /fo csv /nh` (`"pc\user","S-1-5-…"`).
+pub fn parse_whoami_sid(out: &str) -> Option<String> {
+    let sid = out.trim().rsplit(',').next()?.trim().trim_matches('"');
+    (sid.starts_with("S-1-")
+        && sid
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '-' || c == 'S'))
+    .then(|| sid.to_string())
 }
 
 /// Show a local folder in the system's file manager (#100: a history

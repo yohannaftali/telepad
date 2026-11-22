@@ -690,7 +690,12 @@ impl Runtime {
                 let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
                 thread::spawn(move || {
                     let r = local_keys::generate(kind, &path, &comment, pass.expose());
-                    send(tx, ctx, MkMsg::Generated(r));
+                    if let Ok((_, Some(w))) = &r {
+                        let _ = tx.send(Msg::Notice(format!(
+                            "Key created, but its permissions could not be narrowed: {w}"
+                        )));
+                    }
+                    send(tx, ctx, MkMsg::Generated(r.map(|(p, _)| p)));
                 });
                 None
             }
