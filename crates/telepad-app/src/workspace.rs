@@ -78,6 +78,12 @@ pub enum WkMsg {
     AskDelete(String),
     Delete(String),
     CancelDelete,
+    /// The leave question (#99): go on and drop what it listed.
+    LeaveYes,
+    /// The leave question: stay in the workspace, nothing changes.
+    LeaveBack,
+    /// Telepad is closing: ask first if something would be lost.
+    AskQuit,
 }
 
 /// Position and size inside the workspace, in points: x, y, width, height.
@@ -111,8 +117,12 @@ pub struct Workspace {
     /// The window keys go to (the one clicked or opened last).
     pub focused: Option<Win>,
     pub sidebar_collapsed: bool,
-    /// Host window of a restored layout, placed once the hosts are known.
-    pub pending_host: Option<PendingHost>,
+    /// Session windows of a restored layout (host, files, editor,
+    /// database), placed when their session opens (#94, #99).
+    pub pending: Vec<PendingWin>,
+    /// Window of each restored layout line that already exists (line, id):
+    /// session tabs of that line join it.
+    line_groups: Vec<(usize, u64)>,
     next_id: u64,
     raise_seq: u64,
 }
@@ -236,7 +246,9 @@ impl Workspace {
         if m.host_sync.is_some() {
             want.push(Win::HostSync);
         }
-        for s in &m.files {
+        // A file window left with transfers running stays in the background
+        // (#99): no window until its host's files are opened again.
+        for s in m.files.iter().filter(|s| !s.background) {
             want.push(Win::Files(s.id));
             if !s.editor.tabs.is_empty() {
                 want.push(Win::Editor(s.id));
@@ -261,8 +273,15 @@ impl Workspace {
             self.close(w);
         }
         for w in want {
-            if !self.is_open(w) {
-                self.open(w);
+            if self.is_open(w) {
+                continue;
+            }
+            let pending = session_key(m, w)
+                .and_then(|k| self.pending.iter().position(|p| p.key == k))
+                .map(|i| self.pending.remove(i));
+            match pending {
+                Some(p) => self.place(w, p),
+                None => self.open(w),
             }
         }
     }
@@ -405,12 +424,17 @@ impl Workspace {
     /// The layout of a workspace (#94, kept in `preference.db`): one line per
     /// window with at least one page that is reopened:
     /// `x,y,w,h|minimized|maximized|active|tab;tab`. The host window is
-    /// `host:<alias>` (`host` = the selected host's alias).
+    /// `host:<alias>` (`host` = the selected host's alias); the other session
+    /// windows need the model: [`layout`].
     pub fn save(&self, host: Option<&str>) -> String {
-        let key = |w: Win| match w {
-            Win::Host => host.map(|a| format!("host:{a}")),
+        self.save_with(&|w| match w {
+            Win::Host => host.map(|a| format!("host:{}", esc(a))),
             _ => w.key().map(String::from),
-        };
+        })
+    }
+
+    /// [`Workspace::save`] with `key` naming each tab (`None`: not saved).
+    pub fn save_with(&self, key: &dyn Fn(Win) -> Option<String>) -> String {
         let mut lines = Vec::new();
         for g in &self.groups {
             let tabs: Vec<String> = g.tabs.iter().filter_map(|&w| key(w)).collect();
@@ -423,9 +447,10 @@ impl Workspace {
                 .map(|r| format!("{},{},{},{}", r[0], r[1], r[2], r[3]))
                 .unwrap_or_default();
             lines.push(format!(
-                "{rect}|{}|{}|{active}|{}",
+                "{rect}|{}|{}|{}|{}",
                 u8::from(g.minimized),
                 u8::from(g.maximized),
+                token_key(&active),
                 tabs.join(";")
             ));
         }
@@ -434,8 +459,8 @@ impl Workspace {
 
     /// Restore a saved layout exactly (nothing saved: no windows). `keys` is
     /// dropped when the Authorized keys page is closed (it follows its
-    /// session); a `host:<alias>` tab waits in `pending_host` until the
-    /// hosts are known ([`Workspace::place_host`]).
+    /// session); session tabs (`host:`, `files:`, `editor:`, `db:`) wait in
+    /// `pending` until their session opens ([`Workspace::sync`]).
     pub fn restore(&mut self, saved: &str) {
         let sidebar = self.sidebar_collapsed;
         *self = Workspace {
@@ -444,35 +469,16 @@ impl Workspace {
             raise_seq: self.raise_seq,
             ..Default::default()
         };
-        for line in saved.lines() {
+        for (line_no, line) in saved.lines().enumerate() {
             let f: Vec<&str> = line.split('|').collect();
             if f.len() != 5 {
                 continue;
             }
-            let host = f[4]
-                .split(';')
-                .find_map(|t| t.strip_prefix("host:"))
-                .filter(|a| !a.is_empty());
-            let tabs: Vec<Win> = f[4]
-                .split(';')
-                .filter_map(Win::from_key)
-                .filter(|w| {
-                    matches!(
-                        w,
-                        Win::Overview
-                            | Win::Docker
-                            | Win::Kube
-                            | Win::Swarm
-                            | Win::HostSync
-                            | Win::Keys
-                    )
-                })
-                .collect();
+            let tabs: Vec<Win> = f[4].split(';').filter_map(Win::from_key).collect();
             let nums: Vec<f32> = f[0].split(',').filter_map(|v| v.parse().ok()).collect();
             let rect = (nums.len() == 4 && nums[2] > 0.0 && nums[3] > 0.0)
                 .then(|| [nums[0], nums[1], nums[2], nums[3]]);
             let (minimized, maximized) = (f[1] == "1", f[2] == "1");
-            let mut group = None;
             if !tabs.is_empty() {
                 let gi = self.new_group(tabs, rect);
                 let g = &mut self.groups[gi];
@@ -483,15 +489,22 @@ impl Workspace {
                 {
                     g.active = a;
                 }
-                group = Some(g.id);
+                let id = g.id;
+                self.line_groups.push((line_no, id));
             }
-            if let Some(alias) = host
-                && self.pending_host.is_none()
-            {
-                self.pending_host = Some(PendingHost {
-                    alias: alias.to_string(),
-                    group,
-                    active: f[3].starts_with("host:"),
+            for t in f[4].split(';') {
+                let key = token_key(t);
+                let known = ["host:", "files:", "editor:", "db:"]
+                    .iter()
+                    .any(|p| key.len() > p.len() && key.starts_with(p));
+                if !known || self.pending.iter().any(|p| p.key == key) {
+                    continue;
+                }
+                self.pending.push(PendingWin {
+                    key: key.to_string(),
+                    data: token_data(t),
+                    line: line_no,
+                    active: f[3] == key,
                     rect,
                     minimized,
                     maximized,
@@ -505,11 +518,36 @@ impl Workspace {
     /// saved (first start).
     pub fn restore_or_default(&mut self, saved: &str) {
         self.restore(saved);
-        if self.groups.is_empty() && self.pending_host.is_none() {
+        if self.groups.is_empty() && self.pending.is_empty() {
             let gi = self.new_group(vec![Win::Overview], None);
             self.groups[gi].maximized = true;
             self.focus_front();
         }
+    }
+
+    /// Alias of the host window of a restored layout, if one waits.
+    pub fn pending_host(&self) -> Option<String> {
+        self.pending
+            .iter()
+            .find_map(|p| p.key.strip_prefix("host:").map(unesc))
+    }
+
+    /// Pending windows of one kind (`"files:"`, `"editor:"`, `"db:"`):
+    /// (key, name, data).
+    pub fn pending_of(&self, prefix: &str) -> Vec<(String, String, Vec<String>)> {
+        self.pending
+            .iter()
+            .filter_map(|p| {
+                p.key
+                    .strip_prefix(prefix)
+                    .map(|n| (p.key.clone(), unesc(n), p.data.clone()))
+            })
+            .collect()
+    }
+
+    /// Forget a pending window whose session will not open.
+    pub fn drop_pending(&mut self, key: &str) {
+        self.pending.retain(|p| p.key != key);
     }
 
     fn focus_front(&mut self) {
@@ -521,26 +559,32 @@ impl Workspace {
             .map(Group::active_win);
     }
 
-    /// Put the host window of a restored layout back where it was (the
-    /// host has been selected by the caller).
-    pub fn place_host(&mut self, p: PendingHost) {
-        if self.is_open(Win::Host) {
+    /// Put a session window of a restored layout back where it was: as a
+    /// tab of the window its line already has, else in a window of its own.
+    fn place(&mut self, win: Win, p: PendingWin) {
+        if self.is_open(win) {
             return;
         }
-        if let Some(gi) = p
-            .group
-            .and_then(|id| self.groups.iter().position(|g| g.id == id))
-        {
+        let line_group = self
+            .line_groups
+            .iter()
+            .find(|(l, _)| *l == p.line)
+            .and_then(|(_, id)| self.groups.iter().position(|g| g.id == *id));
+        if let Some(gi) = line_group {
+            let raise = self.bump();
             let g = &mut self.groups[gi];
-            g.tabs.push(Win::Host);
+            g.tabs.push(win);
             if p.active {
                 g.active = g.tabs.len() - 1;
             }
+            g.raise = raise;
         } else {
-            let gi = self.new_group(vec![Win::Host], p.rect);
+            let gi = self.new_group(vec![win], p.rect);
             let g = &mut self.groups[gi];
             g.minimized = p.minimized;
             g.maximized = p.maximized;
+            let id = g.id;
+            self.line_groups.push((p.line, id));
         }
         self.focus_front();
     }
@@ -565,16 +609,151 @@ impl Workspace {
     }
 }
 
-/// The host window of a restored layout, waiting for the hosts (#94).
+/// A session window of a restored layout, waiting for its session (#94, #99).
 #[derive(Debug, Clone, PartialEq)]
-pub struct PendingHost {
-    pub alias: String,
-    /// The window it was a tab of (when it had other tabs).
-    group: Option<u64>,
+pub struct PendingWin {
+    /// `host:<alias>`, `files:<alias>`, `editor:<alias>`, `db:<target key>`.
+    pub key: String,
+    /// What reopens it: folders, editor tabs, database target.
+    pub data: Vec<String>,
+    /// Its line in the layout (tabs of one line share a window).
+    line: usize,
     active: bool,
     rect: Option<Rect>,
     minimized: bool,
     maximized: bool,
+}
+
+/// `%`, `,`, `;`, `|` and line breaks escaped, so any name or path fits in
+/// a layout token.
+pub fn esc(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '%' => o.push_str("%25"),
+            ',' => o.push_str("%2C"),
+            ';' => o.push_str("%3B"),
+            '|' => o.push_str("%7C"),
+            '\n' => o.push_str("%0A"),
+            '\r' => o.push_str("%0D"),
+            _ => o.push(c),
+        }
+    }
+    o
+}
+
+/// The other way of [`esc`]; an unknown `%` sequence stays as it is.
+pub fn unesc(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('%') {
+        o.push_str(&rest[..i]);
+        let c = match rest.get(i + 1..i + 3) {
+            Some("25") => Some('%'),
+            Some("2C") => Some(','),
+            Some("3B") => Some(';'),
+            Some("7C") => Some('|'),
+            Some("0A") => Some('\n'),
+            Some("0D") => Some('\r'),
+            _ => None,
+        };
+        match c {
+            Some(c) => {
+                o.push(c);
+                rest = &rest[i + 3..];
+            }
+            None => {
+                o.push('%');
+                rest = &rest[i + 1..];
+            }
+        }
+    }
+    o.push_str(rest);
+    o
+}
+
+/// A layout tab is `kind:name` or `kind:name,data,data…` (escaped).
+fn token_key(t: &str) -> &str {
+    t.split(',').next().unwrap_or(t)
+}
+
+fn token_data(t: &str) -> Vec<String> {
+    t.split(',').skip(1).map(unesc).collect()
+}
+
+/// Name of a session window in a layout and in `pending`.
+pub fn session_key(m: &Model, w: Win) -> Option<String> {
+    Some(match w {
+        Win::Host => format!("host:{}", esc(&m.hosts.get(m.selected?)?.entry.alias)),
+        Win::Files(id) => format!(
+            "files:{}",
+            esc(&m.files.iter().find(|s| s.id == id)?.host.alias)
+        ),
+        Win::Editor(id) => format!(
+            "editor:{}",
+            esc(&m.files.iter().find(|s| s.id == id)?.host.alias)
+        ),
+        Win::Db(id) => format!(
+            "db:{}",
+            esc(&m.db.iter().find(|s| s.id == id)?.target.key())
+        ),
+        _ => return None,
+    })
+}
+
+/// The layout of the live workspace with every window that can come back
+/// (#99): pages, the host window, file windows with their folders, editor
+/// windows with their tabs (paths only, never text), database windows with
+/// their target and database / schema.
+pub fn layout(m: &Model) -> String {
+    m.ws.save_with(&|w| {
+        if let Some(k) = w.key() {
+            return Some(k.to_string());
+        }
+        let key = session_key(m, w)?;
+        let data: Vec<String> = match w {
+            Win::Files(id) => {
+                let s = m.files.iter().find(|s| s.id == id)?;
+                let (l, r) = s.folders();
+                vec![l, r]
+            }
+            Win::Editor(id) => {
+                let s = m.files.iter().find(|s| s.id == id)?;
+                s.editor
+                    .tabs
+                    .iter()
+                    .map(|t| {
+                        let side = match t.side {
+                            crate::files::Side::Local => 'L',
+                            crate::files::Side::Remote => 'R',
+                        };
+                        format!("{side}{}", t.path)
+                    })
+                    .collect()
+            }
+            Win::Db(id) => {
+                let s = m.db.iter().find(|s| s.id == id)?;
+                let t = &s.target;
+                let (db, schema) = s.restore_point();
+                vec![
+                    t.engine.as_str().to_string(),
+                    t.host.clone(),
+                    t.container.clone(),
+                    t.address.clone(),
+                    t.port.to_string(),
+                    db,
+                    schema,
+                ]
+            }
+            _ => Vec::new(),
+        };
+        let mut tok = key;
+        for d in data {
+            tok.push(',');
+            tok.push_str(&esc(&d));
+        }
+        Some(tok)
+    })
 }
 
 const GAP: f32 = 4.0;

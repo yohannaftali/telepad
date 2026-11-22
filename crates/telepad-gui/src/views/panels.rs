@@ -197,6 +197,17 @@ pub fn status_bar(ui: &mut egui::Ui, m: &Model, now: Instant) {
             ui.label(RichText::new(icons::WARNING).weak())
                 .on_hover_text(tip);
         }
+        let bg = telepad_app::background_transfers(m);
+        if bg > 0 {
+            ui.separator();
+            ui.label(format!(
+                "{} {bg} file transfer(s) running in the background",
+                icons::ARROW_RIGHT
+            ))
+            .on_hover_text(
+                "Open the host's files to see them (they keep running in every workspace)",
+            );
+        }
         if let Some(text) = m.message_at(now) {
             ui.separator();
             ui.label(text);

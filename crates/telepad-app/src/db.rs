@@ -196,11 +196,24 @@ pub struct DbSession {
     pub confirm: Option<DbConfirm>,
     /// A structure change is running.
     pub ddl_running: bool,
+    /// Reopened from a workspace (#99): database / schema to go back to.
+    pub restore: Option<(String, String)>,
+    /// Reopened from a workspace: connect once the profile is loaded, when a
+    /// password is saved (else the connect form waits for the user).
+    pub auto_connect: bool,
 }
 
 impl DbSession {
     pub fn engine(&self) -> Engine {
         self.target.engine
+    }
+
+    /// Database and schema a workspace reopens it at (#99).
+    pub fn restore_point(&self) -> (String, String) {
+        self.current
+            .clone()
+            .or_else(|| self.restore.clone())
+            .unwrap_or_default()
     }
 
     pub fn node(&self, database: &str) -> Option<&DbNode> {
@@ -413,6 +426,13 @@ pub enum DbEffect {
 #[derive(Debug, Clone)]
 pub enum DbMsg {
     Open(DbTarget),
+    /// Reopen from a workspace (#99): open, connect with the saved password
+    /// if there is one, go back to this database / schema.
+    Restore {
+        target: DbTarget,
+        database: String,
+        schema: String,
+    },
     Loaded {
         id: DbId,
         profile: Option<Profile>,
@@ -711,6 +731,23 @@ pub fn update(
     msg: DbMsg,
 ) -> Vec<DbEffect> {
     let mut fx = Vec::new();
+    if let DbMsg::Restore {
+        target,
+        database,
+        schema,
+    } = msg
+    {
+        let key = target.key();
+        if sessions.iter().any(|s| s.target.key() == key) {
+            return fx;
+        }
+        fx = update(sessions, drafts, next_id, host_entry, DbMsg::Open(target));
+        if let Some(s) = sessions.iter_mut().find(|s| s.target.key() == key) {
+            s.restore = Some((database, schema));
+            s.auto_connect = true;
+        }
+        return fx;
+    }
     if let DbMsg::Open(target) = msg {
         if sessions.iter().any(|s| s.target.key() == target.key()) {
             return fx;
@@ -749,11 +786,12 @@ pub fn update(
         return fx;
     }
     let mut reopen: Option<(TableRef, DbTab)> = None;
+    let mut connect_now = false;
     let s = &mut sessions[pos];
     let d = drafts.entry(id).or_default();
     let engine = s.engine();
     match msg {
-        DbMsg::Open(_) | DbMsg::Close(_) => {}
+        DbMsg::Open(_) | DbMsg::Restore { .. } | DbMsg::Close(_) => {}
         DbMsg::Loaded {
             profile,
             store,
@@ -767,7 +805,13 @@ pub fn update(
                 d.save_password = p.save_password && store.is_ok();
                 s.read_only = p.read_only;
             }
+            if let Some((db, _)) = s.restore.as_ref().filter(|(db, _)| !db.is_empty()) {
+                d.database = db.clone();
+            }
             s.store = Some(store);
+            if std::mem::take(&mut s.auto_connect) && s.saved_password && d.save_password {
+                connect_now = true;
+            }
         }
         DbMsg::EnvUser { user, .. } => {
             if let Some(u) = user
@@ -964,7 +1008,12 @@ pub fn update(
             if let Err(e) = result {
                 s.error = Some(e);
             }
-            if let (Some(first), Some((db, schema))) = (first, s.current.clone())
+            let wanted = s
+                .restore
+                .take()
+                .map(|(_, schema)| schema)
+                .filter(|w| !w.is_empty() && s.schema_mut(&database, w).is_some());
+            if let (Some(first), Some((db, schema))) = (wanted.or(first), s.current.clone())
                 && db == database
                 && schema.is_empty()
             {
@@ -1506,6 +1555,15 @@ pub fn update(
             }
         }
     }
+    if connect_now {
+        fx.extend(update(
+            sessions,
+            drafts,
+            next_id,
+            host_entry,
+            DbMsg::Connect(id),
+        ));
+    }
     if let Some((table, tab)) = reopen {
         let mut more = update(
             sessions,
@@ -1601,7 +1659,7 @@ fn run_query(s: &mut DbSession, tab: usize, statements: Vec<String>, fx: &mut Ve
 fn msg_id(msg: &DbMsg) -> DbId {
     use DbMsg::*;
     match msg {
-        Open(_) => 0,
+        Open(_) | Restore { .. } => 0,
         Loaded { id, .. }
         | EnvUser { id, .. }
         | Connected { id, .. }
@@ -1655,4 +1713,35 @@ fn msg_id(msg: &DbMsg) -> DbId {
         | RenameCancel(id)
         | RenameSave(id) => *id,
     }
+}
+
+/// What closing this window would throw away (#99), one line each.
+pub fn unsaved(s: &DbSession, d: &DbDraft) -> Vec<String> {
+    let mut v = Vec::new();
+    if !s.data.edits.is_empty() {
+        v.push(format!(
+            "{} changed row(s) in the Data grid, not posted",
+            s.data.edits.count()
+        ));
+    }
+    if d.structure.is_some() {
+        v.push("Structure editor changes, not run".into());
+    }
+    if d.new_table.is_some() {
+        v.push("New table, not created".into());
+    }
+    if d.rename.is_some() {
+        v.push("Table rename, not run".into());
+    }
+    if s.confirm.is_some() {
+        v.push("SQL waiting for Run".into());
+    }
+    let typed = d.queries.iter().filter(|q| !q.trim().is_empty()).count();
+    if typed > 0 {
+        v.push(format!("{typed} query tab(s) with text"));
+    }
+    if s.status == DbStatus::Login && !d.password.is_empty() {
+        v.push("Connect form with a typed password".into());
+    }
+    v
 }

@@ -40,6 +40,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         drafts: d,
     } = state;
     let hosts_changed = matches!(msg, Msg::HostsLoaded { .. });
+    let collected_host = matches!(msg, Msg::Collected(collector::Update::Done { .. }));
     match msg {
         Msg::Started {
             db_path,
@@ -67,7 +68,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 }
             }
             restore_current(m);
-            m.ws_saved = (m.ws.save(None), m.ws.sidebar_collapsed);
+            m.ws_saved = (crate::workspace::layout(m), m.ws.sidebar_collapsed);
             fx.extend(start_page_sessions(m, d));
             if let Some(src) = imported_from {
                 say(
@@ -885,10 +886,16 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
     if hosts_changed && d.keys.is_some() && m.auth_keys.is_empty() {
         fx.extend(load_keys(m, None));
     }
-    // The host window of a restored layout, once the hosts are known.
+    // The session windows of a restored layout, once the hosts are known.
     if hosts_changed {
         place_pending_host(m);
+        fx.extend(start_pending_files(m, d, now));
     }
+    if hosts_changed || collected_host {
+        fx.extend(start_pending_dbs(m, d, now));
+    }
+    // A file window left in the background closes when its transfers end.
+    fx.extend(close_finished_background(m, d, now));
     // Session windows follow their sessions; save the layout when it changed.
     let mut ws = std::mem::take(&mut m.ws);
     ws.sync(m);
@@ -900,17 +907,11 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
     fx
 }
 
-fn selected_alias(m: &Model) -> Option<&str> {
-    m.selected
-        .and_then(|i| m.hosts.get(i))
-        .map(|h| h.entry.alias.as_str())
-}
-
 /// Layout changes go to the current workspace (none while `<none>` is
 /// current) and are written at most once a second; the sidebar goes to
 /// `telepad.db` at once.
 fn autosave(m: &mut Model, d: &crate::Drafts, now: Instant, fx: &mut Vec<Effect>) {
-    let layout = m.ws.save(selected_alias(m));
+    let layout = crate::workspace::layout(m);
     if layout != m.ws_saved.0 {
         m.ws_saved.0 = layout.clone();
         let current = m.wss.current.clone();
@@ -975,16 +976,314 @@ fn start_page_sessions(m: &mut Model, d: &mut crate::Drafts) -> Vec<Effect> {
     fx
 }
 
-/// Select the host of a restored layout and put its window back; a host
-/// that no longer exists is left out.
+/// Select the host of a restored layout (its window is put back by
+/// `Workspace::sync`); a host that no longer exists is left out.
 fn place_pending_host(m: &mut Model) {
-    let Some(p) = m.ws.pending_host.take() else {
+    let Some(alias) = m.ws.pending_host() else {
         return;
     };
-    if let Some(i) = m.hosts.iter().position(|h| h.entry.alias == p.alias) {
-        m.selected = Some(i);
-        m.ws.place_host(p);
+    match m.hosts.iter().position(|h| h.entry.alias == alias) {
+        Some(i) => m.selected = Some(i),
+        None => {
+            m.ws.drop_pending(&format!("host:{}", crate::workspace::esc(&alias)))
+        }
     }
+}
+
+/// File and editor windows of a restored layout (#99): connect them again
+/// with their folders and files; a host that is gone is left out.
+fn start_pending_files(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec<Effect> {
+    use crate::files::{FmMsg, Side};
+    let mut fx = Vec::new();
+    if m.hosts.is_empty() {
+        return fx;
+    }
+    let files = m.ws.pending_of("files:");
+    let editors = m.ws.pending_of("editor:");
+    let mut aliases: Vec<String> = files.iter().map(|(_, a, _)| a.clone()).collect();
+    for (_, a, _) in &editors {
+        if !aliases.contains(a) {
+            aliases.push(a.clone());
+        }
+    }
+    let mut gone = Vec::new();
+    for alias in aliases {
+        let file_key = format!("files:{}", crate::workspace::esc(&alias));
+        let edit_key = format!("editor:{}", crate::workspace::esc(&alias));
+        if !m.hosts.iter().any(|h| h.entry.alias == alias) {
+            m.ws.drop_pending(&file_key);
+            m.ws.drop_pending(&edit_key);
+            gone.push(alias);
+            continue;
+        }
+        if m.files
+            .iter()
+            .any(|s| s.host.alias == alias && !s.background)
+        {
+            continue;
+        }
+        let folders = files
+            .iter()
+            .find(|(k, _, _)| *k == file_key)
+            .and_then(|(_, _, data)| match data.as_slice() {
+                [l, r] if !l.is_empty() && !r.is_empty() => Some((l.clone(), r.clone())),
+                _ => None,
+            });
+        let edit: Vec<(Side, String)> = editors
+            .iter()
+            .find(|(k, _, _)| *k == edit_key)
+            .map(|(_, _, data)| {
+                data.iter()
+                    .filter_map(|t| {
+                        let side = match t.chars().next()? {
+                            'L' => Side::Local,
+                            'R' => Side::Remote,
+                            _ => return None,
+                        };
+                        let path = &t[1..];
+                        (!path.is_empty()).then(|| (side, path.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let hosts = &m.hosts;
+        let entry = |a: &str| {
+            hosts
+                .iter()
+                .find(|h| h.entry.alias == a)
+                .map(|h| h.entry.clone())
+        };
+        fx.extend(
+            crate::files::update(
+                &mut m.files,
+                &mut d.files,
+                &mut m.files_next,
+                &entry,
+                FmMsg::Restore {
+                    alias,
+                    folders,
+                    edit,
+                },
+                now,
+            )
+            .into_iter()
+            .map(Effect::Files),
+        );
+    }
+    if !gone.is_empty() {
+        say(
+            m,
+            now,
+            format!(
+                "Not in the inventory any more, file window left out: {}",
+                gone.join(", ")
+            ),
+        );
+    }
+    fx
+}
+
+/// Database windows of a restored layout (#99), once their host has been
+/// checked: the target is looked up again (a container's address can
+/// change); one that is gone is left out with a note. A host that could not
+/// be checked gets the saved target (its window shows the connect error).
+fn start_pending_dbs(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec<Effect> {
+    use telepad_core::db::{DbTarget, Engine};
+    let mut fx = Vec::new();
+    if m.hosts.is_empty() {
+        return fx;
+    }
+    let mut notes = Vec::new();
+    for (key, _, data) in m.ws.pending_of("db:") {
+        let [engine, host, container, address, port, database, schema] = data.as_slice() else {
+            m.ws.drop_pending(&key);
+            continue;
+        };
+        let (Some(engine), Ok(port)) = (Engine::parse(engine), port.parse::<u16>()) else {
+            m.ws.drop_pending(&key);
+            continue;
+        };
+        let saved = DbTarget {
+            engine,
+            host: host.clone(),
+            container: container.clone(),
+            container_id: String::new(),
+            address: address.clone(),
+            port,
+        };
+        if m.db.iter().any(|s| s.target.key() == saved.key()) {
+            continue;
+        }
+        let Some(h) = m.hosts.iter().find(|h| h.entry.alias == *host) else {
+            m.ws.drop_pending(&key);
+            notes.push(saved.title());
+            continue;
+        };
+        let target = match (&h.report, &h.error) {
+            (Some(r), _) => {
+                match crate::db::host_db_targets(host, r)
+                    .into_iter()
+                    .find(|t| t.key() == saved.key())
+                {
+                    Some(t) => t,
+                    None => {
+                        m.ws.drop_pending(&key);
+                        notes.push(saved.title());
+                        continue;
+                    }
+                }
+            }
+            (None, Some(_)) => saved,
+            (None, None) => continue,
+        };
+        let hosts = &m.hosts;
+        let entry = |a: &str| {
+            hosts
+                .iter()
+                .find(|h| h.entry.alias == a)
+                .map(|h| h.entry.clone())
+        };
+        fx.extend(
+            crate::db::update(
+                &mut m.db,
+                &mut d.db,
+                &mut m.db_next,
+                &entry,
+                crate::db::DbMsg::Restore {
+                    target,
+                    database: database.clone(),
+                    schema: schema.clone(),
+                },
+            )
+            .into_iter()
+            .map(Effect::Db),
+        );
+    }
+    if !notes.is_empty() {
+        say(
+            m,
+            now,
+            format!("Database gone, window left out: {}", notes.join(", ")),
+        );
+    }
+    fx
+}
+
+/// Background file windows (#99) whose transfers ended: close them.
+fn close_finished_background(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec<Effect> {
+    let done: Vec<(crate::files::FmId, String)> = m
+        .files
+        .iter()
+        .filter(|s| s.background && s.running_transfers() == 0)
+        .map(|s| (s.id, s.host.alias.clone()))
+        .collect();
+    let mut fx = Vec::new();
+    for (id, alias) in done {
+        let hosts = &m.hosts;
+        let entry = |a: &str| {
+            hosts
+                .iter()
+                .find(|h| h.entry.alias == a)
+                .map(|h| h.entry.clone())
+        };
+        fx.extend(
+            crate::files::update(
+                &mut m.files,
+                &mut d.files,
+                &mut m.files_next,
+                &entry,
+                crate::files::FmMsg::Discard(id),
+                now,
+            )
+            .into_iter()
+            .map(Effect::Files),
+        );
+        say(m, now, format!("Background transfers to {alias} finished"));
+    }
+    fx
+}
+
+/// File transfers running in the background (#99), for the status bar.
+pub fn background_transfers(m: &Model) -> usize {
+    m.files
+        .iter()
+        .filter(|s| s.background)
+        .map(|s| s.running_transfers())
+        .sum()
+}
+
+/// What leaving the workspace would throw away (#99): (window, what) per
+/// line, and how many transfers keep running. `quit`: Telepad closes, so
+/// running transfers are lost too.
+pub fn leave_losses(state: &State, quit: bool) -> (Vec<(String, String)>, usize) {
+    let (m, d) = (&state.model, &state.drafts);
+    let mut v: Vec<(String, String)> = Vec::new();
+    let mut running = 0;
+    for s in &m.files {
+        let win = format!("Files – {}", s.host.alias);
+        if let Some(fd) = d.files.get(&s.id) {
+            for w in crate::files::unsaved(s, fd) {
+                v.push((win.clone(), w));
+            }
+        }
+        let n = s.running_transfers();
+        if quit && n > 0 {
+            v.push((win, format!("{n} running transfer(s), cancelled")));
+        }
+        running += n;
+    }
+    for s in &m.db {
+        if let Some(dd) = d.db.get(&s.id) {
+            for w in crate::db::unsaved(s, dd) {
+                v.push((format!("Database – {}", s.target.title()), w));
+            }
+        }
+    }
+    if let Some(hs) = &m.host_sync {
+        let n = hs.pending_count();
+        if n > 0 {
+            v.push((
+                "Host Management".into(),
+                format!("{n} change(s) not applied, discarded"),
+            ));
+        }
+        if d.host_sync.form.is_some() {
+            v.push(("Host Management".into(), "Host form, not saved".into()));
+        }
+    }
+    if let Some(k) = &d.keys {
+        if !k.text.trim().is_empty() {
+            v.push(("Authorized keys".into(), "Pasted key, not added".into()));
+        }
+        if !k.selected.is_empty() {
+            v.push((
+                "Authorized keys".into(),
+                format!("{} server(s) chosen", k.selected.len()),
+            ));
+        }
+        if k.confirm.is_some() {
+            v.push((
+                "Authorized keys".into(),
+                "Add / revoke waiting for confirmation".into(),
+            ));
+        }
+    }
+    if d.editor.is_some() {
+        v.push(("Host editor".into(), "Host changes, not saved".into()));
+    }
+    if d.paste.is_some() {
+        v.push(("Import".into(), "Pasted hosts, not imported".into()));
+    }
+    if m.import.is_some() {
+        v.push(("Import".into(), "Import preview, not imported".into()));
+    }
+    if m.update.window && m.update.config.as_ref() != Some(&d.update_form) {
+        v.push((
+            "Software update".into(),
+            "Settings changed, not saved".into(),
+        ));
+    }
+    (v, if quit { 0 } else { running })
 }
 
 /// The workspace list (#94). Switching closes every window first (their
@@ -1004,19 +1303,43 @@ fn workspaces(state: &mut State, wk: crate::workspace::WkMsg, now: Instant) -> V
             {
                 return fx;
             }
-            if !switch_to(state, to, now, &mut fx) {
+            if ask_leave(state, Some(to.clone()), None) {
                 return fx;
+            }
+            switch_to(state, to, now, &mut fx);
+        }
+        WkMsg::AskQuit => {
+            if !ask_leave(state, None, None) {
+                state.model.quit = true;
+            }
+        }
+        WkMsg::LeaveBack => {
+            state.drafts.ws_leave = None;
+            state.drafts.ws_picker = Default::default();
+        }
+        WkMsg::LeaveYes => {
+            let Some(ask) = state.drafts.ws_leave.take() else {
+                return fx;
+            };
+            match ask.to {
+                None => state.model.quit = true,
+                Some(to) => {
+                    switch_to(state, to, now, &mut fx);
+                    if let Some(label) = ask.delete {
+                        delete_workspace(state, &label, now, &mut fx);
+                    }
+                }
             }
         }
         WkMsg::Save => {
             let m = &mut state.model;
             if m.wss.current != Current::None {
-                let layout = m.ws.save(selected_alias(m));
+                let layout = crate::workspace::layout(m);
                 let current = m.wss.current.clone();
                 if let Some(slot) = m.wss.layout_mut(&current) {
                     *slot = layout;
                 }
-                m.ws_saved.0 = m.ws.save(selected_alias(m));
+                m.ws_saved.0 = crate::workspace::layout(m);
                 write_prefs(m, now, &mut fx);
                 say(m, now, format!("Workspace {} saved", current.label()));
             }
@@ -1032,7 +1355,7 @@ fn workspaces(state: &mut State, wk: crate::workspace::WkMsg, now: Instant) -> V
                     d.error = Some(e);
                 }
                 Ok(l) => {
-                    let layout = m.ws.save(selected_alias(m));
+                    let layout = crate::workspace::layout(m);
                     m.wss.custom.push((l.clone(), layout.clone()));
                     m.wss.sort();
                     m.wss.current = Current::Custom(l.clone());
@@ -1047,62 +1370,70 @@ fn workspaces(state: &mut State, wk: crate::workspace::WkMsg, now: Instant) -> V
         WkMsg::CancelDelete => state.drafts.ws_delete = None,
         WkMsg::Delete(label) => {
             state.drafts.ws_delete = None;
-            if state.model.wss.current == Current::Custom(label.clone())
-                && !switch_to(state, Current::Own, now, &mut fx)
-            {
-                return fx;
+            if state.model.wss.current == Current::Custom(label.clone()) {
+                if ask_leave(state, Some(Current::Own), Some(label.clone())) {
+                    return fx;
+                }
+                switch_to(state, Current::Own, now, &mut fx);
             }
-            let m = &mut state.model;
-            let before = m.wss.custom.len();
-            m.wss.custom.retain(|(l, _)| *l != label);
-            if m.wss.custom.len() != before {
-                write_prefs(m, now, &mut fx);
-                say(m, now, format!("Workspace {label} deleted"));
-            }
+            delete_workspace(state, &label, now, &mut fx);
         }
     }
     fx
 }
 
-/// Close every window and open the windows of `to`; `false` when unsaved
-/// editor tabs stopped it (their question is shown).
+fn delete_workspace(state: &mut State, label: &str, now: Instant, fx: &mut Vec<Effect>) {
+    let m = &mut state.model;
+    let before = m.wss.custom.len();
+    m.wss.custom.retain(|(l, _)| l != label);
+    if m.wss.custom.len() != before {
+        write_prefs(m, now, fx);
+        say(m, now, format!("Workspace {label} deleted"));
+    }
+}
+
+/// Something would be lost by leaving: show the list (#99) and wait for
+/// Yes / Back. `to`: `None` = Telepad closes.
+fn ask_leave(
+    state: &mut State,
+    to: Option<telepad_core::prefs::Current>,
+    delete: Option<String>,
+) -> bool {
+    let (items, background) = leave_losses(state, to.is_none());
+    if items.is_empty() {
+        return false;
+    }
+    state.drafts.ws_leave = Some(crate::state::LeaveAsk {
+        to,
+        delete,
+        items,
+        background,
+    });
+    true
+}
+
+/// Close every window and open the windows of `to`. Unsaved, uncommitted
+/// and unapplied work is dropped (the user said Yes, or there was none);
+/// file windows with running transfers stay in the background (#99).
 fn switch_to(
     state: &mut State,
     to: telepad_core::prefs::Current,
     now: Instant,
     fx: &mut Vec<Effect>,
-) -> bool {
+) {
     use crate::files::FmMsg;
-    let unsaved: Vec<crate::files::FmId> = state
-        .model
-        .files
-        .iter()
-        .filter(|s| {
-            state
-                .drafts
-                .files
-                .get(&s.id)
-                .is_some_and(|d| crate::editor::has_unsaved(&s.editor, &d.editor))
-        })
-        .map(|s| s.id)
-        .collect();
-    if !unsaved.is_empty() {
-        for id in unsaved {
-            fx.extend(update(state, Msg::Files(FmMsg::Close(id)), now));
-        }
-        say(
-            &mut state.model,
-            now,
-            "Unsaved editor changes: save or discard them, then pick the workspace again",
-        );
-        return false;
-    }
     // The current layout is already in its workspace (autosave). Closing
     // the windows below must not change it: nothing is current meanwhile.
     state.model.wss.current = telepad_core::prefs::Current::None;
-    let files: Vec<_> = state.model.files.iter().map(|s| s.id).collect();
+    let files: Vec<_> = state
+        .model
+        .files
+        .iter()
+        .filter(|s| !s.background)
+        .map(|s| s.id)
+        .collect();
     for id in files {
-        fx.extend(update(state, Msg::Files(FmMsg::Close(id)), now));
+        fx.extend(update(state, Msg::Files(FmMsg::Background(id)), now));
     }
     let dbs: Vec<_> = state.model.db.iter().map(|s| s.id).collect();
     for id in dbs {
@@ -1115,6 +1446,7 @@ fn switch_to(
             now,
         ));
     }
+    state.drafts.host_sync = Default::default();
     if state.drafts.keys.is_some() {
         fx.extend(update(state, Msg::KeysClose, now));
     }
@@ -1122,18 +1454,36 @@ fn switch_to(
         model: m,
         drafts: d,
     } = state;
+    // Dialogs with settings not applied go too (#99): the same config may be
+    // edited from the next workspace.
+    d.editor = None;
+    d.paste = None;
+    m.import = None;
+    if let Some(c) = &m.update.config {
+        d.update_form = c.clone();
+    }
+    d.update_form_error = None;
     m.selected = None;
     m.wss.current = to;
     restore_current(m);
     place_pending_host(m);
     fx.extend(start_page_sessions(m, d));
+    fx.extend(start_pending_files(m, d, now));
+    fx.extend(start_pending_dbs(m, d, now));
     let mut ws = std::mem::take(&mut m.ws);
     ws.sync(m);
     ws.sync_keys(d.keys.is_some());
     m.ws = ws;
-    m.ws_saved.0 = m.ws.save(selected_alias(m));
+    m.ws_saved.0 = crate::workspace::layout(m);
     write_prefs(m, now, fx);
-    true
+    let running = background_transfers(m);
+    if running > 0 {
+        say(
+            m,
+            now,
+            format!("{running} file transfer(s) keep running in the background"),
+        );
+    }
 }
 
 fn say(m: &mut Model, now: Instant, text: impl Into<String>) {

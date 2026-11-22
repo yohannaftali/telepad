@@ -167,6 +167,62 @@ pub fn dialogs(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
                 );
             });
     }
+    if let Some(ask) = d.ws_leave.clone() {
+        let title = match &ask.to {
+            Some(_) => "Leave this workspace?",
+            None => "Close Telepad?",
+        };
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.label(match &ask.to {
+                    Some(c) => format!(
+                        "Going to {} resets these windows; what is listed below is lost:",
+                        c.label()
+                    ),
+                    None => "Closing Telepad loses what is listed below:".to_string(),
+                });
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .show(ui, |ui| {
+                        let mut last = "";
+                        for (win, what) in &ask.items {
+                            if win != last {
+                                ui.label(RichText::new(win).strong());
+                                last = win;
+                            }
+                            ui.label(format!("   {} {what}", icons::WARNING));
+                        }
+                    });
+                if ask.background > 0 {
+                    ui.add_space(4.0);
+                    ui.label(format!(
+                        "{} {} file transfer(s) keep running in the background.",
+                        icons::INFO,
+                        ask.background
+                    ));
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("To keep them, choose Back, then save or apply them first.")
+                        .weak(),
+                );
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if act_button(ui, true, Act::Danger, &il(icons::CHECK, "Yes")).clicked() {
+                        wk(out, WkMsg::LeaveYes);
+                    }
+                    if ui.button(il(icons::ARROW_LEFT, "Back")).clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                    {
+                        wk(out, WkMsg::LeaveBack);
+                    }
+                });
+            });
+    }
     if let Some(label) = d.ws_delete.clone() {
         egui::Window::new("Delete workspace")
             .collapsible(false)

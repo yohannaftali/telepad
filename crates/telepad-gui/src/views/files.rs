@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use eframe::egui::{self, Color32, RichText};
 use egui_extras::{Column, TableBuilder};
-use telepad_app::editor::{EdMsg, has_unsaved};
+use telepad_app::editor::EdMsg;
 use telepad_app::files::{
     DialogKind, FileDraft, FileSession, FmMsg, Mode, OpKind, Pane, Side, SortCol, Status, TState,
     op_blocked, other, parse_mode,
@@ -43,22 +43,22 @@ struct DragFiles {
     names: Vec<String>,
 }
 
-/// Telepad itself closing with unsaved editor tabs: ask in each editor first.
+/// Telepad itself closing: when work would be lost (unsaved editor text,
+/// uncommitted database edits, running transfers …) the leave question
+/// lists it first (#99); after Yes (or with nothing to lose) it closes.
 pub fn close_guard(ctx: &egui::Context, m: &Model, d: &Drafts, out: &mut Vec<Msg>) {
+    if m.quit {
+        if !ctx.input(|i| i.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        return;
+    }
     if !ctx.input(|i| i.viewport().close_requested()) {
         return;
     }
-    let mut ask = false;
-    for s in &m.files {
-        if let Some(dr) = d.files.get(&s.id)
-            && has_unsaved(&s.editor, &dr.editor)
-        {
-            ask = true;
-            send(out, FmMsg::Close(s.id));
-        }
-    }
-    if ask {
-        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+    if d.ws_leave.is_none() {
+        out.push(Msg::Wk(telepad_app::workspace::WkMsg::AskQuit));
     }
 }
 
@@ -177,6 +177,14 @@ fn window(
             if let Some(op) = op {
                 send(out, FmMsg::Ask { id, side, op });
             }
+        }
+        if let Some(n) = &s.notice {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("{} {n}", icons::INFO));
+                if ui.small_button("OK").clicked() {
+                    send(out, FmMsg::DismissErrors(id));
+                }
+            });
         }
         if !s.op_errors.is_empty() {
             ui.horizontal_wrapped(|ui| {
