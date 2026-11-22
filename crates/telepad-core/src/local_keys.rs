@@ -88,10 +88,12 @@ pub enum Target {
     PublicDer,
     /// Public key only: JWK.
     PublicJwk,
+    /// OpenPGP secret key, ASCII-armoured (#107), for tools that want GPG.
+    OpenPgp,
 }
 
 impl Target {
-    pub const ALL: [Target; 12] = [
+    pub const ALL: [Target; 13] = [
         Target::OpenSsh,
         Target::Ppk3,
         Target::Ppk2,
@@ -100,6 +102,7 @@ impl Target {
         Target::Der,
         Target::Pkcs12,
         Target::Jwk,
+        Target::OpenPgp,
         Target::PublicOpenSsh,
         Target::PublicPem,
         Target::PublicDer,
@@ -116,6 +119,7 @@ impl Target {
             Target::Der => "DER (binary PKCS#8)",
             Target::Pkcs12 => "PKCS#12 (.p12 / .pfx)",
             Target::Jwk => "JWK (JSON)",
+            Target::OpenPgp => "OpenPGP / GPG (.asc)",
             Target::PublicOpenSsh => "Public key: OpenSSH line",
             Target::PublicPem => "Public key: PEM",
             Target::PublicDer => "Public key: DER",
@@ -132,6 +136,7 @@ impl Target {
             Target::Der | Target::PublicDer => "der",
             Target::Pkcs12 => "p12",
             Target::Jwk | Target::PublicJwk => "jwk",
+            Target::OpenPgp => "asc",
             Target::PublicOpenSsh => "pub",
         }
     }
@@ -147,7 +152,12 @@ impl Target {
     pub fn can_encrypt(self) -> bool {
         matches!(
             self,
-            Target::OpenSsh | Target::Ppk3 | Target::Ppk2 | Target::Pkcs8 | Target::Pkcs12
+            Target::OpenSsh
+                | Target::Ppk3
+                | Target::Ppk2
+                | Target::Pkcs8
+                | Target::Pkcs12
+                | Target::OpenPgp
         )
     }
 
@@ -172,6 +182,9 @@ pub fn unsupported(alg: &Algorithm, target: Target) -> Option<&'static str> {
         }
         (KeyKind::P521, _) => Some("ECDSA P-521 converts to OpenSSH and PuTTY only"),
         (KeyKind::Ed25519, Target::Pem) => Some("Ed25519 has no PKCS#1 / SEC1 form: use PKCS#8"),
+        (KeyKind::P256 | KeyKind::P384, Target::OpenPgp) => {
+            Some("OpenPGP: Ed25519 and RSA keys only")
+        }
         _ => None,
     }
 }
@@ -332,7 +345,15 @@ pub fn inspect(path: &Path) -> LocalKey {
                 p
             })
         }
-        Format::OpenPgp | Format::LegacyEncryptedPem => None,
+        Format::OpenPgp => match load(&bytes, path, None) {
+            Ok(p) => Some(p.public_key().clone()),
+            Err(KeyError::NeedsPassphrase | KeyError::WrongPassphrase) => {
+                k.encrypted = true;
+                None
+            }
+            Err(_) => None,
+        },
+        Format::LegacyEncryptedPem => None,
         _ if k.encrypted => None,
         _ => load(&bytes, path, None)
             .ok()
@@ -355,10 +376,6 @@ pub fn inspect(path: &Path) -> LocalKey {
     {
         k.comment = p.comment().to_string();
         k.public_line = p.to_openssh().ok();
-    }
-    if format == Format::OpenPgp {
-        k.kind = "OpenPGP key".into();
-        k.error = Some("OpenPGP keys are listed only; use gpg to convert them".into());
     }
     if format == Format::LegacyEncryptedPem {
         k.error = Some(
@@ -446,6 +463,18 @@ pub fn detect(bytes: &[u8], path: &Path) -> Option<Format> {
             .ok()
             .filter(|v| v.get("kty").is_some() && v.get("d").is_some())
             .map(|_| Format::Jwk);
+    }
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(ext.as_str(), "gpg" | "pgp" | "key")
+        && bytes.first().is_some_and(|b| {
+            // Old format tag 5 (0x94..=0x97) or new format tag 5 (0xC5).
+            matches!(b, 0x94..=0x97 | 0xC5)
+        })
+    {
+        return Some(Format::OpenPgp);
     }
     if bytes.first() == Some(&0x30) {
         use pkcs8::der::Decode;
@@ -536,12 +565,7 @@ pub fn load(bytes: &[u8], path: &Path, passphrase: Option<&str>) -> Result<Priva
             from_pkcs8_der(chain.key().as_der())?
         }
         Format::Jwk => from_jwk(&text())?,
-        Format::OpenPgp => {
-            return Err(KeyError::Unsupported(
-                "OpenPGP keys are listed only; use gpg --export-ssh-key to get an OpenSSH key"
-                    .into(),
-            ));
-        }
+        Format::OpenPgp => openpgp::import(bytes, passphrase)?,
         Format::LegacyEncryptedPem => {
             return Err(KeyError::Unsupported(
                 "Old encrypted PEM: run ssh-keygen -p -f <file> once, then convert".into(),
@@ -775,6 +799,7 @@ pub fn convert(
             z(ks.writer(passphrase).write().map_err(invalid)?)
         }
         Target::Jwk => z(to_jwk(key, true)?.into_bytes()),
+        Target::OpenPgp => z(openpgp::export(key, passphrase)?.into_bytes()),
         Target::PublicOpenSsh => {
             let mut line = key.public_key().to_openssh().map_err(invalid)?;
             line.push('\n');
@@ -1604,6 +1629,7 @@ pub fn convert_file(
     target: Target,
     pass_out: &str,
     dest: &Path,
+    user_id: &str,
 ) -> Result<String, String> {
     if same_file(source, dest) || source == dest {
         return Err("Choose another file: the source is never overwritten".into());
@@ -1617,6 +1643,11 @@ pub fn convert_file(
     );
     let key = load(&bytes, source, (!pass_in.is_empty()).then_some(pass_in))
         .map_err(|e| e.to_string())?;
+    let mut key = key;
+    // OpenPGP (#107): the user ID asked in the dialog (else the comment).
+    if target == Target::OpenPgp && !user_id.trim().is_empty() {
+        key.set_comment(user_id.trim());
+    }
     let out = convert(&key, target, pass_out).map_err(|e| e.to_string())?;
     // Written next to the target, narrowed, then renamed into place (#112).
     let name = dest
@@ -1680,6 +1711,158 @@ pub fn algorithm_of(kind: &str) -> Option<Algorithm> {
     } else {
         return None;
     })
+}
+
+/// OpenPGP (#107): an existing Ed25519 or RSA key as a v4 OpenPGP secret
+/// key (sign + certify, self-signed user ID), and back.
+mod openpgp {
+    use pgp::composed::{ArmorOptions, Deserializable, KeyDetails, SignedSecretKey};
+    use pgp::crypto::ed25519::Mode;
+    use pgp::crypto::public_key::PublicKeyAlgorithm;
+    use pgp::packet::{self, KeyFlags, PubKeyInner, UserId};
+    use pgp::types::{
+        EddsaLegacyPublicParams, KeyVersion, Password, PlainSecretParams, PublicParams,
+        RsaPublicParams, SecretParams, Timestamp,
+    };
+    use rand_core::OsRng;
+    use ssh_key::PrivateKey;
+    use ssh_key::private::KeypairData;
+
+    use super::{KeyError, from_ed25519, from_rsa, invalid, to_rsa};
+
+    fn pgp_err(e: pgp::errors::Error) -> KeyError {
+        KeyError::Invalid(format!("OpenPGP: {e}"))
+    }
+
+    pub(super) fn export(key: &PrivateKey, passphrase: &str) -> Result<String, KeyError> {
+        let (algorithm, public, secret) = match key.key_data() {
+            KeypairData::Ed25519(kp) => {
+                let sk = pgp::crypto::ed25519::SecretKey::try_from_bytes(
+                    kp.private.to_bytes(),
+                    Mode::EdDSALegacy,
+                )
+                .map_err(pgp_err)?;
+                (
+                    PublicKeyAlgorithm::EdDSALegacy,
+                    PublicParams::EdDSALegacy(EddsaLegacyPublicParams::from(&sk)),
+                    PlainSecretParams::EdDSALegacy(pgp::crypto::eddsa_legacy::SecretKey::Ed25519(
+                        sk,
+                    )),
+                )
+            }
+            KeypairData::Rsa(kp) => {
+                let sk = pgp::crypto::rsa::SecretKey::from(to_rsa(kp)?);
+                (
+                    PublicKeyAlgorithm::RSA,
+                    PublicParams::RSA(RsaPublicParams::from(&sk)),
+                    PlainSecretParams::RSA(sk),
+                )
+            }
+            _ => {
+                return Err(KeyError::Unsupported(
+                    "OpenPGP: Ed25519 and RSA keys only".into(),
+                ));
+            }
+        };
+        let inner = PubKeyInner::new(KeyVersion::V4, algorithm, Timestamp::now(), None, public)
+            .map_err(pgp_err)?;
+        let public_key = packet::PublicKey::from_inner(inner).map_err(pgp_err)?;
+        let mut secret_key =
+            packet::SecretKey::new(public_key, SecretParams::Plain(secret)).map_err(pgp_err)?;
+        let uid = if key.comment().trim().is_empty() {
+            "Telepad key".to_string()
+        } else {
+            key.comment().trim().to_string()
+        };
+        let user_id = UserId::from_str(Default::default(), &uid).map_err(pgp_err)?;
+        let mut flags = KeyFlags::default();
+        flags.set_certify(true);
+        flags.set_sign(true);
+        let details = KeyDetails::new(
+            Some(user_id),
+            Vec::new(),
+            Vec::new(),
+            flags,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
+        let signed = details
+            .sign(
+                OsRng,
+                &secret_key,
+                secret_key.public_key(),
+                &Password::empty(),
+            )
+            .map_err(pgp_err)?;
+        if !passphrase.is_empty() {
+            secret_key
+                .set_password(OsRng, &Password::from(passphrase))
+                .map_err(pgp_err)?;
+        }
+        SignedSecretKey::new(secret_key, signed, Vec::new(), Vec::new())
+            .to_armored_string(ArmorOptions::default())
+            .map_err(pgp_err)
+    }
+
+    pub(super) fn import(bytes: &[u8], passphrase: Option<&str>) -> Result<PrivateKey, KeyError> {
+        let key = if bytes.trim_ascii_start().starts_with(b"-----BEGIN PGP") {
+            SignedSecretKey::from_armor_single(std::io::Cursor::new(bytes))
+                .map(|(k, _)| k)
+                .map_err(pgp_err)?
+        } else {
+            SignedSecretKey::from_bytes(std::io::Cursor::new(bytes)).map_err(pgp_err)?
+        };
+        let pw = Password::from(passphrase.unwrap_or_default());
+        let encrypted = matches!(key.primary_key.secret_params(), SecretParams::Encrypted(_));
+        if encrypted && passphrase.is_none_or(str::is_empty) {
+            return Err(KeyError::NeedsPassphrase);
+        }
+        let comment = key
+            .details
+            .users
+            .first()
+            .map(|u| String::from_utf8_lossy(u.id.id()).to_string())
+            .unwrap_or_default();
+        let out = key
+            .primary_key
+            .unlock(&pw, |public, plain| {
+                Ok(match (public, plain) {
+                    (
+                        _,
+                        PlainSecretParams::EdDSALegacy(
+                            pgp::crypto::eddsa_legacy::SecretKey::Ed25519(sk),
+                        )
+                        | PlainSecretParams::Ed25519(sk),
+                    ) => from_ed25519(sk.as_bytes()),
+                    (PublicParams::RSA(p), PlainSecretParams::RSA(sk)) => {
+                        let (d, pp, q, _) = sk.to_bytes()?;
+                        let big = rsa::BigUint::from_bytes_be;
+                        use rsa::traits::PublicKeyParts;
+                        let r = rsa::RsaPrivateKey::from_components(
+                            p.key.n().clone(),
+                            p.key.e().clone(),
+                            big(&d),
+                            vec![big(&pp), big(&q)],
+                        );
+                        match r {
+                            Ok(r) => from_rsa(&r),
+                            Err(e) => Err(invalid(e)),
+                        }
+                    }
+                    _ => Err(KeyError::Unsupported(
+                        "OpenPGP: only Ed25519 and RSA primary keys are converted".into(),
+                    )),
+                })
+            })
+            .map_err(|_| KeyError::WrongPassphrase)?
+            .map_err(pgp_err)??;
+        let mut out = out;
+        out.set_comment(comment);
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
@@ -1764,6 +1947,75 @@ mod tests {
                 }
             }
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn openpgp_round_trips_ed25519_and_rsa_and_refuses_ecdsa() {
+        let all = keys();
+        for key in [&all[0], &all[3]] {
+            for pass in ["", "pgp pass"] {
+                let armored = convert(key, Target::OpenPgp, pass).unwrap();
+                let text = String::from_utf8(armored.to_vec()).unwrap();
+                assert!(
+                    text.starts_with("-----BEGIN PGP PRIVATE KEY BLOCK-----"),
+                    "{text}"
+                );
+                let p = Path::new("k.asc");
+                if pass.is_empty() {
+                    let back = load(&armored, p, None).unwrap();
+                    assert_eq!(fp(&back), fp(key));
+                    assert_eq!(
+                        back.comment(),
+                        "test@example",
+                        "user ID becomes the comment"
+                    );
+                } else {
+                    assert_eq!(
+                        load(&armored, p, None).unwrap_err(),
+                        KeyError::NeedsPassphrase
+                    );
+                    assert_eq!(
+                        load(&armored, p, Some("nope")).unwrap_err(),
+                        KeyError::WrongPassphrase
+                    );
+                    assert_eq!(fp(&load(&armored, p, Some(pass)).unwrap()), fp(key));
+                }
+            }
+        }
+        assert!(unsupported(&all[1].algorithm(), Target::OpenPgp).is_some());
+    }
+
+    /// GnuPG accepts what Telepad writes: `TELEPAD_TEST_GPG=<path to gpg>`.
+    #[test]
+    fn gpg_imports_our_openpgp_key() {
+        let Some(gpg) = std::env::var_os("TELEPAD_TEST_GPG") else {
+            return;
+        };
+        let dir = tmp("gpg");
+        let home = dir.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let file = dir.join("k.asc");
+        std::fs::write(&file, &*convert(&keys()[0], Target::OpenPgp, "").unwrap()).unwrap();
+        let out = std::process::Command::new(&gpg)
+            .arg("--homedir")
+            .arg(&home)
+            .args(["--batch", "--import"])
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let list = std::process::Command::new(&gpg)
+            .arg("--homedir")
+            .arg(&home)
+            .args(["--batch", "--list-secret-keys"])
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&list.stdout).contains("test@example"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1892,10 +2144,29 @@ mod tests {
         let src = dir.join("id_ed25519");
         std::fs::write(&src, &*convert(key, Target::OpenSsh, "").unwrap()).unwrap();
         let dest = dir.join("id_ed25519.ppk");
-        let done = convert_file(&src, "", Target::Ppk3, "", &dest).unwrap();
+        let done = convert_file(&src, "", Target::Ppk3, "", &dest, "").unwrap();
         assert!(done.contains("PuTTY PPK v3"), "{done}");
         assert!(!dir.join(".id_ed25519.ppk.telepad-part").exists());
-        assert!(convert_file(&src, "", Target::OpenSsh, "", &src).is_err());
+        assert!(convert_file(&src, "", Target::OpenSsh, "", &src, "").is_err());
+        let asc = dir.join("id_ed25519.asc");
+        convert_file(
+            &src,
+            "",
+            Target::OpenPgp,
+            "",
+            &asc,
+            "Ops Team <ops@example.com>",
+        )
+        .unwrap();
+        let back = load(&std::fs::read(&asc).unwrap(), &asc, None).unwrap();
+        assert_eq!(back.comment(), "Ops Team <ops@example.com>");
+        let info = inspect(&asc);
+        assert_eq!(info.format, Some(Format::OpenPgp));
+        assert_eq!(
+            info.fingerprint.as_deref(),
+            Some(fp(key).as_str()),
+            "listed with its key"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -2026,6 +2297,15 @@ mod tests {
                     &*convert(&key, Target::OpenSsh, "").unwrap(),
                 )
                 .unwrap();
+                if matches!(key.algorithm(), Algorithm::Ed25519 | Algorithm::Rsa { .. }) {
+                    for (tag, pass) in [("plain", ""), ("pw", "pw")] {
+                        std::fs::write(
+                            out.join(format!("k{i}-{tag}.asc")),
+                            &*convert(&key, Target::OpenPgp, pass).unwrap(),
+                        )
+                        .unwrap();
+                    }
+                }
             }
             std::fs::write(out.join("list.txt"), list).unwrap();
             return;

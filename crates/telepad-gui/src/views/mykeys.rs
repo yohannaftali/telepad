@@ -376,6 +376,16 @@ fn convert_dialog(ctx: &egui::Context, d: &mut MyKeysDraft, out: &mut Vec<Msg>) 
                     }
                 });
             }
+            if c.target == Target::OpenPgp {
+                ui.horizontal(|ui| {
+                    ui.label("User ID");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut c.user_id)
+                            .hint_text("Name <mail@example.com>")
+                            .desired_width(240.0),
+                    );
+                });
+            }
             if c.target.can_encrypt() {
                 ui.horizontal(|ui| {
                     ui.radio_value(&mut c.mode, PassMode::Keep, "Same passphrase");

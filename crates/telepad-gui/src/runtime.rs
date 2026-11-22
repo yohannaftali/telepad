@@ -732,6 +732,7 @@ impl Runtime {
                 target,
                 pass_out,
                 suggest,
+                user_id,
             } => {
                 let mut dialog =
                     rfd::FileDialog::new().set_title(format!("Save as {}", target.label()));
@@ -752,6 +753,7 @@ impl Runtime {
                         target,
                         pass_out.expose(),
                         &dest,
+                        &user_id,
                     );
                     send(tx, ctx, MkMsg::Converted(r));
                 });
