@@ -4942,14 +4942,14 @@ dependencies = [
 
 [[package]]
 name = "telepad-app"
-version = "0.9.2"
+version = "0.9.3"
 dependencies = [
  "telepad-core",
 ]
 
 [[package]]
 name = "telepad-check"
-version = "0.9.2"
+version = "0.9.3"
 dependencies = [
  "serde_json",
  "telepad-core",
@@ -4957,7 +4957,7 @@ dependencies = [
 
 [[package]]
 name = "telepad-core"
-version = "0.9.2"
+version = "0.9.3"
 dependencies = [
  "aes 0.8.4",
  "argon2",
@@ -4993,7 +4993,7 @@ dependencies = [
 
 [[package]]
 name = "telepad-gui"
-version = "0.9.2"
+version = "0.9.3"
 dependencies = [
  "arboard",
  "eframe",

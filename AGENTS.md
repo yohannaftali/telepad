@@ -270,7 +270,9 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #92 | feat(ui): searchable open-windows picker in the top bar, Theme moves to ☰ Settings | closed | 2026-11-21 |
 | #93 | feat(ui): add / import / export hosts on the Host Management page, slimmer ☰ menu | closed | 2026-11-21 |
 | #94 | feat(ui): named workspaces (WinBox style) saved in preference.db, window arrange (tile, stack, minimize all) | closed | 2026-11-21 |
-| #99 | feat(ui): workspaces reopen file, database and editor windows; reset unsaved settings on leave, transfers keep running | open | 2026-11-22 |
-| #100 | feat(history): log file transfers and database commits (HeidiSQL-style SQL log) | open | 2026-11-22 |
-| #101 | feat(keys): My keys tab — list local keys, generate key pairs, convert between OpenSSH, PuTTY and other formats | open | 2026-11-22 |
-| #102 | feat(rdp): saved Remote Desktop settings per host, open with a generated .rdp, import / export .rdp | open | 2026-11-22 |
+| #99 | feat(ui): workspaces reopen file, database and editor windows; reset unsaved settings on leave, transfers keep running | closed | 2026-11-22 |
+| #100 | feat(history): log file transfers and database commits (HeidiSQL-style SQL log) | closed | 2026-11-22 |
+| #101 | feat(keys): My keys tab — list local keys, generate key pairs, convert between OpenSSH, PuTTY and other formats | closed | 2026-11-22 |
+| #102 | feat(rdp): saved Remote Desktop settings per host, open with a generated .rdp, import / export .rdp | closed | 2026-11-22 |
+| #107 | feat(keys): OpenPGP export and import in My keys | open | 2026-11-22 |
+| #108 | feat(rdp): save the Remote Desktop password in Windows Credential Manager (optional) | open | 2026-11-22 |
