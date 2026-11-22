@@ -25,7 +25,7 @@ minimized, maximized, tabbed and arranged, kept in named workspaces like MikroTi
 - **Authorized keys**: the keys in each host's `authorized_keys`, by server or by key,
   and add or revoke one SSH public key on many hosts at once; **My keys** lists the key
   pairs on this computer, generates new ones (`ssh-keygen`, Ed25519 by default) and converts
-  them between OpenSSH, PuTTY `.ppk`, PEM, PKCS#8, PKCS#12, JWK and DER
+  them between OpenSSH, PuTTY `.ppk`, PEM, PKCS#8, PKCS#12, JWK, DER and OpenPGP (GPG)
 - **Host Management**: add, import (OpenSSH config, JSON, pasted text) and export hosts;
   Telepad's hosts next to `~/.ssh/config` (or another config file); copy, edit or delete
   per host, merge / replace / sync, with a preview and a backup before the file is written

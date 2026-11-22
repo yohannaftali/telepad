@@ -56,6 +56,8 @@ pub struct ConvertForm {
     pub mode: PassMode,
     pub pass_out: Secret,
     pub pass_out2: Secret,
+    /// OpenPGP user ID (#107), e.g. `Name <mail@example.com>`.
+    pub user_id: String,
     pub error: Option<String>,
     pub busy: bool,
     pub done: Option<String>,
@@ -119,6 +121,8 @@ pub enum MkEffect {
         pass_out: Secret,
         /// Suggested place: `~/.ssh/<name>` for an import.
         suggest: PathBuf,
+        /// OpenPGP user ID (#107).
+        user_id: String,
     },
     /// Native open dialog, then inspect → [`MkMsg::Picked`].
     PickImport {
@@ -305,6 +309,7 @@ pub fn update(
                         Secret::default()
                     },
                     suggest: m.dir.join(name),
+                    user_id: c.user_id.trim().to_string(),
                 });
             }
         }
@@ -344,6 +349,7 @@ fn form(k: &LocalKey, import: bool) -> ConvertForm {
         mode: PassMode::Keep,
         pass_out: Secret::default(),
         pass_out2: Secret::default(),
+        user_id: k.comment.clone(),
         error: None,
         busy: false,
         done: None,
