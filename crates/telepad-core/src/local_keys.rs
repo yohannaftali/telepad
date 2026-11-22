@@ -1530,9 +1530,16 @@ pub fn protect(path: &Path, pass: &str) -> Result<(), KeyError> {
 
 /// Generate a key pair at `path` with the system's `ssh-keygen` (#101).
 /// It writes into a private folder first (owner-only), Telepad encrypts the
-/// key with `pass` there, then both files are moved into place; nothing is
-/// ever overwritten. The passphrase never reaches a command line.
-pub fn generate(kind: GenType, path: &Path, comment: &str, pass: &str) -> Result<PathBuf, String> {
+/// key with `pass` there and restricts it to the owner, then both files are
+/// moved into place; nothing is ever overwritten. The passphrase never
+/// reaches a command line. `Ok((path, warning))`: the key exists; `warning`
+/// says when its permissions could not be narrowed (#112).
+pub fn generate(
+    kind: GenType,
+    path: &Path,
+    comment: &str,
+    pass: &str,
+) -> Result<(PathBuf, Option<String>), String> {
     if let Some(why) = check_new_path(path) {
         return Err(why);
     }
@@ -1570,6 +1577,9 @@ pub fn generate(kind: GenType, path: &Path, comment: &str, pass: &str) -> Result
             ));
         }
         protect(&tmp, pass).map_err(|e| e.to_string())?;
+        // Narrowed before the move: the key never sits in place readable by
+        // others, and a failure here does not leave a half-done key behind.
+        let warning = crate::platform::restrict_to_owner(&tmp).err();
         if path.exists() || pub_path(path).exists() {
             return Err(format!(
                 "{} appeared meanwhile: not overwritten",
@@ -1579,8 +1589,7 @@ pub fn generate(kind: GenType, path: &Path, comment: &str, pass: &str) -> Result
         std::fs::rename(&tmp, path).map_err(|e| format!("cannot move the key: {e}"))?;
         std::fs::rename(pub_path(&tmp), pub_path(path))
             .map_err(|e| format!("cannot move the public key: {e}"))?;
-        crate::platform::restrict_to_owner(path)?;
-        Ok(path.to_path_buf())
+        Ok((path.to_path_buf(), warning))
     })();
     let _ = std::fs::remove_dir_all(&work);
     result
@@ -1609,9 +1618,21 @@ pub fn convert_file(
     let key = load(&bytes, source, (!pass_in.is_empty()).then_some(pass_in))
         .map_err(|e| e.to_string())?;
     let out = convert(&key, target, pass_out).map_err(|e| e.to_string())?;
-    std::fs::write(dest, &*out).map_err(|e| format!("cannot write {}: {e}", dest.display()))?;
-    if !target.is_public() {
-        crate::platform::restrict_to_owner(dest)?;
+    // Written next to the target, narrowed, then renamed into place (#112).
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "key".into());
+    let part = dest.with_file_name(format!(".{name}.telepad-part"));
+    std::fs::write(&part, &*out).map_err(|e| format!("cannot write {}: {e}", part.display()))?;
+    let warning = if target.is_public() {
+        None
+    } else {
+        crate::platform::restrict_to_owner(&part).err()
+    };
+    if let Err(e) = std::fs::rename(&part, dest) {
+        let _ = std::fs::remove_file(&part);
+        return Err(format!("cannot write {}: {e}", dest.display()));
     }
     // ssh wants the public half next to an OpenSSH key.
     if target == Target::OpenSsh && !pub_path(dest).exists() {
@@ -1619,7 +1640,7 @@ pub fn convert_file(
         std::fs::write(pub_path(dest), &*line)
             .map_err(|e| format!("cannot write {}: {e}", pub_path(dest).display()))?;
     }
-    Ok(format!(
+    let mut done = format!(
         "{} written as {}{}",
         dest.display(),
         target.label(),
@@ -1628,7 +1649,11 @@ pub fn convert_file(
         } else {
             ""
         }
-    ))
+    );
+    if let Some(w) = warning {
+        done.push_str(&format!(" — warning: {w}"));
+    }
+    Ok(done)
 }
 
 /// The algorithm from the type text the scan gave ("Ed25519", "RSA 4096", …).
@@ -1845,6 +1870,42 @@ mod tests {
     }
 
     #[test]
+    fn whoami_sid_is_read_from_its_csv() {
+        assert_eq!(
+            crate::platform::parse_whoami_sid("\"pc\\ops\",\"S-1-5-21-1-2-3-1001\"\r\n").as_deref(),
+            Some("S-1-5-21-1-2-3-1001")
+        );
+        assert_eq!(
+            crate::platform::parse_whoami_sid("ERROR: access denied"),
+            None
+        );
+        assert_eq!(
+            crate::platform::parse_whoami_sid("\"x\",\"S-1-5;rm\""),
+            None
+        );
+    }
+
+    #[test]
+    fn convert_writes_through_a_part_file_and_never_over_the_source() {
+        let dir = tmp("convert");
+        let key = &keys()[0];
+        let src = dir.join("id_ed25519");
+        std::fs::write(&src, &*convert(key, Target::OpenSsh, "").unwrap()).unwrap();
+        let dest = dir.join("id_ed25519.ppk");
+        let done = convert_file(&src, "", Target::Ppk3, "", &dest).unwrap();
+        assert!(done.contains("PuTTY PPK v3"), "{done}");
+        assert!(!dir.join(".id_ed25519.ppk.telepad-part").exists());
+        assert!(convert_file(&src, "", Target::OpenSsh, "", &src).is_err());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let m = std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777;
+            assert_eq!(m, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn next_free_never_reuses_a_name() {
         let dir = tmp("free");
         assert_eq!(next_free(&dir, "id_ed25519"), dir.join("id_ed25519"));
@@ -1893,8 +1954,9 @@ mod tests {
         }
         let dir = tmp("keygen");
         let path = dir.join("id_ed25519");
-        let made = generate(GenType::Ed25519, &path, "test@example", "pw").unwrap();
+        let (made, warning) = generate(GenType::Ed25519, &path, "test@example", "pw").unwrap();
         assert_eq!(made, path);
+        assert_eq!(warning, None, "narrowed by SID");
         let k = inspect(&path);
         assert_eq!(k.format, Some(Format::OpenSsh));
         assert!(k.encrypted, "protected with the passphrase");

@@ -906,7 +906,9 @@ in — you still pick the hosts and type `add`), **Convert / export…**.
 
 An existing file is never overwritten. The passphrase never appears on a command line:
 `ssh-keygen` writes the key into a private folder in `~/.ssh`, Telepad encrypts it there,
-then moves `id_…` and `id_….pub` into place. The private key is readable by your user only
+narrows its permissions there (Windows: your account by its SID, so domain and
+Microsoft accounts work too), then moves `id_…` and `id_….pub` into place. If the
+permissions cannot be narrowed, the key is still created and the status bar says so. The private key is readable by your user only
 (Windows: your account, plus SYSTEM and Administrators as `ssh-keygen` sets them;
 macOS / Linux: mode 600, `~/.ssh` 700).
 Without `ssh-keygen` (Windows: the *OpenSSH Client* optional feature) the dialog says what
