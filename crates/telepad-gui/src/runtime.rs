@@ -45,6 +45,8 @@ pub struct Runtime {
     prefs: Option<(Sender<WorkspacePrefs>, thread::JoinHandle<()>)>,
     /// `history.db` (#100): one thread writes and reads it, in order.
     history: Option<(Sender<HistCmd>, thread::JoinHandle<()>)>,
+    /// `preference.db` / `history.db` stay readable by others (#110).
+    permission_notes: Vec<String>,
 }
 
 /// Work for the `history.db` thread (#100).
@@ -173,6 +175,7 @@ impl Runtime {
             files: HashMap::new(),
             prefs: None,
             history: None,
+            permission_notes: Vec::new(),
         };
         match open_workspace(cli_config, cli_db) {
             Ok(ws) => {
@@ -192,11 +195,22 @@ impl Runtime {
                     prefs: rt.open_prefs(ws.store.path(), cli_prefs, &ws.store),
                 };
                 let history_error = rt.open_history(ws.store.path(), cli_history).err();
+                // Database files others can read (#110): said once, not fatal.
+                let mut notes: Vec<String> = ws
+                    .store
+                    .permission_warning()
+                    .map(str::to_string)
+                    .into_iter()
+                    .collect();
+                notes.append(&mut rt.permission_notes);
                 rt.ssh = Some(ssh);
                 rt.ws = Some(ws);
                 rt.dispatch(state, started);
                 if let Some(e) = history_error {
                     rt.dispatch(state, Msg::Notice(format!("History is not kept: {e}")));
+                }
+                for n in notes {
+                    rt.dispatch(state, Msg::Notice(n));
                 }
                 if let Ok(alias) = std::env::var("TELEPAD_SELECT") {
                     rt.dispatch(state, Msg::SelectAlias(alias));
@@ -533,6 +547,8 @@ impl Runtime {
     ) -> Result<WorkspacePrefs, String> {
         let path = prefs::prefs_path(db, cli);
         let p = Prefs::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        self.permission_notes
+            .extend(p.permission_warning().map(str::to_string));
         let legacy = store.ui_prefs().map(|u| u.workspace).unwrap_or_default();
         p.import_legacy(&legacy).map_err(|e| e.to_string())?;
         let loaded = p.load().map_err(|e| e.to_string())?;
@@ -560,6 +576,8 @@ impl Runtime {
         let path = history::history_path(db, cli);
         let h = history::History::open(&path, unix_now())
             .map_err(|e| format!("{}: {e}", path.display()))?;
+        self.permission_notes
+            .extend(h.permission_warning().map(str::to_string));
         let (htx, hrx) = mpsc::channel::<HistCmd>();
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         let handle = thread::spawn(move || {

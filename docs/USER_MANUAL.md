@@ -28,6 +28,12 @@ flowchart TB
 | `preference.db` | workspaces: which windows, where, which folders / files / database | file contents, passwords |
 | `history.db` | transfers, file changes and SQL statements, 90 days | file contents, passwords (masked in SQL) |
 
+On macOS and Linux Telepad keeps `telepad.db`, `preference.db` and `history.db` (and
+SQLite's `-wal` / `-shm` files next to them) readable by your user only (mode `600`);
+if it cannot, the status bar says which file. On Windows the folder's permissions apply:
+the per-user data folder (`%APPDATA%\Telepad`) is private; a portable copy next to the exe
+is as private as that folder.
+
 **What runs on a host.** Monitoring is one read-only shell script per round. Everything
 that changes a host is something you start and confirm: a Docker action (shown in a
 terminal), adding or revoking a key (you type `add` / `revoke`), a database change (you see

@@ -117,6 +117,47 @@ pub fn user_at_host() -> String {
     format!("{user}@{host}")
 }
 
+/// Telepad's database files readable by their owner only (#110): the file
+/// and its `-wal` / `-shm` / `-journal` companions, `0600` on macOS / Linux
+/// (SQLite creates the companions with the database's mode). Windows: the
+/// folder's ACL applies (the per-user data folder is private).
+pub fn restrict_db_files(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if path.as_os_str() == ":memory:" {
+            return Ok(());
+        }
+        let mut first_error = None;
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let mut p = path.as_os_str().to_os_string();
+            p.push(suffix);
+            let p = std::path::PathBuf::from(p);
+            if !p.exists() {
+                continue;
+            }
+            let mode = std::fs::metadata(&p).map(|m| m.permissions().mode() & 0o777);
+            if mode.as_ref().is_ok_and(|m| *m == 0o600) {
+                continue;
+            }
+            if let Err(e) = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))
+                && first_error.is_none()
+            {
+                first_error = Some(format!("{} stays readable by others ({e})", p.display()));
+            }
+        }
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
 /// A folder for keys: owner only (`0700` on macOS / Linux; Windows: the
 /// profile's own ACL, inherited).
 pub fn restrict_dir_to_owner(dir: &std::path::Path) -> Result<(), String> {
