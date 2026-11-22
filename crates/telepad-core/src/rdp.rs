@@ -438,10 +438,8 @@ impl RdpSettings {
 /// Text of a `.rdp` file: UTF-16 LE with BOM (as mstsc saves it) or UTF-8.
 pub fn decode_file(bytes: &[u8]) -> String {
     if bytes.len() >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe {
-        let units: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
+        let (pairs, _) = bytes[2..].as_chunks::<2>();
+        let units: Vec<u16> = pairs.iter().map(|c| u16::from_le_bytes(*c)).collect();
         return String::from_utf16_lossy(&units);
     }
     String::from_utf8_lossy(bytes)

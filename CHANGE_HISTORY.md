@@ -2,6 +2,36 @@
 
 Newest first.
 
+## [2026-11-22] — Telepad 0.9.3
+- **Workspaces** (#99): file windows (folders), editor windows (paths, never text) and
+  database windows (connection, database / schema) come back with their workspace and on
+  start; databases reconnect with the saved password. Leaving a workspace or closing
+  Telepad shows one modal listing what would be lost (unsaved editor text, grid edits,
+  structure changes, query text, Host Management / Authorized keys work, open dialogs):
+  **Yes** / **Back**. Running uploads and downloads keep going in the background.
+- **History** (#100): `history.db` (90 days): the file window's History tab (transfers,
+  file operations, editor saves) and the database window's SQL log (HeidiSQL style,
+  passwords masked); export CSV, clear.
+- **My keys** (#101): the key pairs on this computer, Generate (ssh-keygen, Ed25519),
+  Convert / export / import between OpenSSH, PuTTY PPK v2 / v3, PEM, PKCS#8, DER, PKCS#12,
+  JWK and public-only forms (PPK checked against puttygen 0.83).
+- **Remote Desktop settings** (#102) per host in `telepad.db`, Import / Export `.rdp`,
+  Open RDP with a temporary `.rdp` (mstsc / Windows App) or `xfreerdp` arguments.
+- Fixes: RDP-only hosts imported without a Port line get 3389.
+- README and manual: how Telepad works (diagrams), annotated screenshots.
+
+## [2026-11-22] — Tested and merged: #99, #100, #101, #102 (PRs #103–#106)
+- Stacked branches; CI green on Windows, macOS, Linux, `db-live`, `files-live` (and the
+  package builds); issues closed with test notes.
+- GUI tested on Windows 11 with lab containers (made-up hosts, documentation addresses,
+  MariaDB next to one host) and a fake home folder (no real keys or paths in
+  screenshots): leave modal (Back / Yes / Escape / quit), 2.3 GB upload kept in the
+  background, windows back after switch and restart, SQL log and history read back,
+  generate + convert to PPK v3, RDP settings + Open RDP (.rdp checked, mstsc closed).
+- Fixed during the test: doubled transfer titles, "just now" → "this session", leave
+  question made modal, My keys detail width, mstsc drive list, RDP-only import port.
+- Follow-ups filed: #107 (OpenPGP), #108 (Windows Credential Manager for RDP).
+
 ## [2026-11-22] — feat(rdp): saved Remote Desktop settings per host, open with a generated .rdp, import / export .rdp
 - Issue #102 created on GitHub
 - Scope: telepad-core (store, rdp, platform), telepad-app (host editor), telepad-gui
