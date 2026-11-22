@@ -2,6 +2,18 @@
 
 Newest first.
 
+## [2026-11-22] — Fixed and merged: #107, #108, #110, #111, #112 (PRs #114–#118)
+- #111 history CSV export defuses formula cells; #110 Telepad's databases mode 600 on
+  macOS / Linux (note when not possible); #112 keys narrowed before the move, by SID,
+  failure as a warning; #108 RDP password in Windows Credential Manager (TERMSRV, Win32
+  API via `windows-sys`, never read back); #107 OpenPGP export / import (rPGP; checked
+  with GnuPG 2.4.7: import, same SSH key, signing).
+- CI green on Windows, macOS, Linux, `db-live`, `files-live`, package builds.
+- GUI on Windows 11 (lab, fake home): OpenPGP convert with User ID; Credential Manager save
+  → `cmdkey` shows the Domain Password → Forget removes it.
+- Not verified: an mstsc login with the saved credential (no Windows RDP host in the lab).
+- Not released yet (main is ahead of v0.9.3).
+
 ## [2026-11-22] — Post-release review of v0.9.3 (#99–#102)
 - Reviewed merges 11c452d, cec833e, fcff314, 35557a9 and release 377fca8 on `main`.
 - No telemetry: the only HTTP client is the update check (GitHub, `telepad/<version>`
