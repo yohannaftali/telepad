@@ -251,6 +251,11 @@ fn rdp_section(ui: &mut egui::Ui, ed: &mut telepad_app::Editor, out: &mut Vec<Ms
                     ui.label("");
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut r.multimon, "All monitors");
+                        if r.screen != Screen::Fit {
+                            ui.checkbox(&mut r.scale, "Scale to the window").on_hover_text(
+                                "smart sizing: the remote desktop keeps its size and is shrunk or stretched to the window",
+                            );
+                        }
                         egui::ComboBox::from_id_salt("rdp-bpp")
                             .selected_text(format!("{} bit colour", r.color_depth))
                             .show_ui(ui, |ui| {

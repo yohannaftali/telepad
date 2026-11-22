@@ -74,6 +74,9 @@ pub struct RdpSettings {
     pub gateway_use: GatewayUse,
     pub auth_level: AuthLevel,
     pub autodetect: bool,
+    /// `smart sizing`: the remote desktop keeps its size and is scaled to
+    /// the window (not the same as Fit, which changes the remote size).
+    pub scale: bool,
     /// `.rdp` lines Telepad does not edit, kept as they were imported.
     pub extra: Vec<String>,
 }
@@ -97,6 +100,7 @@ impl Default for RdpSettings {
             gateway_use: GatewayUse::Never,
             auth_level: AuthLevel::Warn,
             autodetect: true,
+            scale: false,
             extra: Vec::new(),
         }
     }
@@ -217,8 +221,10 @@ impl RdpSettings {
             Screen::Fit => {
                 l.push("screen mode id:i:1".into());
                 l.push("dynamic resolution:i:1".into());
-                l.push("smart sizing:i:1".into());
             }
+        }
+        if self.scale && self.screen != Screen::Fit {
+            l.push("smart sizing:i:1".into());
         }
         l.push(format!("use multimon:i:{}", u8::from(self.multimon)));
         l.push(format!("session bpp:i:{}", self.color_depth));
@@ -329,7 +335,8 @@ impl RdpSettings {
                 "screen mode id" => mode = num(),
                 "desktopwidth" => w = Some(num()),
                 "desktopheight" => h = Some(num()),
-                "dynamic resolution" | "smart sizing" => dynamic |= num() == 1,
+                "dynamic resolution" => dynamic = num() == 1,
+                "smart sizing" => s.scale = num() == 1,
                 "use multimon" => s.multimon = num() == 1,
                 "session bpp" => s.color_depth = (num() as u8).max(15),
                 "redirectclipboard" => s.clipboard = num() == 1,
@@ -397,6 +404,9 @@ impl RdpSettings {
             Screen::FullScreen => a.push("/f".into()),
             Screen::Window { width, height } => a.push(format!("/size:{width}x{height}")),
             Screen::Fit => a.push("/dynamic-resolution".into()),
+        }
+        if self.scale && self.screen != Screen::Fit {
+            a.push("/smart-sizing".into());
         }
         if self.multimon {
             a.push("/multimon".into());
@@ -515,6 +525,34 @@ mod tests {
             d.render("h", 3389)
                 .contains("drivestoredirect:s:C:\\;d:\\;")
         );
+    }
+
+    #[test]
+    fn smart_sizing_keeps_the_window_size() {
+        // As mstsc saves "scale to the window" for a 1920 × 1080 desktop.
+        let s = RdpSettings::parse(
+            "screen mode id:i:1\r\ndesktopwidth:i:1920\r\ndesktopheight:i:1080\r\nfull address:s:192.0.2.60:53118\r\nsmart sizing:i:1\r\n",
+        );
+        assert_eq!(
+            s.screen,
+            Screen::Window {
+                width: 1920,
+                height: 1080
+            }
+        );
+        assert!(s.scale);
+        assert_eq!(s.port, 53118);
+        let text = s.render("ignored", 3389);
+        assert!(text.contains("desktopwidth:i:1920") && text.contains("smart sizing:i:1"));
+        assert!(!text.contains("dynamic resolution"));
+        assert_eq!(RdpSettings::parse(&text), s);
+        let (args, _) = s.xfreerdp_args("x", 3389);
+        assert!(args.contains(&"/size:1920x1080".to_string()));
+        assert!(args.contains(&"/smart-sizing".to_string()));
+        // Dynamic resolution alone is Fit.
+        let f = RdpSettings::parse("screen mode id:i:1\r\ndynamic resolution:i:1\r\n");
+        assert_eq!(f.screen, Screen::Fit);
+        assert!(!f.scale);
     }
 
     #[test]
