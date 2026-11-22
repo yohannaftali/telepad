@@ -703,7 +703,8 @@ earlier sessions — newest on top.
 | File operations | New folder / New file, Rename, Delete (each path), Permissions (mode), editor **Save**; "(this computer)" for the local side |
 
 **Filter** (any words), **All / Uploads / Downloads**, **Not done only** (failed and
-cancelled), **Export…** (the lines shown as CSV), **Clear…** (asks first; this host's
+cancelled), **Export…** (the lines shown as CSV; a text cell starting with `=`, `+`, `-`
+or `@` gets a leading `'` so a spreadsheet shows it instead of running it as a formula), **Clear…** (asks first; this host's
 lines only). The folder button of a transfer line shows its local folder in the system's
 file manager.
 
