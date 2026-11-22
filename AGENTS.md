@@ -274,8 +274,8 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #100 | feat(history): log file transfers and database commits (HeidiSQL-style SQL log) | closed | 2026-11-22 |
 | #101 | feat(keys): My keys tab — list local keys, generate key pairs, convert between OpenSSH, PuTTY and other formats | closed | 2026-11-22 |
 | #102 | feat(rdp): saved Remote Desktop settings per host, open with a generated .rdp, import / export .rdp | closed | 2026-11-22 |
-| #107 | feat(keys): OpenPGP export and import in My keys | open | 2026-11-22 |
-| #108 | feat(rdp): save the Remote Desktop password in Windows Credential Manager (optional) | open | 2026-11-22 |
-| #110 | fix(store): create history.db, preference.db and telepad.db readable by the owner only (macOS / Linux) | open | 2026-11-22 |
-| #111 | fix(history): neutralise formula cells in the CSV export | open | 2026-11-22 |
-| #112 | fix(keys): restrict the generated key before moving it; ACL by SID, permission failure as a warning | open | 2026-11-22 |
+| #107 | feat(keys): OpenPGP export and import in My keys | closed | 2026-11-22 |
+| #108 | feat(rdp): save the Remote Desktop password in Windows Credential Manager (optional) | closed | 2026-11-22 |
+| #110 | fix(store): create history.db, preference.db and telepad.db readable by the owner only (macOS / Linux) | closed | 2026-11-22 |
+| #111 | fix(history): neutralise formula cells in the CSV export | closed | 2026-11-22 |
+| #112 | fix(keys): restrict the generated key before moving it; ACL by SID, permission failure as a warning | closed | 2026-11-22 |
