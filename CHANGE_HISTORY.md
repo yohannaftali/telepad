@@ -2,6 +2,17 @@
 
 Newest first.
 
+## [2026-11-22] — Telepad 0.9.4
+- **OpenPGP** in My keys (#107): Ed25519 / RSA keys export as OpenPGP (GPG) with a User
+  ID and optional passphrase; OpenPGP secret keys import to OpenSSH (checked with GnuPG).
+- **Remote Desktop password in Windows Credential Manager** (#108): saved as
+  `TERMSRV/<address>` like Remote Desktop's *Remember me*; Forget; never stored by Telepad.
+- **Remote Desktop: Scale to the window** (#120): `smart sizing` keeps the desktop size
+  (e.g. 1920 × 1080) instead of being read as *Fit the window*.
+- Hardening from the 0.9.3 review: database files readable by the owner only on macOS /
+  Linux (#110); history CSV export defuses formula cells (#111); generated / converted keys
+  narrowed before the move, by SID, a permission problem is a warning (#112).
+
 ## [2026-11-22] — Fixed and merged: #107, #108, #110, #111, #112 (PRs #114–#118)
 - #111 history CSV export defuses formula cells; #110 Telepad's databases mode 600 on
   macOS / Linux (note when not possible); #112 keys narrowed before the move, by SID,
