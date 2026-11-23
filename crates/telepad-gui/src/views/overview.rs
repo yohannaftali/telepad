@@ -222,6 +222,8 @@ fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, paused: bool, 
                     RichText::new(format!("{e}{known}")).color(usage_color(95.0))
                 } else if h.loading {
                     RichText::new(format!("loading…{known}")).weak()
+                } else if paused {
+                    RichText::new(format!("paused{known}")).color(usage_color(75.0))
                 } else {
                     RichText::new(format!("queued{known}")).weak()
                 };

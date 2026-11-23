@@ -173,8 +173,10 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 say(
                     m,
                     now,
-                    if paused {
+                    if paused && n == 1 {
                         format!("Paused {what} — its own Refresh still reads it")
+                    } else if paused {
+                        format!("Paused {what} — their own Refresh still reads them")
                     } else {
                         format!("Resumed {what}")
                     },

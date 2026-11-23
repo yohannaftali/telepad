@@ -554,6 +554,27 @@ fn hosts_are_paused_one_by_one() {
             .0
             .contains("Resumed 2 hosts")
     );
+    let both = || Msg::PauseHosts {
+        aliases: vec!["web01".into(), "db01".into()],
+        paused: true,
+    };
+    update(&mut s, both(), at(201));
+    assert!(
+        s.model
+            .message
+            .as_ref()
+            .unwrap()
+            .0
+            .contains("their own Refresh")
+    );
+    update(
+        &mut s,
+        Msg::PauseHosts {
+            aliases: vec!["web01".into(), "db01".into()],
+            paused: false,
+        },
+        at(201),
+    );
     let fx = update(&mut s, Msg::Tick { busy: 0 }, at(202));
     assert_eq!(jobs(&fx).len(), 2);
 
