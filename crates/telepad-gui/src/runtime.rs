@@ -24,7 +24,7 @@ use telepad_core::db::{detect, secret, tunnel};
 use telepad_core::history;
 use telepad_core::prefs::{self, Prefs, WorkspacePrefs};
 use telepad_core::store;
-use telepad_core::strategy::{self, SavedFacts, Strategy, UpdateDb};
+use telepad_core::strategy::{self, Strategy, UpdateDb};
 use telepad_core::update::{self, Updater, relaunch};
 use telepad_core::{Workspace, config, open_workspace, platform};
 
@@ -57,6 +57,7 @@ enum StrategyCmd {
     Save(Strategy),
     Facts(Box<strategy::Facts>),
     Prune(Vec<String>),
+    HostPaused(String, bool),
 }
 
 /// Work for the `history.db` thread (#100).
@@ -526,6 +527,9 @@ impl Runtime {
             Effect::SaveStrategy(s) => self.strategy_send(StrategyCmd::Save(s)),
             Effect::SaveFacts(f) => self.strategy_send(StrategyCmd::Facts(Box::new(f))),
             Effect::PruneFacts(keep) => self.strategy_send(StrategyCmd::Prune(keep)),
+            Effect::SaveHostPaused { alias, paused } => {
+                self.strategy_send(StrategyCmd::HostPaused(alias, paused))
+            }
             Effect::Ping(hosts) => {
                 self.background(move || Msg::Pinged(ping_all(&hosts)));
                 None
@@ -619,17 +623,12 @@ impl Runtime {
 
     /// Open `update.db` (#122), read the strategy and the last known facts,
     /// and start its writer thread.
-    fn open_strategy(
-        &mut self,
-        db: &Path,
-        cli: Option<&str>,
-    ) -> Result<(Strategy, Vec<SavedFacts>), String> {
+    fn open_strategy(&mut self, db: &Path, cli: Option<&str>) -> Result<strategy::Loaded, String> {
         let path = strategy::strategy_path(db, cli);
         let u = UpdateDb::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         self.permission_notes
             .extend(u.permission_warning().map(str::to_string));
-        let st = u.load_strategy().map_err(|e| e.to_string())?;
-        let facts = u.load_facts(unix_now()).map_err(|e| e.to_string())?;
+        let loaded = u.load(unix_now()).map_err(|e| e.to_string())?;
         let (stx, srx) = mpsc::channel::<StrategyCmd>();
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         let handle = thread::spawn(move || {
@@ -639,6 +638,7 @@ impl Runtime {
                     StrategyCmd::Save(s) => u.save_strategy(&s),
                     StrategyCmd::Facts(f) => u.save_facts(&f, unix_now()),
                     StrategyCmd::Prune(keep) => u.prune(&keep),
+                    StrategyCmd::HostPaused(alias, paused) => u.set_host_paused(&alias, paused),
                 };
                 // Said once: the same problem would repeat on every collection.
                 if let Err(e) = r
@@ -651,7 +651,7 @@ impl Runtime {
             }
         });
         self.strategy = Some((stx, handle));
-        Ok((st, facts))
+        Ok(loaded)
     }
 
     fn strategy_send(&self, cmd: StrategyCmd) -> Option<Msg> {

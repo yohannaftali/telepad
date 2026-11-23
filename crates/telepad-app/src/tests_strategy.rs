@@ -7,7 +7,7 @@ use telepad_core::collector::{Scope, Update};
 use telepad_core::config::{Access, HostEntry};
 use telepad_core::model::HostReport;
 use telepad_core::store::UiPrefs;
-use telepad_core::strategy::{Facts, SavedFacts, SlowFacts, StaticFacts, Strategy};
+use telepad_core::strategy::{Facts, Loaded, SavedFacts, SlowFacts, StaticFacts, Strategy};
 use telepad_core::update::UpdateConfig;
 
 use crate::workspace::Win;
@@ -37,7 +37,11 @@ fn start(strategy: Result<(Strategy, Vec<SavedFacts>), String>, now: Instant) ->
             }),
             ui_prefs: UiPrefs::default(),
             prefs: Ok(Default::default()),
-            strategy,
+            strategy: strategy.map(|(strategy, facts)| Loaded {
+                strategy,
+                facts,
+                paused_hosts: Vec::new(),
+            }),
         },
         now,
     );
@@ -467,4 +471,110 @@ fn without_update_db_defaults_apply_and_nothing_is_written() {
         "pause still works for this session"
     );
     assert!(!fx.iter().any(|e| matches!(e, Effect::SaveStrategy(_))));
+}
+
+#[test]
+fn hosts_are_paused_one_by_one() {
+    let t0 = Instant::now();
+    let mut s = State::default();
+    update(
+        &mut s,
+        Msg::Started {
+            db_path: "telepad.db".into(),
+            ssh_config_path: "telepad.ssh_config".into(),
+            imported_from: None,
+            update_config: Ok(UpdateConfig {
+                enabled: false,
+                ..Default::default()
+            }),
+            ui_prefs: UiPrefs::default(),
+            prefs: Ok(Default::default()),
+            strategy: Ok(Loaded {
+                paused_hosts: vec!["db01".into(), "gone01".into()],
+                ..Default::default()
+            }),
+        },
+        t0,
+    );
+    // Paused in update.db: not read on start, not pinged; a deleted host's pause is dropped.
+    let fx = load(&mut s, vec![host(1, "web01"), host(2, "db01")], t0);
+    assert_eq!(jobs(&fx), [("web01".into(), Scope::FULL)]);
+    assert!(!s.model.paused_hosts.contains("gone01"));
+    let at = |secs| t0 + Duration::from_secs(secs);
+    let fx = update(&mut s, Msg::Tick { busy: 0 }, at(61));
+    assert_eq!(
+        jobs(&fx).iter().map(|j| j.0.as_str()).collect::<Vec<_>>(),
+        ["web01"]
+    );
+    assert_eq!(pinged(&fx), ["web01"]);
+    // Refresh all leaves it alone; its own Refresh reads it.
+    let all = jobs(&update(&mut s, Msg::RefreshAll, at(62)));
+    assert!(!all.iter().any(|(a, _)| a == "db01"), "{all:?}");
+    assert_eq!(
+        jobs(&update(&mut s, Msg::Refresh(1), at(62))),
+        [("db01".into(), Scope::FULL)]
+    );
+
+    // Pause web01 too, then resume both: saved, and read on the next tick.
+    let fx = update(
+        &mut s,
+        Msg::PauseHosts {
+            aliases: vec!["web01".into(), "nope".into()],
+            paused: true,
+        },
+        at(63),
+    );
+    assert!(
+        matches!(&fx[..], [Effect::SaveHostPaused { alias, paused: true }] if alias == "web01")
+    );
+    let fx = update(&mut s, Msg::Tick { busy: 0 }, at(200));
+    assert!(jobs(&fx).is_empty() && pinged(&fx).is_empty());
+    // A ping result that arrives after pausing changes nothing.
+    update(&mut s, Msg::Pinged(vec![("web01".into(), None)]), at(200));
+    assert_eq!(s.model.hosts[0].ping, None);
+    let fx = update(
+        &mut s,
+        Msg::PauseHosts {
+            aliases: vec!["web01".into(), "db01".into()],
+            paused: false,
+        },
+        at(201),
+    );
+    assert_eq!(
+        fx.iter()
+            .filter(|e| matches!(e, Effect::SaveHostPaused { paused: false, .. }))
+            .count(),
+        2
+    );
+    assert!(
+        s.model
+            .message
+            .as_ref()
+            .unwrap()
+            .0
+            .contains("Resumed 2 hosts")
+    );
+    let fx = update(&mut s, Msg::Tick { busy: 0 }, at(202));
+    assert_eq!(jobs(&fx).len(), 2);
+
+    // Renamed: the pause follows the host.
+    update(
+        &mut s,
+        Msg::PauseHosts {
+            aliases: vec!["db01".into()],
+            paused: true,
+        },
+        at(203),
+    );
+    let fx = load(&mut s, vec![host(1, "web01"), host(2, "db02")], at(204));
+    assert!(s.model.paused_hosts.contains("db02") && !s.model.paused_hosts.contains("db01"));
+    assert!(
+        fx.iter().any(
+            |e| matches!(e, Effect::SaveHostPaused { alias, paused: true } if alias == "db02")
+        )
+    );
+    assert!(
+        !jobs(&fx).iter().any(|(a, _)| a == "db02"),
+        "paused: not read after the rename"
+    );
 }

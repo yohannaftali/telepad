@@ -12,8 +12,11 @@ Newest first.
   `Effect::SaveStrategy` / `SaveFacts` / `PruneFacts` / `Ping`; `Win::Strategy`; `HostState`
   `Seen` times (saved facts older than this boot), `known` facts, ping result / misses;
   `tests_strategy.rs` (8 tests).
-- GUI: top bar Pause / Resume (replaces "Auto every 60 s"), status bar "Paused",
-  ☰ ▸ Update Strategy… page, `update.db` writer thread, ping rounds, `--update-db`;
+- GUI: "Auto every 60 s" removed from the top bar; ☰ ▸ Update Strategy… page manages
+  refresh: Pause all, intervals, host list with per-host Pause / Resume and Refresh
+  (owner request 2026-11-23: pause by host, refresh settings on a page); host page and
+  right-click menu Pause updates; status bar "Paused" / "N hosts paused" opens the page;
+  `update.db` writer thread (`paused_hosts` table), ping rounds, `--update-db`;
   last known OS in the Hosts table and host page.
 - Docs: USER_MANUAL (Refreshing, Update Strategy, files, command line), README, AGENTS.md,
   `.gitignore`.

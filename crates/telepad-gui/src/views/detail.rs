@@ -18,6 +18,7 @@ pub fn detail(
     h: &HostState,
     i: usize,
     cluster_shown_by: Option<&str>,
+    paused: bool,
     nginx_only: &mut bool,
     out: &mut Vec<Msg>,
 ) {
@@ -58,6 +59,28 @@ pub fn detail(
         }
         if h.loading {
             ui.spinner();
+        }
+        // Pause this host's automatic checks (#122); Refresh still reads it.
+        if !h.entry.unmonitored {
+            let (icon, text, tip) = if paused {
+                (
+                    icons::PLAY,
+                    "Resume updates",
+                    "Check this host by itself again",
+                )
+            } else {
+                (
+                    icons::PAUSE,
+                    "Pause updates",
+                    "Stop checking this host by itself (no SSH, no ping); Refresh still reads it",
+                )
+            };
+            if ui.button(il(icon, text)).on_hover_text(tip).clicked() {
+                out.push(Msg::PauseHosts {
+                    aliases: vec![h.entry.alias.clone()],
+                    paused: !paused,
+                });
+            }
         }
         ui.separator();
         if act_button(ui, true, Act::Edit, &il(icons::EDIT, "Edit")).clicked() {
@@ -124,7 +147,7 @@ pub fn detail(
         .on_hover_text(
             "Live metrics are read every round; OS / CPU info and addresses, \
              listening ports and pending updates less often, and kept in update.db \
-             across restarts (☰ ▸ Update Strategy…). Refresh reads everything now.",
+             across restarts (Update Strategy in the top-right menu). Refresh reads everything now.",
         );
     }
     if let Some(ping) = h.ping {

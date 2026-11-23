@@ -32,13 +32,7 @@ pub enum Msg {
         prefs: Result<telepad_core::prefs::WorkspacePrefs, String>,
         /// Update Strategy and last known facts from `update.db` (#122);
         /// `Err`: it could not be opened, defaults apply and nothing is saved.
-        strategy: Result<
-            (
-                telepad_core::strategy::Strategy,
-                Vec<telepad_core::strategy::SavedFacts>,
-            ),
-            String,
-        >,
+        strategy: Result<telepad_core::strategy::Loaded, String>,
     },
     /// The database could not be opened; nothing else works.
     Fatal(String),
@@ -46,8 +40,14 @@ pub enum Msg {
     Tick {
         busy: usize,
     },
-    /// Pause / resume every automatic check (#122, top bar).
+    /// Pause / resume every automatic check (#122, Update Strategy page).
     SetPaused(bool),
+    /// Pause / resume these hosts' automatic checks (by alias); their own
+    /// Refresh still reads them.
+    PauseHosts {
+        aliases: Vec<String>,
+        paused: bool,
+    },
     /// Open the Update Strategy page with the saved values in its form.
     StrategyOpen,
     /// Check the form and save it.
@@ -341,6 +341,11 @@ pub enum Effect {
     /// Write the Update Strategy to `update.db` (#122); errors come back as
     /// [`Msg::Notice`].
     SaveStrategy(telepad_core::strategy::Strategy),
+    /// Pause / resume one host in `update.db`.
+    SaveHostPaused {
+        alias: String,
+        paused: bool,
+    },
     /// Keep a host's freshly read static / slow facts in `update.db`.
     SaveFacts(telepad_core::strategy::Facts),
     /// Forget saved facts of hosts not in this list (deleted, renamed).

@@ -220,9 +220,8 @@ The **top bar** holds the tools for those windows:
 - **Window picker**: the window in front and how many are open; click it for the list of
   every open window — type to search, Enter brings that window to the front.
 - **Arrange**: **Tile** side by side, **Stack** as a cascade, **Minimize all**, **Restore all**.
-- **Pause** / **Resume**: stop every automatic check (SSH and ping) and start them again;
-  **Refresh all** still works while paused.
-- **☰**: **Settings → Theme** (System / Light / Dark), **Update Strategy…** (which checks run
+- **☰**: **Settings → Theme** (System / Light / Dark), **Update Strategy…** (pause all hosts
+  or single ones — also from a host's page or right-click menu — and which checks run
   by themselves and how often: ping 30 s, live metrics 1 min, addresses / ports / pending
   updates 6 h, OS info 1 day by default; saved in `update.db`, which also keeps each host's
   last known OS and updates so a restart shows them at once) and **Software update…**.

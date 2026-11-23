@@ -85,7 +85,138 @@ pub fn strategy_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec
         }
         ui.add_space(10.0);
         ui.label(RichText::new(status_line(m)).weak().small());
+        ui.add_space(10.0);
+        ui.separator();
+        hosts(ui, m, &mut d.strategy.host_filter, out);
     });
+}
+
+/// Every monitored host: paused or not, last checked, ping; Pause / Resume
+/// and Refresh one by one or for the listed hosts.
+fn hosts(ui: &mut egui::Ui, m: &Model, filter: &mut String, out: &mut Vec<Msg>) {
+    ui.heading(il(icons::DESKTOP, "Hosts"));
+    ui.label(
+        RichText::new(
+            "A paused host is not checked by itself (no SSH, no ping) and Refresh all skips it; \
+             its own Refresh still reads it.",
+        )
+        .weak(),
+    );
+    let listed: Vec<usize> = (0..m.hosts.len())
+        .filter(|&i| !m.hosts[i].entry.unmonitored)
+        .filter(|&i| telepad_app::matches_filter(filter.trim(), &m.hosts[i]))
+        .collect();
+    let aliases = |paused: bool| -> Vec<String> {
+        listed
+            .iter()
+            .map(|&i| &m.hosts[i])
+            .filter(|h| m.host_paused(h) != paused)
+            .map(|h| h.entry.alias.clone())
+            .collect()
+    };
+    let (to_pause, to_resume) = (aliases(true), aliases(false));
+    ui.horizontal_wrapped(|ui| {
+        ui.add(
+            egui::TextEdit::singleline(filter)
+                .desired_width(200.0)
+                .hint_text(format!("{} host, IP, OS", icons::SEARCH)),
+        );
+        if ui
+            .add_enabled(
+                !to_pause.is_empty(),
+                egui::Button::new(il(
+                    icons::PAUSE,
+                    &format!("Pause {} listed", to_pause.len()),
+                )),
+            )
+            .clicked()
+        {
+            out.push(Msg::PauseHosts {
+                aliases: to_pause,
+                paused: true,
+            });
+        }
+        if ui
+            .add_enabled(
+                !to_resume.is_empty(),
+                egui::Button::new(il(
+                    icons::PLAY,
+                    &format!("Resume {} listed", to_resume.len()),
+                )),
+            )
+            .clicked()
+        {
+            out.push(Msg::PauseHosts {
+                aliases: to_resume,
+                paused: false,
+            });
+        }
+        ui.label(RichText::new(format!("{} paused", m.paused_hosts.len())).weak());
+    });
+    ui.add_space(4.0);
+    egui::Grid::new("strategy_hosts")
+        .num_columns(5)
+        .spacing([14.0, 4.0])
+        .striped(true)
+        .show(ui, |ui| {
+            ui.label("");
+            ui.label(RichText::new("Host").strong());
+            ui.label(RichText::new("Updated").strong());
+            ui.label(RichText::new("Ping").strong());
+            ui.label("");
+            ui.end_row();
+            for &i in &listed {
+                let h = &m.hosts[i];
+                let paused = m.host_paused(h);
+                status_dot(ui, h);
+                ui.label(RichText::new(&h.entry.alias).strong());
+                if paused {
+                    ui.label(
+                        RichText::new(il(icons::PAUSE, &format!("paused · {}", ago(h.updated))))
+                            .color(usage_color(75.0)),
+                    );
+                } else {
+                    ui.label(RichText::new(ago(h.updated)).weak());
+                }
+                ui.label(
+                    RichText::new(match h.ping {
+                        Some(Some(ms)) => format!("{ms:.0} ms"),
+                        Some(None) => "no reply".into(),
+                        None => "—".into(),
+                    })
+                    .weak(),
+                );
+                ui.horizontal(|ui| {
+                    let (icon, text) = if paused {
+                        (icons::PLAY, "Resume")
+                    } else {
+                        (icons::PAUSE, "Pause")
+                    };
+                    if ui.small_button(il(icon, text)).clicked() {
+                        out.push(Msg::PauseHosts {
+                            aliases: vec![h.entry.alias.clone()],
+                            paused: !paused,
+                        });
+                    }
+                    if ui
+                        .add_enabled(
+                            !h.loading,
+                            egui::Button::new(il(icons::REFRESH, "Refresh")).small(),
+                        )
+                        .clicked()
+                    {
+                        out.push(Msg::Refresh(i));
+                    }
+                    if h.loading {
+                        ui.spinner();
+                    }
+                });
+                ui.end_row();
+            }
+        });
+    if listed.is_empty() {
+        ui.label(RichText::new("No matching monitored hosts").weak());
+    }
 }
 
 fn pause_row(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
@@ -102,7 +233,7 @@ fn pause_row(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
         } else {
             ui.label(il(icons::CLOCK, "Automatic checks are running."));
             if ui
-                .button(il(icons::PAUSE, "Pause"))
+                .button(il(icons::PAUSE, "Pause all"))
                 .on_hover_text("Stop every automatic check (SSH and ping) until Resume")
                 .clicked()
             {

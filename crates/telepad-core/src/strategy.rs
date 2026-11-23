@@ -242,6 +242,15 @@ pub struct SavedFacts {
     pub slow: Option<(SlowFacts, Duration)>,
 }
 
+/// What `update.db` holds, as read on start.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Loaded {
+    pub strategy: Strategy,
+    pub facts: Vec<SavedFacts>,
+    /// Hosts paused one by one (aliases).
+    pub paused_hosts: Vec<String>,
+}
+
 /// `--update-db` > `TELEPAD_UPDATE_DB` > `update.db` next to `telepad.db`.
 pub fn strategy_path(db: &Path, cli: Option<&str>) -> PathBuf {
     cli.map(PathBuf::from)
@@ -283,6 +292,10 @@ impl UpdateDb {
                  -- seconds since 1970-01-01 UTC
                  collected_at INTEGER NOT NULL,
                  PRIMARY KEY (alias, tier)
+             );
+             -- Hosts whose automatic checks are paused one by one.
+             CREATE TABLE IF NOT EXISTS paused_hosts (
+                 alias TEXT PRIMARY KEY
              );
              PRAGMA user_version = {STRATEGY_VERSION};"
         ))?;
@@ -404,14 +417,49 @@ impl UpdateDb {
 
     /// Forget the facts of hosts that are not in `keep` (deleted or renamed).
     pub fn prune(&self, keep: &[String]) -> Result<(), StoreError> {
-        let mut st = self.conn.prepare("SELECT DISTINCT alias FROM last_facts")?;
+        let mut st = self
+            .conn
+            .prepare("SELECT alias FROM last_facts UNION SELECT alias FROM paused_hosts")?;
         let have: Vec<String> = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
         let tx = self.conn.unchecked_transaction()?;
         for a in have.iter().filter(|a| !keep.contains(a)) {
             tx.execute("DELETE FROM last_facts WHERE alias = ?1", [a])?;
+            tx.execute("DELETE FROM paused_hosts WHERE alias = ?1", [a])?;
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Pause or resume one host's automatic checks.
+    pub fn set_host_paused(&self, alias: &str, paused: bool) -> Result<(), StoreError> {
+        if paused {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO paused_hosts(alias) VALUES(?1)",
+                [alias],
+            )?;
+        } else {
+            self.conn
+                .execute("DELETE FROM paused_hosts WHERE alias = ?1", [alias])?;
+        }
+        Ok(())
+    }
+
+    /// Aliases of the hosts paused one by one, A–Z.
+    pub fn paused_hosts(&self) -> Result<Vec<String>, StoreError> {
+        let mut st = self
+            .conn
+            .prepare("SELECT alias FROM paused_hosts ORDER BY alias")?;
+        let v = st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        Ok(v)
+    }
+
+    /// Everything Telepad reads from `update.db` on start.
+    pub fn load(&self, now: i64) -> Result<Loaded, StoreError> {
+        Ok(Loaded {
+            strategy: self.load_strategy()?,
+            facts: self.load_facts(now)?,
+            paused_hosts: self.paused_hosts()?,
+        })
     }
 }
 
@@ -588,6 +636,21 @@ mod tests {
             )
             .unwrap();
         assert!(db.load_facts(5_600).unwrap().is_empty());
+    }
+
+    #[test]
+    fn hosts_are_paused_one_by_one_and_pruned() {
+        let path = temp("p.db");
+        let db = UpdateDb::open(&path).unwrap();
+        db.set_host_paused("web01", true).unwrap();
+        db.set_host_paused("web01", true).unwrap();
+        db.set_host_paused("db01", true).unwrap();
+        assert_eq!(db.paused_hosts().unwrap(), ["db01", "web01"]);
+        db.set_host_paused("db01", false).unwrap();
+        assert_eq!(db.load(0).unwrap().paused_hosts, ["web01"]);
+        // Deleted or renamed: forgotten.
+        db.prune(&["db01".to_string()]).unwrap();
+        assert!(db.paused_hosts().unwrap().is_empty());
     }
 
     #[test]

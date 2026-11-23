@@ -52,10 +52,11 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             strategy,
         } => {
             match strategy {
-                Ok((st, facts)) => {
-                    m.strategy = st;
+                Ok(l) => {
+                    m.strategy = l.strategy;
                     m.strategy_ok = true;
-                    m.restored = facts.into_iter().map(|f| (f.alias.clone(), f)).collect();
+                    m.restored = l.facts.into_iter().map(|f| (f.alias.clone(), f)).collect();
+                    m.paused_hosts = l.paused_hosts.into_iter().collect();
                 }
                 Err(e) => {
                     m.strategy = Default::default();
@@ -66,7 +67,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             m.paused_at = m.strategy.paused.then_some(now);
             d.strategy = crate::state::StrategyDraft {
                 form: m.strategy,
-                error: None,
+                ..Default::default()
             };
             d.compact_host_list = ui_prefs.compact_host_list;
             d.group_by_status = ui_prefs.group_by_status;
@@ -145,10 +146,51 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 }
             }
         }
+        Msg::PauseHosts { aliases, paused } => {
+            let mut n = 0;
+            for a in aliases {
+                if !m.hosts.iter().any(|h| h.entry.alias == a) {
+                    continue;
+                }
+                let changed = if paused {
+                    m.paused_hosts.insert(a.clone())
+                } else {
+                    m.paused_hosts.remove(&a)
+                };
+                if changed {
+                    n += 1;
+                    if m.strategy_ok {
+                        fx.push(Effect::SaveHostPaused { alias: a, paused });
+                    }
+                }
+            }
+            if n > 0 {
+                let what = if n == 1 {
+                    "1 host".to_string()
+                } else {
+                    format!("{n} hosts")
+                };
+                say(
+                    m,
+                    now,
+                    if paused {
+                        format!("Paused {what} — its own Refresh still reads it")
+                    } else {
+                        format!("Resumed {what}")
+                    },
+                );
+                if !paused {
+                    // Read at once on the next tick.
+                    m.last_refresh = None;
+                    m.last_ping = None;
+                }
+            }
+        }
         Msg::StrategyOpen => {
             d.strategy = crate::state::StrategyDraft {
                 form: m.strategy,
                 error: None,
+                host_filter: std::mem::take(&mut d.strategy.host_filter),
             };
             m.ws.open(crate::workspace::Win::Strategy);
         }
@@ -1727,13 +1769,14 @@ fn selected_id(m: &Model) -> Option<i64> {
 /// Collect every monitored host: everything when the user asked (`manual`),
 /// otherwise only the tiers that are due (live metrics always).
 /// RDP-only hosts follow the ping check when it is on (their collection is
-/// a ping + port probe).
+/// a ping + port probe). Hosts paused one by one are left out, also from
+/// Refresh all: only their own Refresh reads them.
 fn refresh_all(m: &mut Model, now: Instant, manual: bool, fx: &mut Vec<Effect>) {
     let st = m.strategy;
     fx.push(Effect::Collect(
         m.hosts
             .iter()
-            .filter(|h| !h.entry.unmonitored)
+            .filter(|h| !h.entry.unmonitored && !m.host_paused(h))
             .filter(|h| manual || !(st.ping.on && h.entry.access == Access::Rdp))
             .map(|h| Job {
                 host: h.entry.clone(),
@@ -1761,7 +1804,12 @@ fn automatic(m: &mut Model, busy: usize, now: Instant, fx: &mut Vec<Effect>) {
             let jobs: Vec<Job> = m
                 .hosts
                 .iter()
-                .filter(|h| !h.entry.unmonitored && h.entry.access == Access::Ssh && !h.loading)
+                .filter(|h| {
+                    !h.entry.unmonitored
+                        && h.entry.access == Access::Ssh
+                        && !h.loading
+                        && !m.host_paused(h)
+                })
                 // Waiting for its first collection: the live round reads it.
                 .filter(|h| h.updated.is_some() || !st.live.on)
                 // A failing host is tried again only after the SSH retry time.
@@ -1783,7 +1831,11 @@ fn automatic(m: &mut Model, busy: usize, now: Instant, fx: &mut Vec<Effect>) {
         m.last_ping = Some(now);
         let mut ping = Vec::new();
         let mut rdp = Vec::new();
-        for h in m.hosts.iter().filter(|h| !h.entry.unmonitored) {
+        for h in m
+            .hosts
+            .iter()
+            .filter(|h| !h.entry.unmonitored && !m.paused_hosts.contains(&h.entry.alias))
+        {
             match h.entry.access {
                 Access::Ssh => ping.push(h.entry.clone()),
                 Access::Rdp => rdp.push(full(&h.entry)),
@@ -1807,6 +1859,10 @@ fn pinged(m: &mut Model, results: Vec<(String, Option<f32>)>, now: Instant, fx: 
     let st = m.strategy;
     let mut jobs = Vec::new();
     for (alias, ms) in results {
+        // Paused while the round ran: leave it as it is.
+        if m.paused_hosts.contains(&alias) {
+            continue;
+        }
         let Some(h) = m.hosts.iter_mut().find(|h| h.entry.alias == alias) else {
             continue;
         };
@@ -1881,6 +1937,19 @@ fn reconcile(m: &mut Model, entries: Vec<HostEntry>, now: Instant, fx: &mut Vec<
             .iter()
             .position(|h| h.entry.id == entry.id)
             .map(|i| old.swap_remove(i));
+        // Renamed: the pause follows the host.
+        if let Some(p) = &prev
+            && p.entry.alias != entry.alias
+            && m.paused_hosts.remove(&p.entry.alias)
+        {
+            m.paused_hosts.insert(entry.alias.clone());
+            if m.strategy_ok {
+                fx.push(Effect::SaveHostPaused {
+                    alias: entry.alias.clone(),
+                    paused: true,
+                });
+            }
+        }
         let state = match prev {
             Some(h) if h.entry == entry => h,
             _ => {
@@ -1888,7 +1957,10 @@ fn reconcile(m: &mut Model, entries: Vec<HostEntry>, now: Instant, fx: &mut Vec<
                 if let Some(f) = m.restored.remove(&h.entry.alias) {
                     restore(&mut h, f, now);
                 }
-                if !h.entry.unmonitored && !m.strategy.paused {
+                if !h.entry.unmonitored
+                    && !m.strategy.paused
+                    && !m.paused_hosts.contains(&h.entry.alias)
+                {
                     to_poll.push(Job {
                         host: h.entry.clone(),
                         scope: h.scope_at(now, &m.strategy),
@@ -1900,6 +1972,9 @@ fn reconcile(m: &mut Model, entries: Vec<HostEntry>, now: Instant, fx: &mut Vec<
         m.hosts.push(state);
     }
     m.restored.clear();
+    let aliases: std::collections::BTreeSet<&str> =
+        m.hosts.iter().map(|h| h.entry.alias.as_str()).collect();
+    m.paused_hosts.retain(|a| aliases.contains(a.as_str()));
     if m.strategy_ok {
         fx.push(Effect::PruneFacts(
             m.hosts.iter().map(|h| h.entry.alias.clone()).collect(),

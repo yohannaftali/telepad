@@ -27,7 +27,7 @@ flowchart TB
 | `telepad.ssh_config` | the ssh config Telepad generates from `telepad.db` | — (rewritten on every change; do not edit) |
 | `preference.db` | workspaces: which windows, where, which folders / files / database | file contents, passwords |
 | `history.db` | transfers, file changes and SQL statements, 90 days | file contents, passwords (masked in SQL) |
-| `update.db` | the [Update Strategy](#update-strategy) (pause, which checks run and how often) and each host's last known OS / CPU info, addresses, ports and pending updates | live metrics, passwords |
+| `update.db` | the [Update Strategy](#update-strategy) (pause, paused hosts, which checks run and how often) and each host's last known OS / CPU info, addresses, ports and pending updates | live metrics, passwords |
 
 On macOS and Linux Telepad keeps `telepad.db`, `preference.db`, `history.db` and `update.db` (and
 SQLite's `-wal` / `-shm` files next to them) readable by your user only (mode `600`);
@@ -47,7 +47,7 @@ Telepad is one window (like MikroTik WinBox): pages open as windows **inside** i
 
 ```
 --------------------------------------------------------------------------
-Telepad | Refresh all | Pause | ▤ <own> ▾ | ▣ Hosts · 3 ▾ | Arrange | 2 up ☰ |
+Telepad | Refresh all | ▤ <own> ▾ | ▣ Hosts · 3 ▾ | Arrange | 2 up         ☰ |
 --------------------------------------------------------------------------
 Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
  Hosts           | | search | Table / Cards                     | |
@@ -62,7 +62,7 @@ Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | **Refresh all**, **Pause** / **Resume** (automatic checks; see [Update Strategy](#update-strategy)), the **workspace** dropdown and the **window picker** (the window in front and how many are open; see below), **Arrange**, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Settings ▸ Theme**, **Update Strategy…**, **Software update…**; Host Management and Authorized keys are in the sidebar, adding, importing and exporting hosts is on the Host Management page) |
+| **Top bar** | **Refresh all**, the **workspace** dropdown and the **window picker** (the window in front and how many are open; see below), **Arrange**, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Settings ▸ Theme**, **Update Strategy…**, **Software update…**; Host Management and Authorized keys are in the sidebar, adding, importing and exporting hosts is on the Host Management page) |
 | **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
@@ -401,8 +401,11 @@ capped (500 services, 1000 workloads per kind, 100 problem pods).
 
 All monitored hosts are checked at start, then by themselves as set on the
 [Update Strategy](#update-strategy) page. **Refresh all** checks every host now;
-**Refresh** on a host checks only that one. **Pause** in the top bar stops every automatic
-check until **Resume** (the status bar says *Paused* and for how long); Refresh still works.
+**Refresh** on a host checks only that one. Pausing — all hosts or single hosts — is on the
+same page: **Pause all** stops every automatic check until **Resume**, and a paused host is
+not checked by itself (no SSH, no ping) and skipped by **Refresh all**, while its own
+**Refresh** still reads it. The status bar says *Paused …* or *N hosts paused*; click it to
+open the page.
 
 Not everything is read on every round. By default automatic checks read:
 
@@ -435,10 +438,10 @@ updates. A deleted or renamed host's saved info is dropped.
 ## Update Strategy
 
 **☰ ▸ Update Strategy…** opens a page (an inner window that comes back with its workspace)
-with what Telepad checks by itself:
+for everything about refreshing: pause all or single hosts, and what Telepad checks by itself:
 
 ```
-⏸ Pause    Automatic checks are running.
+Automatic checks are running.   [⏸ Pause all]
 On  Check                            Reads                                         Every       Allowed
 ☑   Ping                             Host up or down, without SSH (RDP: probe)     30  [s  ▾]  10 s – 1 h
 ☑   Live metrics                     CPU, memory, disks, sensors, Docker, …        1   [min▾]  15 s – 1 d
@@ -446,16 +449,27 @@ On  Check                            Reads                                      
 ☑   System info                      Hostname, OS release, kernel, CPU model       1   [d  ▾]  1 min – 7 d
     Retry SSH for unreachable hosts  Hosts without ping reply are only pinged; …   10  [min▾]  1 min – 1 d
 [✓ Save]  [Revert]  [Reset to defaults]
+
+Hosts
+[search host, IP, OS]  [⏸ Pause 54 listed]  [▶ Resume 2 listed]   2 paused
+    Host      Updated           Ping
+●   web01     12s ago           3 ms      [⏸ Pause]  [⟳ Refresh]
+●   backup01  ⏸ paused · 2h ago  —        [▶ Resume] [⟳ Refresh]
 ```
 
 | Control | Does |
 |---|---|
-| **Pause** / **Resume** | Same as the top bar button: stops / restarts every automatic check (SSH and ping). Saved, so Telepad starts paused after a restart if you left it paused. |
+| **Pause all** / **Resume** | Stops / restarts every automatic check (SSH and ping) for all hosts. Saved, so Telepad starts paused after a restart if you left it paused. |
 | **On** | Turn a check off: it never runs by itself (Refresh still reads it). The interval stays for when you turn it on again. Live metrics off still reads *Network & updates* and *System info* when they are due. |
 | **Every** | Number and unit (s, min, h, d). Values outside **Allowed** are refused on Save with the reason. |
 | **Save** | Checks and saves the form to `update.db`; applies from the next round, no restart. |
 | **Revert** | Back to what is saved. |
 | **Reset to defaults** | Puts the defaults in the form (ping 30 s, live 1 min, network & updates 6 h, system info 1 d, SSH retry 10 min); **Save** keeps them. |
+| **Hosts** list | Every monitored host with its state, when it was last read and its last ping. **Pause** / **Resume** on a row pauses that host (saved in `update.db`, kept when the host is renamed, dropped when it is deleted); **Pause _N_ listed** / **Resume _N_ listed** do it for the hosts the search box lists; **Refresh** reads that host now. |
+
+A host can also be paused from its host page (**Pause updates** / **Resume updates** next to
+**Refresh**) and from its right-click menu. The Hosts table shows ⏸ in the *Updated* column
+of a paused host; its last values stay on screen.
 
 **Ping check.** Every monitored host is pinged on its own timer, without SSH, so the up /
 down count moves between live rounds. A host that answered ping before and misses two pings

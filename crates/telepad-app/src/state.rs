@@ -88,6 +88,8 @@ pub struct Model {
     /// Last ping round, and whether one is running.
     pub last_ping: Option<Instant>,
     pub pinging: bool,
+    /// Hosts paused one by one (#122), by alias, as in `update.db`.
+    pub paused_hosts: BTreeSet<String>,
     /// Facts from `update.db` waiting for their host to be loaded, by alias.
     pub restored: std::collections::BTreeMap<String, telepad_core::strategy::SavedFacts>,
 }
@@ -164,6 +166,8 @@ pub struct Drafts {
 pub struct StrategyDraft {
     pub form: Strategy,
     pub error: Option<String>,
+    /// Narrows the page's host list.
+    pub host_filter: String,
 }
 
 impl StrategyDraft {
@@ -787,6 +791,11 @@ impl Model {
             .iter()
             .filter(|h| h.online() == Some(false))
             .count()
+    }
+
+    /// This host's automatic checks are paused (one by one, #122).
+    pub fn host_paused(&self, h: &HostState) -> bool {
+        self.paused_hosts.contains(&h.entry.alias)
     }
 
     pub fn message_at(&self, now: Instant) -> Option<&str> {

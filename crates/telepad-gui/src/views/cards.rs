@@ -35,6 +35,7 @@ pub fn cards(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mut V
                             i,
                             &m.hosts[i],
                             m.rdp.contains_key(&m.hosts[i].entry.alias),
+                            m.host_paused(&m.hosts[i]),
                             out,
                         );
                     }
@@ -43,7 +44,14 @@ pub fn cards(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mut V
         });
 }
 
-fn card(ui: &mut egui::Ui, i: usize, h: &HostState, has_rdp: bool, out: &mut Vec<Msg>) {
+fn card(
+    ui: &mut egui::Ui,
+    i: usize,
+    h: &HostState,
+    has_rdp: bool,
+    paused: bool,
+    out: &mut Vec<Msg>,
+) {
     // Text must not take the right-click meant for the card's menu (#83).
     ui.style_mut().interaction.selectable_labels = false;
     let card = egui::Frame::group(ui.style())
@@ -136,5 +144,5 @@ fn card(ui: &mut egui::Ui, i: usize, h: &HostState, has_rdp: bool, out: &mut Vec
     // SSH, Files, databases, edit… on right-click (#83).
     card.response
         .interact(egui::Sense::click())
-        .context_menu(|ui| host_menu(ui, h, i, has_rdp, out));
+        .context_menu(|ui| host_menu(ui, h, i, has_rdp, paused, out));
 }

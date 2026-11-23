@@ -453,7 +453,14 @@ fn act_widget(
 /// Right-click menu of a host row or card (#83): SSH / RDP, Files, the
 /// databases Telepad detected on it (host and containers), then open, edit,
 /// clone and delete. Coloured like the buttons they replace.
-pub fn host_menu(ui: &mut egui::Ui, h: &HostState, i: usize, has_rdp: bool, out: &mut Vec<Msg>) {
+pub fn host_menu(
+    ui: &mut egui::Ui,
+    h: &HostState,
+    i: usize,
+    has_rdp: bool,
+    paused: bool,
+    out: &mut Vec<Msg>,
+) {
     let item = |ui: &mut egui::Ui, text: RichText, msg: Msg, out: &mut Vec<Msg>| {
         if ui.button(text).clicked() {
             out.push(msg);
@@ -512,6 +519,23 @@ pub fn host_menu(ui: &mut egui::Ui, h: &HostState, i: usize, has_rdp: bool, out:
         }
     }
     ui.separator();
+    // Pause this host's automatic checks (#122).
+    if !h.entry.unmonitored {
+        let (icon, text) = if paused {
+            (icons::PLAY, "Resume updates")
+        } else {
+            (icons::PAUSE, "Pause updates")
+        };
+        item(
+            ui,
+            RichText::new(icons::label(icon, text)),
+            Msg::PauseHosts {
+                aliases: vec![h.entry.alias.clone()],
+                paused: !paused,
+            },
+            out,
+        );
+    }
     item(
         ui,
         RichText::new(icons::label(icons::DESKTOP, "Open host window")),
