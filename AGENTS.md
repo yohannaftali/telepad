@@ -46,8 +46,8 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/lib.rs` | Workspace: find `config` / `telepad.db`, first-run import, `.env` fallback key, `open_ssh_alias` |
 | `src/config.rs` | OpenSSH config import/export: hosts (alias, HostName, User, Port, IdentityFile, description, other options, not-monitored tag, RDP-only tag) + global `Host *`/`Match` text; renders the file `ssh -F` reads |
 | `src/store.rs` | SQLite inventory (`rusqlite`, bundled): `hosts` + `settings` + `db_connections` (saved database connections, no passwords) tables, `PRAGMA user_version` schema version, transactional import (Merge/Replace), `parse_pasted` (pasted config / JSON / `[alias] [user@]host[:port]` lines), JSON + OpenSSH export, generated `telepad.ssh_config` (atomic write) |
-| `src/collector.rs` | Runs `ssh -F <config> -T -o BatchMode=yes ... <alias> sh -s` with `script.sh` on stdin; `Scope` (which tiers, ping first for hosts without ping reply) and `carry_over` of skipped facts; timeouts; bounded worker pool; sends `Update`s over a channel; RDP-only hosts get ping + TCP probe |
-| `src/script.sh` | Remote read-only collection script, `===SECTION===` markers; tiers `TP_STATIC` (daily) / `TP_SLOW` (6 h) switched by `collector::Scope`, live sections every round |
+| `src/collector.rs` | Runs `ssh -F <config> -T -o BatchMode=yes ... <alias> sh -s` with `script.sh` on stdin; `Scope` (which tiers, ping first for hosts without ping reply; intervals from `strategy::Strategy`, #122) and `carry_over` of skipped facts; timeouts; bounded worker pool; sends `Update`s over a channel; RDP-only hosts get ping + TCP probe |
+| `src/script.sh` | Remote read-only collection script, `===SECTION===` markers; tiers `TP_STATIC` (daily by default) / `TP_SLOW` (6 h by default) switched by `collector::Scope`, live sections every round; pending updates only from the local package cache (never `apt-get update`) |
 | `src/bmc_setup.sh` | Interactive, user-started BMC (`ipmitool`) setup — see Conventions |
 | `src/parse.rs` | Pure parsers for each section, unit-tested against `tests/fixtures/` |
 | `src/authorized_keys.rs` | Authorized keys page backend: read-only `list` / `list_all` of `~/.ssh/authorized_keys` → `HostKeys` (`AuthKey`: line, options, key, supported, group from the `#` line above; login fingerprints), `parse_authorized_keys`, validate a pasted key (type, base64, embedded type), SHA256 fingerprint, add/revoke script for `~/.ssh/authorized_keys` (Add into a group: `INSERT_AWK`, `check_group`), lockout guard (`login_keys`), parallel `apply_all` |
@@ -63,13 +63,14 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/history.rs` | `history.db` (#100): transfer / file operation / SQL log `Entry` (kind, host, target, title, detail, outcome, rows, bytes, duration, method), `History::open` (trim to 90 days / 50 000 rows), `add`, `list(Scope)`, `clear`, `mask_secrets` (password literals), `format_utc`, `to_csv`, `history_path` |
 | `src/local_keys.rs` | My keys (#101): `scan` (~/.ssh + IdentityFile paths) / `inspect` → `LocalKey` (format, type, fingerprint, comment, passphrase, permission warning), `detect` / `load` (OpenSSH, PPK v2 / v3 incl. Argon2id / AES, PKCS#1, SEC1, PKCS#8 plain / encrypted, DER, PKCS#12, JWK, OpenPGP armoured / binary via `pgp` (#107)), `convert(Target)` incl. public-only, `unsupported` per key type, `generate` (ssh-keygen into a private folder, `protect` with the passphrase, move into place, never overwrite), `convert_file`; own RSA conversion (`to_rsa`: ssh-key 0.6.7's passes `p` twice); live checks `TELEPAD_TEST_KEYGEN`, `TELEPAD_TEST_PPK_DIR` (also writes `.asc` samples for GnuPG) / `TELEPAD_TEST_PUTTYGEN` / `TELEPAD_TEST_GPG` |
 | `src/rdp.rs` | Remote Desktop settings (#102): `RdpSettings` (address, port, user / domain, `Screen`, multimon, colours, clipboard / drives / printers, `Audio`, admin, gateway, `AuthLevel`, autodetect, extra lines), `validate`, `render` (.rdp text) / `parse` (drops `password 51:b:`), `decode_file` / `encode_file` (UTF-16 LE BOM), `xfreerdp_args` |
+| `src/strategy.rs` | `update.db` (#122): `Strategy` (paused, `Every` on / seconds for ping, live, slow, static; SSH retry), `Check` (title, allowed `range`), `validate`, `human_secs`; `StaticFacts` / `SlowFacts` (`of` / `apply`, also used by `collector::Scope::carry_over`), `Facts`, `SavedFacts` (with age); `UpdateDb` (`open`, `load_strategy` / `save_strategy`, `save_facts` / `load_facts(now)`, `prune`), `strategy_path`, `PRAGMA user_version` |
 | `src/prefs.rs` | `preference.db` (#94): named workspaces (`WorkspacePrefs`: `<own>` layout, custom (label, layout), `Current`), `check_label`, `prefs_path`, one-time `import_legacy` of `ui_workspace`, `PRAGMA user_version` |
 
 ### telepad-app (Model–View–Update)
 
 | Path | Role |
 |---|---|
-| `src/state.rs` | `State { model: Model, drafts: Drafts }` (drafts include the overview `Sort` and the `KeysDraft` of the Authorized keys page (tab, server, open key), model the `KeyRun` results, `auth_keys` (`AkHost` per alias), `key_holders` and the `Workspace` `ws`), `OverviewPage`, `HostState` (+ `scope_at`: which tiers are due), `Editor`, `ImportDialog`, `UpdateState`, `matches_filter` |
+| `src/state.rs` | `State { model: Model, drafts: Drafts }` (drafts include the overview `Sort` and the `KeysDraft` of the Authorized keys page (tab, server, open key), model the `KeyRun` results, `auth_keys` (`AkHost` per alias), `key_holders` and the `Workspace` `ws`), `OverviewPage`, `HostState` (+ `scope_at(now, &Strategy)`: which tiers are on and due; `Seen` times that may predate this run; `known` facts from `update.db`; ping result / misses), `StrategyDraft`, `Editor`, `ImportDialog`, `UpdateState`, `matches_filter` |
 | `src/msg.rs` | `Msg` (user intents + results of effects) and `Effect` (work for the runtime) |
 | `src/table.rs` | Overview order: `Sort`/`SortKey`, `overview_rows` (filter + stable sort); `drop_index` / `can_reorder` (drag to reorder); `docker_stacks` (Docker overview by stack); `cluster_rows` (Kubernetes / Swarm pages); host list `host_list_groups`, `worst_usage`; `fullest_disk`, `hottest` |
 | `src/update.rs` | `update(&mut State, Msg, now) -> Vec<Effect>` — the only place the model changes |
@@ -89,6 +90,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_keys.rs` | Behaviour tests for the Authorized keys page |
 | `src/mykeys.rs` | My keys tab (#101): `MyKeys` (model), `MyKeysDraft` (selection, `GenForm`, `ConvertForm`; passphrases as `Secret`), `MkMsg` / `MkEffect`, `update`, `used_by` / `authorized_on` |
 | `src/tests_mykeys.rs` | Behaviour tests for the My keys tab |
+| `src/tests_strategy.rs` | Behaviour tests for #122 (pause, Update Strategy page, ping rounds, last known facts) |
 
 ### telepad-gui
 
@@ -97,7 +99,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/main.rs` | Arguments, `--open-ssh`; no console window in Windows release builds |
 | `src/app.rs` | eframe app: each frame `runtime.frame()`, `views::draw()`, dispatch the returned `Msg`s |
 | `src/runtime.rs` | Executes `Effect`s (database, ssh, collector, update threads, dialogs, clipboard read/write via `arboard`, OS) and feeds results back as `Msg`s |
-| `src/views/` | One module per screen: `panels` (top bar, status bar), `workspace` (page sidebar, inner windows: title bar, tabs, move / resize / minimize / maximize, minimized strip), `overview`, `detail`, `sensors`, `docker`, `docker_overview`, `ports`, `editor`, `import`, `keys`, `database` (one inner window per connection), `files` (one inner window per host), `text_editor` (its editor window: tabs, gutter, colours, find bar), `host_sync`, `confirm`, `update_window`. Only the main OS window exists; pages and dialogs are drawn inside it |
+| `src/views/` | One module per screen: `panels` (top bar, status bar), `workspace` (page sidebar, inner windows: title bar, tabs, move / resize / minimize / maximize, minimized strip), `overview`, `detail`, `sensors`, `docker`, `docker_overview`, `ports`, `editor`, `import`, `keys`, `strategy` (Update Strategy page, #122), `database` (one inner window per connection), `files` (one inner window per host), `text_editor` (its editor window: tabs, gutter, colours, find bar), `host_sync`, `confirm`, `update_window`. Only the main OS window exists; pages and dialogs are drawn inside it |
 | `src/widgets.rs` | Shared drawing helpers and colours (bars, status dot, fan, thresholds, action buttons `Act`: red danger / yellow edit / green add / amber caution, `host_menu` (right-click host menu), `light_visuals`) |
 | `src/icons.rs` | Phosphor icon font glyphs and OS logo detection; `assets/` holds the font and logos |
 | `assets/icon/` | App icon (`telepad.png` window icon, `.ico` exe/installer, `.icns` macOS app), generated by `scripts/make-icon.py` |
@@ -174,7 +176,7 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
 - SSH: `BatchMode=yes` (never prompts), `StrictHostKeyChecking=accept-new`
   (trust on first use; changed keys still rejected).
 - Self-update downloads only from `https://github.com/<repo>/releases/download/`, verifies the
-  SHA-256 before anything is replaced, and never touches `telepad.db`, `preference.db`, `history.db`, `config` or `.env`.
+  SHA-256 before anything is replaced, and never touches `telepad.db`, `preference.db`, `history.db`, `update.db`, `config` or `.env`.
 - UI text may use any character, but the GUI test `every_character_in_the_ui_has_a_glyph` must
   pass (proportional text falls back to Hack; Phosphor holds the icons).
 - Test data uses documentation addresses (`192.0.2.0/24`, `198.51.100.0/24`) and made-up
@@ -195,6 +197,7 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
 | ssh binary override | `TELEPAD_SSH` env var (default: Windows `System32\OpenSSH\ssh.exe`, else `ssh`) |
 | View settings | `settings` table `ui_overview_cards`, `ui_theme`, `ui_sidebar_collapsed`; `ui_workspace` is only read once (imported into `preference.db` as `<own>`, #94); `ui_compact_host_list` / `ui_group_by_status` are kept but unused since the host list went (#77) |
 | History (#100) | `history.db` next to `telepad.db` (`--history <path>` / `TELEPAD_HISTORY`): `entries` table, one writer / reader thread in the runtime, flushed on exit; file windows (History tab) and database windows (SQL log) load their scope on open |
+| Update Strategy (#122) | `update.db` next to `telepad.db` (`--update-db <path>` / `TELEPAD_UPDATE_DB`): `strategy` table (key → value: `paused`, `ping_on` / `ping_secs`, `live_*`, `slow_*`, `static_*`, `ssh_retry_secs`; out-of-range values read as defaults) + `last_facts` (alias, tier `static` / `slow`, JSON, `collected_at` Unix seconds; pruned to the loaded aliases); one writer thread in the runtime, flushed on exit. ☰ ▸ Update Strategy… (`Win::Strategy`), Pause / Resume in the top bar; ping rounds via `Effect::Ping` (no SSH) |
 | Workspaces (#94) | `preference.db` next to `telepad.db` (`--prefs <path>` / `TELEPAD_PREFS`): `workspaces` table (label, kind `own` / `custom`, layout `x,y,w,h|minimized|maximized|active|tab;tab` per window, position, updated) + `prefs` (`current`, `legacy_imported`); written by a writer thread, autosave ≤ 1 / s, flushed on exit |
 | File window folders | `settings` table `files_paths:<alias>` (`local
 remote`, last folders per host) |
@@ -203,7 +206,7 @@ remote`, last folders per host) |
 | Database connections | `db_connections` table (user, database, save-password and read-only flags per `DbTarget::key`); passwords in the OS password store (service "Telepad database") |
 | Update source | `settings` table `update_enabled` / `update_repo` / `update_auto_install` (☰ ▸ Software update…); check via the github.com `releases/latest` redirect (API only as fallback: 60 req/h per IP); default `yohannaftali/telepad` |
 
-`.env`, `config`, `telepad.db`, `preference.db`, `history.db` and `telepad.ssh_config` are git-ignored: never commit an inventory.
+`.env`, `config`, `telepad.db`, `preference.db`, `history.db`, `update.db` and `telepad.ssh_config` are git-ignored: never commit an inventory.
 
 ## Validate
 
@@ -279,3 +282,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #110 | fix(store): create history.db, preference.db and telepad.db readable by the owner only (macOS / Linux) | closed | 2026-11-22 |
 | #111 | fix(history): neutralise formula cells in the CSV export | closed | 2026-11-22 |
 | #112 | fix(keys): restrict the generated key before moving it; ACL by SID, permission failure as a warning | closed | 2026-11-22 |
+| #122 | feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db | ready-for-review | 2026-11-23 |

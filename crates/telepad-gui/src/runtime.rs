@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
 use telepad_app::db::{DbEffect, DbId, DbJob, DbMsg};
@@ -24,6 +24,7 @@ use telepad_core::db::{detect, secret, tunnel};
 use telepad_core::history;
 use telepad_core::prefs::{self, Prefs, WorkspacePrefs};
 use telepad_core::store;
+use telepad_core::strategy::{self, SavedFacts, Strategy, UpdateDb};
 use telepad_core::update::{self, Updater, relaunch};
 use telepad_core::{Workspace, config, open_workspace, platform};
 
@@ -45,8 +46,17 @@ pub struct Runtime {
     prefs: Option<(Sender<WorkspacePrefs>, thread::JoinHandle<()>)>,
     /// `history.db` (#100): one thread writes and reads it, in order.
     history: Option<(Sender<HistCmd>, thread::JoinHandle<()>)>,
+    /// `update.db` (#122): one thread writes it, in order.
+    strategy: Option<(Sender<StrategyCmd>, thread::JoinHandle<()>)>,
     /// `preference.db` / `history.db` stay readable by others (#110).
     permission_notes: Vec<String>,
+}
+
+/// Work for the `update.db` thread (#122).
+enum StrategyCmd {
+    Save(Strategy),
+    Facts(Box<strategy::Facts>),
+    Prune(Vec<String>),
 }
 
 /// Work for the `history.db` thread (#100).
@@ -162,6 +172,7 @@ impl Runtime {
         cli_db: Option<&str>,
         cli_prefs: Option<&str>,
         cli_history: Option<&str>,
+        cli_update_db: Option<&str>,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
         let mut rt = Self {
@@ -175,6 +186,7 @@ impl Runtime {
             files: HashMap::new(),
             prefs: None,
             history: None,
+            strategy: None,
             permission_notes: Vec::new(),
         };
         match open_workspace(cli_config, cli_db) {
@@ -193,6 +205,7 @@ impl Runtime {
                     update_config: ws.store.update_config().map_err(|e| e.to_string()),
                     ui_prefs: ws.store.ui_prefs().unwrap_or_default(),
                     prefs: rt.open_prefs(ws.store.path(), cli_prefs, &ws.store),
+                    strategy: rt.open_strategy(ws.store.path(), cli_update_db),
                 };
                 let history_error = rt.open_history(ws.store.path(), cli_history).err();
                 // Database files others can read (#110): said once, not fatal.
@@ -510,6 +523,13 @@ impl Runtime {
                 Some((w, _)) if w.send(p).is_ok() => None,
                 _ => Some(Msg::PrefsSaved(Err("preference.db is not open".into()))),
             },
+            Effect::SaveStrategy(s) => self.strategy_send(StrategyCmd::Save(s)),
+            Effect::SaveFacts(f) => self.strategy_send(StrategyCmd::Facts(Box::new(f))),
+            Effect::PruneFacts(keep) => self.strategy_send(StrategyCmd::Prune(keep)),
+            Effect::Ping(hosts) => {
+                self.background(move || Msg::Pinged(ping_all(&hosts)));
+                None
+            }
             Effect::SaveUiPrefs(p) => {
                 Some(Msg::UiPrefsSaved(self.with_store(|s| s.set_ui_prefs(&p))))
             }
@@ -595,6 +615,58 @@ impl Runtime {
         });
         self.prefs = Some((wtx, handle));
         Ok(loaded)
+    }
+
+    /// Open `update.db` (#122), read the strategy and the last known facts,
+    /// and start its writer thread.
+    fn open_strategy(
+        &mut self,
+        db: &Path,
+        cli: Option<&str>,
+    ) -> Result<(Strategy, Vec<SavedFacts>), String> {
+        let path = strategy::strategy_path(db, cli);
+        let u = UpdateDb::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        self.permission_notes
+            .extend(u.permission_warning().map(str::to_string));
+        let st = u.load_strategy().map_err(|e| e.to_string())?;
+        let facts = u.load_facts(unix_now()).map_err(|e| e.to_string())?;
+        let (stx, srx) = mpsc::channel::<StrategyCmd>();
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        let handle = thread::spawn(move || {
+            let mut failed = false;
+            while let Ok(cmd) = srx.recv() {
+                let r = match cmd {
+                    StrategyCmd::Save(s) => u.save_strategy(&s),
+                    StrategyCmd::Facts(f) => u.save_facts(&f, unix_now()),
+                    StrategyCmd::Prune(keep) => u.prune(&keep),
+                };
+                // Said once: the same problem would repeat on every collection.
+                if let Err(e) = r
+                    && !failed
+                {
+                    failed = true;
+                    let _ = tx.send(Msg::Notice(format!("Cannot write update.db: {e}")));
+                    ctx.request_repaint();
+                }
+            }
+        });
+        self.strategy = Some((stx, handle));
+        Ok((st, facts))
+    }
+
+    fn strategy_send(&self, cmd: StrategyCmd) -> Option<Msg> {
+        let (tx, _) = self.strategy.as_ref()?;
+        tx.send(cmd)
+            .err()
+            .map(|_| Msg::Notice("update.db is not open".into()))
+    }
+
+    /// On exit: wait until the `update.db` thread wrote everything sent to it.
+    pub fn flush_strategy(&mut self) {
+        if let Some((tx, handle)) = self.strategy.take() {
+            drop(tx);
+            let _ = handle.join();
+        }
     }
 
     /// Open `history.db` (trimmed to 90 days / 50 000 entries) and start
@@ -1043,7 +1115,7 @@ impl Runtime {
                             match ev {
                                 transfer::Event::Bytes(n) => {
                                     pending += n;
-                                    if last.elapsed() < std::time::Duration::from_millis(150) {
+                                    if last.elapsed() < Duration::from_millis(150) {
                                         return;
                                     }
                                     last = Instant::now();
@@ -1525,6 +1597,33 @@ impl Runtime {
             ctx.request_repaint();
         });
     }
+}
+
+/// Ping every host (no SSH), [`WORKERS`] at a time; (alias, ms or no reply).
+fn ping_all(hosts: &[config::HostEntry]) -> Vec<(String, Option<f32>)> {
+    let mut out = Vec::with_capacity(hosts.len());
+    for chunk in hosts.chunks(WORKERS) {
+        thread::scope(|s| {
+            let running: Vec<_> = chunk
+                .iter()
+                .map(|h| {
+                    let target = if h.hostname.is_empty() {
+                        &h.alias
+                    } else {
+                        &h.hostname
+                    };
+                    (
+                        h.alias.clone(),
+                        s.spawn(move || platform::ping(target, Duration::from_secs(2))),
+                    )
+                })
+                .collect();
+            for (alias, t) in running {
+                out.push((alias, t.join().ok().flatten()));
+            }
+        });
+    }
+    out
 }
 
 /// Stop whatever statement the connection is running (no-op when idle).

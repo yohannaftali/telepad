@@ -205,12 +205,18 @@ fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, grip: bool) {
         Some(r) => report_cells(row, h, r),
         None => {
             row.col(|ui| {
+                let known = h
+                    .known
+                    .as_ref()
+                    .map(|k| k.os_pretty.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map_or(String::new(), |os| format!(" · last known: {os}"));
                 let msg = if let Some(e) = &h.error {
-                    RichText::new(e).color(usage_color(95.0))
+                    RichText::new(format!("{e}{known}")).color(usage_color(95.0))
                 } else if h.loading {
-                    RichText::new("loading…").weak()
+                    RichText::new(format!("loading…{known}")).weak()
                 } else {
-                    RichText::new("queued").weak()
+                    RichText::new(format!("queued{known}")).weak()
                 };
                 clipped(ui, msg);
             });

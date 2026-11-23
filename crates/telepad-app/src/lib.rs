@@ -23,9 +23,9 @@ pub mod workspace;
 pub use msg::{Effect, Msg};
 pub use state::{
     AkHost, Drafts, Editor, HostState, ImportDialog, KeyHolders, KeyRun, KeysDraft, KeysTab,
-    LeaveAsk, MESSAGE_TTL, Model, OverviewPage, PasteImport, PickerDraft, RunInfoView, State,
-    UpdatePhase, UpdateState, key_groups, key_holders, key_selectable, matches_filter,
-    matches_query,
+    LeaveAsk, MESSAGE_TTL, Model, OverviewPage, PasteImport, PickerDraft, RunInfoView, Seen, State,
+    StrategyDraft, UpdatePhase, UpdateState, key_groups, key_holders, key_selectable,
+    matches_filter, matches_query,
 };
 pub use table::{
     ClusterKind, ClusterRow, Flag, FlagKind, HostGroup, Severity, Sort, SortKey, StackRow,
@@ -55,5 +55,7 @@ mod tests_leave;
 mod tests_mykeys;
 #[cfg(test)]
 mod tests_rdp;
+#[cfg(test)]
+mod tests_strategy;
 #[cfg(test)]
 mod tests_workspace;

@@ -111,21 +111,41 @@ pub fn detail(
         ))
         .weak(),
     );
-    if h.report.is_some() && h.entry.access == Access::Ssh {
+    if h.shown().is_some() && h.entry.access == Access::Ssh {
         ui.label(
             RichText::new(format!(
                 "OS and CPU info read {} · addresses, ports and updates read {}",
-                ago(h.static_at),
-                ago(h.slow_at)
+                ago_seen(h.static_at),
+                ago_seen(h.slow_at)
             ))
             .weak()
             .small(),
         )
         .on_hover_text(
-            "Live metrics are read on every refresh; OS / CPU info once a day and \
-             addresses, listening ports and pending updates every 6 hours. \
-             Refresh reads everything now.",
+            "Live metrics are read every round; OS / CPU info and addresses, \
+             listening ports and pending updates less often, and kept in update.db \
+             across restarts (☰ ▸ Update Strategy…). Refresh reads everything now.",
         );
+    }
+    if let Some(ping) = h.ping {
+        let text = match ping {
+            Some(ms) => format!("ping {ms:.0} ms · {}", ago(h.ping_at)),
+            None => format!("no ping reply · {}", ago(h.ping_at)),
+        };
+        ui.label(RichText::new(text).weak().small());
+    }
+    if h.report.is_none()
+        && let Some(k) = &h.known
+    {
+        let mut parts = vec![k.os_pretty.clone(), k.kernel.clone()];
+        if let Some(n) = k.maintenance.updates {
+            parts.push(format!("{n} update(s) pending"));
+        }
+        parts.retain(|p| !p.is_empty());
+        ui.label(RichText::new(format!("Last known: {}", parts.join(" · "))).weak())
+            .on_hover_text(
+                "Saved from an earlier run; read again from the host on the next collection",
+            );
     }
     if let Some(e) = &h.error {
         ui.colored_label(usage_color(95.0), format!("Last check failed: {e}"));

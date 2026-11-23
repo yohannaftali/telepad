@@ -21,6 +21,7 @@ fn started(layout: &str) -> (State, Vec<Effect>) {
             imported_from: None,
             update_config: Ok(UpdateConfig::default()),
             ui_prefs: UiPrefs::default(),
+            strategy: Ok(Default::default()),
             prefs: Ok(WorkspacePrefs {
                 own: layout.into(),
                 ..Default::default()
@@ -441,6 +442,7 @@ fn preference_db_missing_still_starts_and_saves_nothing() {
             imported_from: None,
             update_config: Ok(UpdateConfig::default()),
             ui_prefs: UiPrefs::default(),
+            strategy: Ok(Default::default()),
             prefs: Err("locked".into()),
         },
         Instant::now(),

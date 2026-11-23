@@ -13,6 +13,7 @@ pub fn run(
     cli_db: Option<String>,
     cli_prefs: Option<String>,
     cli_history: Option<String>,
+    cli_update_db: Option<String>,
 ) -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Telepad")
@@ -38,6 +39,7 @@ pub fn run(
                 cli_db,
                 cli_prefs,
                 cli_history,
+                cli_update_db,
             )))
         }),
     )
@@ -56,6 +58,7 @@ impl TelepadApp {
         cli_db: Option<String>,
         cli_prefs: Option<String>,
         cli_history: Option<String>,
+        cli_update_db: Option<String>,
     ) -> Self {
         icons::install(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -69,6 +72,7 @@ impl TelepadApp {
             cli_db.as_deref(),
             cli_prefs.as_deref(),
             cli_history.as_deref(),
+            cli_update_db.as_deref(),
         );
         Self {
             state,
@@ -82,6 +86,7 @@ impl eframe::App for TelepadApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.runtime.flush_prefs(&self.state.model);
         self.runtime.flush_history();
+        self.runtime.flush_strategy();
         self.runtime.shutdown();
     }
 

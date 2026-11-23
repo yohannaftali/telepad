@@ -7,10 +7,11 @@ use std::time::{Duration, Instant};
 use std::collections::BTreeSet;
 
 use telepad_core::authorized_keys::{KeyAction, KeyOutcome};
-use telepad_core::collector::{self, Scope};
+use telepad_core::collector::Scope;
 use telepad_core::config::{Access, HostEntry, Inventory};
 use telepad_core::model::HostReport;
 use telepad_core::store::{self, ImportMode, ImportSummary, ThemePref, UiPrefs};
+use telepad_core::strategy::Strategy;
 use telepad_core::update::{Check, UpdateConfig};
 
 /// How long a status-bar message stays visible.
@@ -78,6 +79,17 @@ pub struct Model {
     pub my_keys: crate::mykeys::MyKeys,
     /// Saved Remote Desktop settings by alias (#102).
     pub rdp: std::collections::BTreeMap<String, telepad_core::rdp::RdpSettings>,
+    /// What Telepad checks by itself and how often (#122, `update.db`).
+    pub strategy: Strategy,
+    /// `update.db` is open; when not, nothing is saved there.
+    pub strategy_ok: bool,
+    /// Since when automatic checks are paused (this session).
+    pub paused_at: Option<Instant>,
+    /// Last ping round, and whether one is running.
+    pub last_ping: Option<Instant>,
+    pub pinging: bool,
+    /// Facts from `update.db` waiting for their host to be loaded, by alias.
+    pub restored: std::collections::BTreeMap<String, telepad_core::strategy::SavedFacts>,
 }
 
 /// A key added to / revoked from several hosts.
@@ -104,8 +116,6 @@ impl KeyRun {
 #[derive(Debug)]
 pub struct Drafts {
     pub filter: String,
-    pub auto_refresh: bool,
-    pub interval_secs: u32,
     pub ports_nginx_only: bool,
     pub editor: Option<Editor>,
     pub update_form: UpdateConfig,
@@ -144,6 +154,26 @@ pub struct Drafts {
     pub ws_area: [f32; 2],
     /// The leave question (#99): what would be lost by leaving.
     pub ws_leave: Option<LeaveAsk>,
+    /// Update Strategy page (#122): the form and why Save refused it.
+    pub strategy: StrategyDraft,
+}
+
+/// The Update Strategy page's form (#122). `paused` is not part of it (the
+/// top bar's Pause button changes it at once).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StrategyDraft {
+    pub form: Strategy,
+    pub error: Option<String>,
+}
+
+impl StrategyDraft {
+    /// The form differs from what is saved.
+    pub fn changed(&self, saved: &Strategy) -> bool {
+        Strategy {
+            paused: saved.paused,
+            ..self.form
+        } != *saved
+    }
 }
 
 /// Leaving the workspace would throw work away (#99): the list shown before
@@ -347,8 +377,6 @@ impl Default for Drafts {
     fn default() -> Self {
         Self {
             filter: String::new(),
-            auto_refresh: true,
-            interval_secs: 60,
             ports_nginx_only: false,
             editor: None,
             update_form: UpdateConfig::default(),
@@ -370,6 +398,7 @@ impl Default for Drafts {
             ws_delete: None,
             ws_area: [1200.0, 700.0],
             ws_leave: None,
+            strategy: StrategyDraft::default(),
         }
     }
 }
@@ -393,9 +422,19 @@ pub struct HostState {
     pub updated: Option<Instant>,
     pub elapsed: Option<Duration>,
     /// Last successful read of hostname / OS / kernel / CPU model (daily).
-    pub static_at: Option<Instant>,
+    pub static_at: Option<Seen>,
     /// Last successful read of addresses, ports and updates (every 6 hours).
-    pub slow_at: Option<Instant>,
+    pub slow_at: Option<Seen>,
+    /// Facts from `update.db` (#122) while there is no report of this
+    /// session yet: shown as last known, and kept by the first collection.
+    pub known: Option<HostReport>,
+    /// Last ping check (#122): `Some(None)` = no reply.
+    pub ping: Option<Option<f32>>,
+    pub ping_at: Option<Instant>,
+    /// The host answered a ping check once (hosts that drop ICMP never are
+    /// marked down by ping), and how many checks in a row it missed since.
+    pub ping_replied: bool,
+    pub ping_misses: u8,
     /// Last attempt found the host down without a ping reply: ping it first.
     pub no_ping: bool,
     /// Last time ssh was actually tried (not skipped by a failed ping).
@@ -410,19 +449,28 @@ impl HostState {
         }
     }
 
-    /// What the next automatic collection needs from this host.
-    pub fn scope_at(&self, now: Instant) -> Scope {
+    /// What the next automatic collection needs from this host: the tiers
+    /// that are on and due.
+    pub fn scope_at(&self, now: Instant, st: &Strategy) -> Scope {
         if self.entry.access == Access::Rdp {
             return Scope::FULL;
         }
-        let due = |t: Option<Instant>, every: Duration| {
-            t.is_none_or(|t| now.saturating_duration_since(t) >= every)
+        let due = |t: Option<Seen>, every: telepad_core::strategy::Every| {
+            every.on && t.is_none_or(|t| t.age(now) >= every.every())
         };
         Scope {
-            static_info: due(self.static_at, collector::STATIC_EVERY),
-            slow: due(self.slow_at, collector::SLOW_EVERY),
-            ping_first: self.no_ping && !due(self.ssh_at, collector::DOWN_SSH_RETRY),
+            static_info: due(self.static_at, st.static_info),
+            slow: due(self.slow_at, st.slow),
+            ping_first: self.no_ping
+                && self
+                    .ssh_at
+                    .is_some_and(|t| now.saturating_duration_since(t) < st.ssh_retry_every()),
         }
+    }
+
+    /// The report to show: this session's, else the last known facts.
+    pub fn shown(&self) -> Option<&HostReport> {
+        self.report.as_ref().or(self.known.as_ref())
     }
 
     pub fn online(&self) -> Option<bool> {
@@ -431,6 +479,36 @@ impl HostState {
             (None, Some(_)) => Some(true),
             _ => None,
         }
+    }
+}
+
+/// A moment in the past: `at` minus `before`. Saved times can lie before
+/// this computer's monotonic clock started (e.g. facts from yesterday after a
+/// reboot), which an [`Instant`] cannot hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Seen {
+    pub at: Instant,
+    pub before: Duration,
+}
+
+impl Seen {
+    pub fn at(t: Instant) -> Self {
+        Self {
+            at: t,
+            before: Duration::ZERO,
+        }
+    }
+
+    /// `age` before `now`.
+    pub fn ago(age: Duration, now: Instant) -> Self {
+        Self {
+            at: now,
+            before: age,
+        }
+    }
+
+    pub fn age(self, now: Instant) -> Duration {
+        now.saturating_duration_since(self.at) + self.before
     }
 }
 

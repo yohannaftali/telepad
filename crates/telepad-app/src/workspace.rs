@@ -26,6 +26,8 @@ pub enum Win {
     HostSync,
     /// Public keys (#49).
     Keys,
+    /// Update Strategy (#122): what Telepad checks by itself and how often.
+    Strategy,
     /// A file window session (#62).
     Files(crate::files::FmId),
     /// A database connection (#52).
@@ -46,6 +48,7 @@ impl Win {
             Win::Swarm => Some("swarm"),
             Win::HostSync => Some("hostsync"),
             Win::Keys => Some("keys"),
+            Win::Strategy => Some("strategy"),
             Win::Host | Win::Files(_) | Win::Db(_) | Win::Editor(_) => None,
         }
     }
@@ -58,6 +61,7 @@ impl Win {
             "swarm" => Win::Swarm,
             "hostsync" => Win::HostSync,
             "keys" => Win::Keys,
+            "strategy" => Win::Strategy,
             _ => return None,
         })
     }

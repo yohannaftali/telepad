@@ -42,6 +42,7 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
         ),
         Win::HostSync => (icons::SYNC, "Host Management".into()),
         Win::Keys => (icons::KEY, "Authorized keys".into()),
+        Win::Strategy => (icons::CLOCK, "Update Strategy".into()),
         Win::Files(id) => (icons::FOLDER, format!("Files — {}", alias(id))),
         Win::Db(id) => (
             icons::DATABASE,
@@ -58,7 +59,9 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
 fn close_msg(w: Win) -> Msg {
     use telepad_app::files::FmMsg;
     match w {
-        Win::Overview | Win::Docker | Win::Kube | Win::Swarm => Msg::Ws(WsMsg::Close(w)),
+        Win::Overview | Win::Docker | Win::Kube | Win::Swarm | Win::Strategy => {
+            Msg::Ws(WsMsg::Close(w))
+        }
         Win::Host => Msg::Select(None),
         Win::HostSync => Msg::HostSync(telepad_app::hostsync::HsMsg::Close),
         Win::Keys => Msg::KeysClose,
@@ -79,6 +82,7 @@ fn default_size(w: Win) -> Vec2 {
         Win::Host => egui::vec2(900.0, 640.0),
         Win::HostSync => egui::vec2(1150.0, 680.0),
         Win::Keys => egui::vec2(660.0, 560.0),
+        Win::Strategy => egui::vec2(960.0, 470.0),
         Win::Files(_) => egui::vec2(1200.0, 720.0),
         Win::Db(_) => egui::vec2(1150.0, 700.0),
         Win::Editor(_) => egui::vec2(1050.0, 720.0),

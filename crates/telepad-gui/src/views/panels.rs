@@ -60,13 +60,21 @@ fn hosts_menu(ui: &mut egui::Ui, theme: ThemePref, out: &mut Vec<Msg>) {
             }
         });
         ui.separator();
+        if ui
+            .button(il(icons::CLOCK, "Update Strategy…"))
+            .on_hover_text("Pause, and what Telepad checks by itself and how often")
+            .clicked()
+        {
+            out.push(Msg::StrategyOpen);
+            ui.close();
+        }
         if ui.button(il(icons::IMPORT, "Software update…")).clicked() {
             out.push(Msg::UpdateWindow(true));
             ui.close();
         }
     })
     .response
-    .on_hover_text("Settings (theme) · Software update");
+    .on_hover_text("Settings (theme) · Update Strategy · Software update");
 }
 
 fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
@@ -116,12 +124,29 @@ fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
     {
         out.push(Msg::RefreshAll);
     }
-    ui.checkbox(&mut d.auto_refresh, "Auto every");
-    ui.add(
-        egui::DragValue::new(&mut d.interval_secs)
-            .range(15..=3600)
-            .suffix(" s"),
-    );
+    // Pause / Resume (#122); intervals are on ☰ ▸ Update Strategy….
+    if m.strategy.paused {
+        if ui
+            .button(
+                RichText::new(il(icons::PLAY, "Resume"))
+                    .color(usage_color(75.0))
+                    .strong(),
+            )
+            .on_hover_text(super::strategy::paused_text(m))
+            .clicked()
+        {
+            out.push(Msg::SetPaused(false));
+        }
+    } else if ui
+        .button(il(icons::PAUSE, "Pause"))
+        .on_hover_text(
+            "Stop automatic checks (SSH and ping) until Resume; \
+             intervals: ☰ ▸ Update Strategy…",
+        )
+        .clicked()
+    {
+        out.push(Msg::SetPaused(true));
+    }
     ui.separator();
     super::workspaces::workspace_picker(ui, m, d, out);
     window_picker(ui, m, d, out);
@@ -196,6 +221,13 @@ pub fn status_bar(ui: &mut egui::Ui, m: &Model, now: Instant) {
             v.on_hover_text(&tip);
             ui.label(RichText::new(icons::WARNING).weak())
                 .on_hover_text(tip);
+        }
+        if m.strategy.paused {
+            ui.separator();
+            ui.label(
+                RichText::new(il(icons::PAUSE, &super::strategy::paused_text(m)))
+                    .color(usage_color(75.0)),
+            );
         }
         let bg = telepad_app::background_transfers(m);
         if bg > 0 {

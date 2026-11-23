@@ -1,9 +1,10 @@
 use std::time::{Duration, Instant};
 
-use telepad_core::collector::{DOWN_SSH_RETRY, SLOW_EVERY, STATIC_EVERY, Scope, Update};
+use telepad_core::collector::{Scope, Update};
 use telepad_core::config::{Access, HostEntry, Inventory};
 use telepad_core::model::HostReport;
 use telepad_core::store::{ImportMode, ImportSummary, UiPrefs};
+use telepad_core::strategy::Strategy;
 use telepad_core::update::{CHECK_EVERY, Check, UpdateConfig};
 
 use crate::*;
@@ -26,6 +27,7 @@ fn started(now: Instant) -> (State, Vec<Effect>) {
             imported_from: None,
             update_config: Ok(UpdateConfig::default()),
             ui_prefs: UiPrefs::default(),
+            strategy: Ok(Default::default()),
             prefs: Ok(Default::default()),
         },
         now,
@@ -106,6 +108,7 @@ fn fatal_and_bad_update_settings_are_reported() {
                 theme: telepad_core::store::ThemePref::Dark,
                 ..Default::default()
             },
+            strategy: Ok(Default::default()),
             prefs: Ok(Default::default()),
         },
         Instant::now(),
@@ -152,7 +155,7 @@ fn reload_keeps_results_and_selection_and_polls_only_changes() {
 }
 
 #[test]
-fn auto_refresh_waits_for_interval_and_idle_collector() {
+fn auto_refresh_waits_for_interval_and_idle_collector_and_pauses() {
     let t0 = Instant::now();
     let (mut s, _) = started(t0);
     loaded(&mut s, vec![host(1, "web01")], t0);
@@ -167,8 +170,25 @@ fn auto_refresh_waits_for_interval_and_idle_collector() {
     );
     assert!(collect_aliases(&update(&mut s, Msg::Tick { busy: 0 }, at(62))).is_empty());
 
-    s.drafts.auto_refresh = false;
-    assert!(collect_aliases(&update(&mut s, Msg::Tick { busy: 0 }, at(500))).is_empty());
+    // Paused: nothing runs by itself, not even ping; Refresh all still works.
+    let fx = update(&mut s, Msg::SetPaused(true), at(62));
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::SaveStrategy(st) if st.paused))
+    );
+    let fx = update(&mut s, Msg::Tick { busy: 0 }, at(500));
+    assert!(collect_aliases(&fx).is_empty());
+    assert!(!fx.iter().any(|e| matches!(e, Effect::Ping(_))));
+    assert_eq!(
+        collect_aliases(&update(&mut s, Msg::RefreshAll, at(500))),
+        ["web01"]
+    );
+    // Resumed: what came due runs on the next tick.
+    update(&mut s, Msg::SetPaused(false), at(501));
+    assert_eq!(
+        collect_aliases(&update(&mut s, Msg::Tick { busy: 0 }, at(501))),
+        ["web01"]
+    );
 }
 
 fn scopes(fx: &[Effect]) -> Vec<Scope> {
@@ -245,13 +265,19 @@ fn automatic_refresh_reads_static_and_slow_facts_only_when_due() {
 
     let h = &s.model.hosts[0];
     assert_eq!(
-        h.scope_at(t0 + SLOW_EVERY),
+        h.scope_at(t0 + Strategy::default().slow.every(), &Strategy::default()),
         Scope {
             slow: true,
             ..Scope::LIVE
         }
     );
-    assert_eq!(h.scope_at(t0 + STATIC_EVERY), Scope::FULL);
+    assert_eq!(
+        h.scope_at(
+            t0 + Strategy::default().static_info.every(),
+            &Strategy::default()
+        ),
+        Scope::FULL
+    );
 }
 
 #[test]
@@ -265,9 +291,15 @@ fn a_reboot_reads_everything_on_the_next_round() {
     };
     finished(&mut s, "web01", Ok(up(5000)), Scope::FULL, false, t0);
     let t1 = t0 + Duration::from_secs(60);
-    assert_eq!(s.model.hosts[0].scope_at(t1), Scope::LIVE);
+    assert_eq!(
+        s.model.hosts[0].scope_at(t1, &Strategy::default()),
+        Scope::LIVE
+    );
     finished(&mut s, "web01", Ok(up(30)), Scope::LIVE, false, t1);
-    assert_eq!(s.model.hosts[0].scope_at(t1), Scope::FULL);
+    assert_eq!(
+        s.model.hosts[0].scope_at(t1, &Strategy::default()),
+        Scope::FULL
+    );
 }
 
 #[test]
@@ -285,7 +317,10 @@ fn a_host_without_ping_reply_is_only_pinged_until_it_answers() {
     );
     let h = &s.model.hosts[0];
     assert!(h.no_ping);
-    assert!(h.scope_at(t0 + Duration::from_secs(60)).ping_first);
+    assert!(
+        h.scope_at(t0 + Duration::from_secs(60), &Strategy::default())
+            .ping_first
+    );
 
     // Ping still silent: ssh was skipped, so the 10-minute ssh retry clock keeps running.
     let t1 = t0 + Duration::from_secs(60);
@@ -302,7 +337,14 @@ fn a_host_without_ping_reply_is_only_pinged_until_it_answers() {
         t1,
     );
     assert_eq!(s.model.hosts[0].ssh_at, Some(t0));
-    assert!(!s.model.hosts[0].scope_at(t0 + DOWN_SSH_RETRY).ping_first);
+    assert!(
+        !s.model.hosts[0]
+            .scope_at(
+                t0 + Strategy::default().ssh_retry_every(),
+                &Strategy::default()
+            )
+            .ping_first
+    );
 
     // It answered ping and ssh worked: back to normal.
     finished(
@@ -313,13 +355,20 @@ fn a_host_without_ping_reply_is_only_pinged_until_it_answers() {
         false,
         t1,
     );
-    assert!(!s.model.hosts[0].scope_at(t1).ping_first);
+    assert!(
+        !s.model.hosts[0]
+            .scope_at(t1, &Strategy::default())
+            .ping_first
+    );
     assert_eq!(s.model.hosts[0].online(), Some(true));
 
     // RDP-only hosts are already just ping + port probe.
     let mut rdp = host(2, "win01");
     rdp.access = Access::Rdp;
-    assert_eq!(HostState::new(rdp).scope_at(t1), Scope::FULL);
+    assert_eq!(
+        HostState::new(rdp).scope_at(t1, &Strategy::default()),
+        Scope::FULL
+    );
 }
 
 #[test]

@@ -2,6 +2,33 @@
 
 Newest first.
 
+## [2026-11-23] — feat(collector): Update Strategy page, pause, ping check, last facts in update.db (#122)
+- Issue #122 addressed on GitHub (branch `122-update-strategy`)
+- Core: new `strategy.rs` (`update.db`: `strategy` + `last_facts`, `Strategy` / `Every` / `Check`
+  limits, `StaticFacts` / `SlowFacts` shared with `collector::Scope::carry_over`); collector
+  constants `STATIC_EVERY` / `SLOW_EVERY` / `DOWN_SSH_RETRY` replaced by the strategy;
+  `NetAddr` / `Listener` / `Maintenance` deserialize.
+- App: `Msg::SetPaused` / `StrategyOpen` / `StrategySave` / `StrategyReset` / `Pinged`,
+  `Effect::SaveStrategy` / `SaveFacts` / `PruneFacts` / `Ping`; `Win::Strategy`; `HostState`
+  `Seen` times (saved facts older than this boot), `known` facts, ping result / misses;
+  `tests_strategy.rs` (8 tests).
+- GUI: top bar Pause / Resume (replaces "Auto every 60 s"), status bar "Paused",
+  ☰ ▸ Update Strategy… page, `update.db` writer thread, ping rounds, `--update-db`;
+  last known OS in the Hosts table and host page.
+- Docs: USER_MANUAL (Refreshing, Update Strategy, files, command line), README, AGENTS.md,
+  `.gitignore`.
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 197, app 149, gui 7
+  incl. glyph test); release GUI on a copy of the real inventory (56 hosts): `update.db`
+  created, static + slow facts saved for 48 reachable hosts; after a restart no static / slow
+  tier was read again (no newer `collected_at`). Not verified: the Pause button and the
+  Update Strategy page by clicking (no desktop automation), ping marking a host down live.
+
+## [2026-11-23] — feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db
+- Issue #122 created on GitHub
+- Scope: collector (telepad-core `collector.rs`, new `update.db`), telepad-app, telepad-gui (top bar, ☰ menu, new page)
+- Labels: enhancement
+- Builds on #36 (tiered collection): intervals become settings, tier facts persist across restarts, Pause replaces "Auto every 60 s"
+
 ## [2026-11-22] — Telepad 0.9.4
 - **OpenPGP** in My keys (#107): Ed25519 / RSA keys export as OpenPGP (GPG) with a User
   ID and optional passphrase; OpenPGP secret keys import to OpenSSH (checked with GnuPG).

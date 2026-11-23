@@ -21,6 +21,7 @@ mod picker;
 mod ports;
 mod run_info;
 mod sensors;
+mod strategy;
 mod text_editor;
 mod update_window;
 mod workspace;
@@ -118,6 +119,7 @@ fn page(
         Win::Swarm => cluster::cluster_page(ui, m, telepad_app::ClusterKind::Swarm, out),
         Win::HostSync => host_sync::host_sync_page(ui, m, d, out),
         Win::Keys => keys::keys_page(ui, m, d, out),
+        Win::Strategy => strategy::strategy_page(ui, m, d, out),
         Win::Files(id) => files::files_page(ui, m, d, id, focused, out, now),
         Win::Db(id) => database::db_page(ui, m, d, id, out),
         Win::Editor(id) => text_editor::editor_page(ui, m, d, id, focused, out),

@@ -58,7 +58,8 @@ flowchart LR
         db1[("telepad.db<br/>hosts, settings,<br/>RDP settings")]
         db2[("preference.db<br/>workspaces")]
         db3[("history.db<br/>transfers, SQL log")]
-        tp --> db1 & db2 & db3
+        db4[("update.db<br/>update strategy,<br/>last known info")]
+        tp --> db1 & db2 & db3 & db4
         tp --> ssh
     end
     subgraph hosts["Your hosts (nothing installed)"]
@@ -66,7 +67,7 @@ flowchart LR
         h2["Databases<br/>through an SSH tunnel"]
         h3["Windows<br/>Remote Desktop"]
     end
-    ssh -- "every 60 s, read-only" --> h1
+    ssh -- "read-only, on the Update Strategy" --> h1
     ssh -- "only when you open them" --> h2
     tp -. "mstsc / Windows App / xfreerdp" .-> h3
 ```
@@ -93,7 +94,8 @@ Releases are built for Windows (x86_64), macOS (Apple silicon and Intel) and Lin
 2. Start **Telepad** from the Start menu.
 
 Your hosts and settings live in `%APPDATA%\Telepad\telepad.db` (workspaces in
-`preference.db` next to it), and uninstalling keeps them. To import an existing OpenSSH config on the first start, put it there as `config`, or
+`preference.db`, the update strategy and last known host info in `update.db` next to it),
+and uninstalling keeps them. To import an existing OpenSSH config on the first start, put it there as `config`, or
 use **Host Management → Import → From ~/.ssh/config**.
 
 ### Windows (portable zip)
@@ -130,7 +132,7 @@ choose **More info → Run anyway**.
 3. Start Telepad from Applications or Launchpad. **Open SSH** uses Terminal.app.
 
 Hosts and settings live in `~/Library/Application Support/Telepad/telepad.db` (workspaces
-in `preference.db` next to it); put an
+in `preference.db`, the update strategy in `update.db` next to it); put an
 OpenSSH config there as `config` to import it on the first start, or use
 **Host Management → Import → From ~/.ssh/config**. A portable zip (`telepad-<version>-macos-<arch>.zip`)
 is also published; it keeps its data next to the program and needs the same `xattr` step
@@ -148,8 +150,8 @@ for its folder.
 
 The Linux builds are made on Ubuntu 22.04 and need glibc 2.35 or newer.
 
-On every platform the folder must stay writable: `telepad.db`, `preference.db` and `history.db` are
-created next to the program, and in-app updates replace the programs in place.
+On every platform the folder must stay writable: `telepad.db`, `preference.db`, `history.db` and
+`update.db` are created next to the program, and in-app updates replace the programs in place.
 
 ### With Cargo (any platform)
 
@@ -160,7 +162,8 @@ cargo install --git https://github.com/yohannaftali/telepad --locked telepad-gui
 This builds and installs `telepad` and `telepad-check` into `~/.cargo/bin`. See
 [Building from source](CONTRIBUTING.md#building-from-source) for the prerequisites. When installed this way,
 pass `--db <path>` (or set `TELEPAD_DB`) so the database does not live in `~/.cargo/bin`
-(`preference.db` goes next to it; `--prefs <path>` / `TELEPAD_PREFS` to put it elsewhere),
+(`preference.db` and `update.db` go next to it; `--prefs <path>` / `TELEPAD_PREFS` and
+`--update-db <path>` / `TELEPAD_UPDATE_DB` put them elsewhere),
 and update with the same `cargo install` command instead of the in-app updater.
 
 ### Requirements on your PC
@@ -217,7 +220,12 @@ The **top bar** holds the tools for those windows:
 - **Window picker**: the window in front and how many are open; click it for the list of
   every open window — type to search, Enter brings that window to the front.
 - **Arrange**: **Tile** side by side, **Stack** as a cascade, **Minimize all**, **Restore all**.
-- **☰**: **Settings → Theme** (System / Light / Dark) and **Software update…**.
+- **Pause** / **Resume**: stop every automatic check (SSH and ping) and start them again;
+  **Refresh all** still works while paused.
+- **☰**: **Settings → Theme** (System / Light / Dark), **Update Strategy…** (which checks run
+  by themselves and how often: ping 30 s, live metrics 1 min, addresses / ports / pending
+  updates 6 h, OS info 1 day by default; saved in `update.db`, which also keeps each host's
+  last known OS and updates so a restart shows them at once) and **Software update…**.
 
 ![Two custom workspaces, three windows tiled](docs/images/workspaces.png)
 

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct HostReport {
@@ -40,7 +40,8 @@ pub struct HostReport {
 
 /// What needs doing on a host: reboot, updates, OS release past end of support.
 /// `None` = could not be determined (tool missing, unknown release).
-#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct Maintenance {
     /// The host's own date (`YYYY-MM-DD`), used for the end-of-support check.
     pub today: Option<String>,
@@ -70,7 +71,8 @@ impl Maintenance {
 }
 
 /// A listening socket on the host (`ss -tuln` / `netstat -tuln`).
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Listener {
     pub proto: String,
     pub address: String,
@@ -140,7 +142,8 @@ impl Disk {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NetAddr {
     pub interface: String,
     pub family: String,
