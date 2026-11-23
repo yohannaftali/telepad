@@ -2,6 +2,22 @@
 
 Newest first.
 
+## [2026-11-23] — Telepad 0.9.5
+- **Update Strategy** (#122, ☰ ▸ Update Strategy…): Pause all, or pause single hosts (page,
+  host page, right-click menu); per check on / off and interval — ping 30 s, live metrics
+  1 min, network & updates 6 h, system info 1 day, SSH retry 10 min by default; replaces
+  "Auto every 60 s" in the top bar. Saved in the new `update.db` next to `telepad.db`.
+- **Ping check**: hosts are pinged on their own timer (no SSH); a host that answered and
+  misses two pings is shown down at once and read again as soon as it answers.
+- **Last known info**: OS / CPU info, addresses, ports and pending updates are kept in
+  `update.db`, shown at once after a restart and not read again before they are due.
+  Still read-only: Telepad never runs `apt-get update`.
+
+## [2026-11-23] — Tested and merged: #122 (PR #123)
+- Full pass on Windows 11 (UI Automation walkthrough, runtime checks against `update.db`,
+  headless `dockerho`); right-click menu item confirmed by the owner. CI green on Windows,
+  macOS, Linux, `db-live`, `files-live`. Issue closed by the PR; test summary commented.
+
 ## [2026-11-23] — Tested #122 (branch `122-update-strategy`)
 - Windows 11, release build, copy of the real inventory (56 hosts), headless `dockerho`
   (OS, kernel, cores, disk, 25 containers, 41 ports match direct read-only commands).

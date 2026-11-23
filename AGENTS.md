@@ -282,4 +282,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #110 | fix(store): create history.db, preference.db and telepad.db readable by the owner only (macOS / Linux) | closed | 2026-11-22 |
 | #111 | fix(history): neutralise formula cells in the CSV export | closed | 2026-11-22 |
 | #112 | fix(keys): restrict the generated key before moving it; ACL by SID, permission failure as a warning | closed | 2026-11-22 |
-| #122 | feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db | ready-for-review | 2026-11-23 |
+| #122 | feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db | closed | 2026-11-23 |
