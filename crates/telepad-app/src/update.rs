@@ -13,8 +13,8 @@ use telepad_core::update::{CHECK_EVERY, CURRENT_VERSION, RETRY_AFTER_FAILURE, Up
 
 use crate::msg::{Effect, Msg};
 use crate::state::{
-    Editor, HostState, ImportDialog, KeyRun, KeysDraft, Model, PasteImport, RunInfoView, State,
-    UpdatePhase, key_selectable,
+    Editor, HostState, ImportDialog, KeyRun, KeysDraft, Model, PasteImport, RunInfoView, Seen,
+    State, UpdatePhase, key_selectable,
 };
 
 /// Apply `msg` to `state` at time `now`; return the effects to run.
@@ -49,7 +49,26 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             update_config,
             ui_prefs,
             prefs,
+            strategy,
         } => {
+            match strategy {
+                Ok(l) => {
+                    m.strategy = l.strategy;
+                    m.strategy_ok = true;
+                    m.restored = l.facts.into_iter().map(|f| (f.alias.clone(), f)).collect();
+                    m.paused_hosts = l.paused_hosts.into_iter().collect();
+                }
+                Err(e) => {
+                    m.strategy = Default::default();
+                    m.strategy_ok = false;
+                    say(m, now, format!("Update strategy is not saved: {e}"));
+                }
+            }
+            m.paused_at = m.strategy.paused.then_some(now);
+            d.strategy = crate::state::StrategyDraft {
+                form: m.strategy,
+                ..Default::default()
+            };
             d.compact_host_list = ui_prefs.compact_host_list;
             d.group_by_status = ui_prefs.group_by_status;
             d.overview_cards = ui_prefs.overview_cards;
@@ -102,11 +121,107 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             if m.update.enabled() && elapsed(m.update.last_check, now) >= Some(every) {
                 start_check(m, now, false, &mut fx);
             }
-            let interval = Duration::from_secs(u64::from(d.interval_secs));
-            if d.auto_refresh && busy == 0 && elapsed(m.last_refresh, now) >= Some(interval) {
-                refresh_all(m, now, false, &mut fx);
+            if !m.strategy.paused {
+                automatic(m, busy, now, &mut fx);
             }
         }
+        Msg::SetPaused(paused) => {
+            if m.strategy.paused != paused {
+                m.strategy.paused = paused;
+                m.paused_at = paused.then_some(now);
+                say(
+                    m,
+                    now,
+                    if paused {
+                        "Automatic checks paused — Refresh all still works"
+                    } else {
+                        "Automatic checks resumed"
+                    },
+                );
+                save_strategy(m, &mut fx);
+                if !paused {
+                    // Catch up at once on what came due while paused.
+                    m.last_refresh = None;
+                    m.last_ping = None;
+                }
+            }
+        }
+        Msg::PauseHosts { aliases, paused } => {
+            let mut n = 0;
+            for a in aliases {
+                if !m.hosts.iter().any(|h| h.entry.alias == a) {
+                    continue;
+                }
+                let changed = if paused {
+                    m.paused_hosts.insert(a.clone())
+                } else {
+                    m.paused_hosts.remove(&a)
+                };
+                if changed {
+                    n += 1;
+                    if m.strategy_ok {
+                        fx.push(Effect::SaveHostPaused { alias: a, paused });
+                    }
+                }
+            }
+            if n > 0 {
+                let what = if n == 1 {
+                    "1 host".to_string()
+                } else {
+                    format!("{n} hosts")
+                };
+                say(
+                    m,
+                    now,
+                    if paused && n == 1 {
+                        format!("Paused {what} — its own Refresh still reads it")
+                    } else if paused {
+                        format!("Paused {what} — their own Refresh still reads them")
+                    } else {
+                        format!("Resumed {what}")
+                    },
+                );
+                if !paused {
+                    // Read at once on the next tick.
+                    m.last_refresh = None;
+                    m.last_ping = None;
+                }
+            }
+        }
+        Msg::StrategyOpen => {
+            d.strategy = crate::state::StrategyDraft {
+                form: m.strategy,
+                error: None,
+                host_filter: std::mem::take(&mut d.strategy.host_filter),
+            };
+            m.ws.open(crate::workspace::Win::Strategy);
+        }
+        Msg::StrategyReset => {
+            d.strategy.form = telepad_core::strategy::Strategy {
+                paused: m.strategy.paused,
+                ..Default::default()
+            };
+            d.strategy.error = None;
+        }
+        Msg::StrategySave => {
+            let form = telepad_core::strategy::Strategy {
+                paused: m.strategy.paused,
+                ..d.strategy.form
+            };
+            match form.validate() {
+                Err(e) => d.strategy.error = Some(e),
+                Ok(()) => {
+                    d.strategy.error = None;
+                    d.strategy.form = form;
+                    if form != m.strategy {
+                        m.strategy = form;
+                        save_strategy(m, &mut fx);
+                        say(m, now, "Update strategy saved");
+                    }
+                }
+            }
+        }
+        Msg::Pinged(results) => pinged(m, results, now, &mut fx),
 
         // Asked for by the user: everything, not only what is due.
         Msg::RefreshAll => refresh_all(m, now, true, &mut fx),
@@ -860,7 +975,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         Msg::Restart => fx.push(Effect::Relaunch),
         Msg::OpenUrl(url) => fx.push(Effect::OpenUrl(url)),
 
-        Msg::Collected(u) => collected(m, u, now),
+        Msg::Collected(u) => collected(m, u, now, &mut fx),
         Msg::HostsLoaded {
             hosts,
             ssh_config_error,
@@ -1655,18 +1770,142 @@ fn selected_id(m: &Model) -> Option<i64> {
 
 /// Collect every monitored host: everything when the user asked (`manual`),
 /// otherwise only the tiers that are due (live metrics always).
+/// RDP-only hosts follow the ping check when it is on (their collection is
+/// a ping + port probe). Hosts paused one by one are left out, also from
+/// Refresh all: only their own Refresh reads them.
 fn refresh_all(m: &mut Model, now: Instant, manual: bool, fx: &mut Vec<Effect>) {
+    let st = m.strategy;
     fx.push(Effect::Collect(
         m.hosts
             .iter()
-            .filter(|h| !h.entry.unmonitored)
+            .filter(|h| !h.entry.unmonitored && !m.host_paused(h))
+            .filter(|h| manual || !(st.ping.on && h.entry.access == Access::Rdp))
             .map(|h| Job {
                 host: h.entry.clone(),
-                scope: if manual { Scope::FULL } else { h.scope_at(now) },
+                scope: if manual {
+                    Scope::FULL
+                } else {
+                    h.scope_at(now, &st)
+                },
             })
             .collect(),
     ));
     m.last_refresh = Some(now);
+}
+
+/// What runs by itself on a tick (#122), unless paused: the live round when
+/// it is due (with the tiers that are due), else hosts whose static / slow
+/// tier came due on its own (live off or between rounds); and the ping round.
+fn automatic(m: &mut Model, busy: usize, now: Instant, fx: &mut Vec<Effect>) {
+    let st = m.strategy;
+    if busy == 0 {
+        if st.live.on && elapsed(m.last_refresh, now).is_none_or(|e| e >= st.live.every()) {
+            refresh_all(m, now, false, fx);
+        } else {
+            let retry = st.ssh_retry_every();
+            let jobs: Vec<Job> = m
+                .hosts
+                .iter()
+                .filter(|h| {
+                    !h.entry.unmonitored
+                        && h.entry.access == Access::Ssh
+                        && !h.loading
+                        && !m.host_paused(h)
+                })
+                // Waiting for its first collection: the live round reads it.
+                .filter(|h| h.updated.is_some() || !st.live.on)
+                // A failing host is tried again only after the SSH retry time.
+                .filter(|h| h.error.is_none() || elapsed(h.updated, now).is_none_or(|e| e >= retry))
+                .filter_map(|h| {
+                    let scope = h.scope_at(now, &st);
+                    (scope.static_info || scope.slow).then(|| Job {
+                        host: h.entry.clone(),
+                        scope,
+                    })
+                })
+                .collect();
+            if !jobs.is_empty() {
+                fx.push(Effect::Collect(jobs));
+            }
+        }
+    }
+    if st.ping.on && !m.pinging && elapsed(m.last_ping, now).is_none_or(|e| e >= st.ping.every()) {
+        m.last_ping = Some(now);
+        let mut ping = Vec::new();
+        let mut rdp = Vec::new();
+        for h in m
+            .hosts
+            .iter()
+            .filter(|h| !h.entry.unmonitored && !m.paused_hosts.contains(&h.entry.alias))
+        {
+            match h.entry.access {
+                Access::Ssh => ping.push(h.entry.clone()),
+                Access::Rdp => rdp.push(full(&h.entry)),
+            }
+        }
+        if !rdp.is_empty() {
+            fx.push(Effect::Collect(rdp));
+        }
+        if !ping.is_empty() {
+            m.pinging = true;
+            fx.push(Effect::Ping(ping));
+        }
+    }
+}
+
+/// A ping round came back. A host that answered ping checks before and now
+/// misses two in a row is marked down at once (no SSH timeout); a host that
+/// was down and answers again is collected now.
+fn pinged(m: &mut Model, results: Vec<(String, Option<f32>)>, now: Instant, fx: &mut Vec<Effect>) {
+    m.pinging = false;
+    let st = m.strategy;
+    let mut jobs = Vec::new();
+    for (alias, ms) in results {
+        // Paused while the round ran: leave it as it is.
+        if m.paused_hosts.contains(&alias) {
+            continue;
+        }
+        let Some(h) = m.hosts.iter_mut().find(|h| h.entry.alias == alias) else {
+            continue;
+        };
+        h.ping = Some(ms);
+        h.ping_at = Some(now);
+        if ms.is_some() {
+            h.ping_replied = true;
+            h.ping_misses = 0;
+            if h.no_ping {
+                h.no_ping = false;
+                if !st.paused && !h.loading && !h.entry.unmonitored {
+                    jobs.push(Job {
+                        host: h.entry.clone(),
+                        scope: h.scope_at(now, &st),
+                    });
+                }
+            }
+        } else {
+            h.ping_misses = h.ping_misses.saturating_add(1);
+            if h.ping_replied && h.ping_misses >= 2 && !h.no_ping && !h.loading {
+                h.no_ping = true;
+                if h.error.is_none() {
+                    h.error = Some(PING_DOWN.into());
+                    h.updated = Some(now);
+                }
+            }
+        }
+    }
+    if !jobs.is_empty() {
+        fx.push(Effect::Collect(jobs));
+    }
+}
+
+/// Shown for a host the ping check found down.
+pub const PING_DOWN: &str =
+    "no ping reply — the host looks down (ping check); it is collected again when it answers";
+
+fn save_strategy(m: &Model, fx: &mut Vec<Effect>) {
+    if m.strategy_ok {
+        fx.push(Effect::SaveStrategy(m.strategy));
+    }
 }
 
 fn full(entry: &HostEntry) -> Job {
@@ -1700,16 +1939,48 @@ fn reconcile(m: &mut Model, entries: Vec<HostEntry>, now: Instant, fx: &mut Vec<
             .iter()
             .position(|h| h.entry.id == entry.id)
             .map(|i| old.swap_remove(i));
+        // Renamed: the pause follows the host.
+        if let Some(p) = &prev
+            && p.entry.alias != entry.alias
+            && m.paused_hosts.remove(&p.entry.alias)
+        {
+            m.paused_hosts.insert(entry.alias.clone());
+            if m.strategy_ok {
+                fx.push(Effect::SaveHostPaused {
+                    alias: entry.alias.clone(),
+                    paused: true,
+                });
+            }
+        }
         let state = match prev {
             Some(h) if h.entry == entry => h,
             _ => {
-                if !entry.unmonitored {
-                    to_poll.push(full(&entry));
+                let mut h = HostState::new(entry);
+                if let Some(f) = m.restored.remove(&h.entry.alias) {
+                    restore(&mut h, f, now);
                 }
-                HostState::new(entry)
+                if !h.entry.unmonitored
+                    && !m.strategy.paused
+                    && !m.paused_hosts.contains(&h.entry.alias)
+                {
+                    to_poll.push(Job {
+                        host: h.entry.clone(),
+                        scope: h.scope_at(now, &m.strategy),
+                    });
+                }
+                h
             }
         };
         m.hosts.push(state);
+    }
+    m.restored.clear();
+    let aliases: std::collections::BTreeSet<&str> =
+        m.hosts.iter().map(|h| h.entry.alias.as_str()).collect();
+    m.paused_hosts.retain(|a| aliases.contains(a.as_str()));
+    if m.strategy_ok {
+        fx.push(Effect::PruneFacts(
+            m.hosts.iter().map(|h| h.entry.alias.clone()).collect(),
+        ));
     }
     m.selected = selected.and_then(|id| m.hosts.iter().position(|h| h.entry.id == Some(id)));
     if !to_poll.is_empty() {
@@ -1720,7 +1991,25 @@ fn reconcile(m: &mut Model, entries: Vec<HostEntry>, now: Instant, fx: &mut Vec<
     }
 }
 
-fn collected(m: &mut Model, u: collector::Update, now: Instant) {
+/// Last known facts from `update.db` for a host loaded for the first time:
+/// shown at once, and their tier is not read again before it is due.
+fn restore(h: &mut HostState, f: telepad_core::strategy::SavedFacts, now: Instant) {
+    if h.entry.access == Access::Rdp {
+        return;
+    }
+    let mut r = telepad_core::model::HostReport::default();
+    if let Some((s, age)) = f.static_info {
+        s.apply(&mut r);
+        h.static_at = Some(Seen::ago(age, now));
+    }
+    if let Some((s, age)) = f.slow {
+        s.apply(&mut r);
+        h.slow_at = Some(Seen::ago(age, now));
+    }
+    h.known = Some(r);
+}
+
+fn collected(m: &mut Model, u: collector::Update, now: Instant, fx: &mut Vec<Effect>) {
     match u {
         collector::Update::Started(alias) => {
             if let Some(h) = m.hosts.iter_mut().find(|h| h.entry.alias == alias) {
@@ -1744,15 +2033,24 @@ fn collected(m: &mut Model, u: collector::Update, now: Instant) {
                 }
                 match result {
                     Ok(mut r) => {
-                        let prev = h.report.take();
+                        let prev = h.report.take().or_else(|| h.known.take());
+                        h.known = None;
                         if let Some(prev) = &prev {
                             scope.carry_over(&mut r, prev);
                         }
                         if scope.static_info {
-                            h.static_at = Some(now);
+                            h.static_at = Some(Seen::at(now));
                         }
                         if scope.slow {
-                            h.slow_at = Some(now);
+                            h.slow_at = Some(Seen::at(now));
+                        }
+                        if m.strategy_ok && !r.rdp_only && (scope.static_info || scope.slow) {
+                            use telepad_core::strategy::{Facts, SlowFacts, StaticFacts};
+                            fx.push(Effect::SaveFacts(Facts {
+                                alias: alias.clone(),
+                                static_info: scope.static_info.then(|| StaticFacts::of(&r)),
+                                slow: scope.slow.then(|| SlowFacts::of(&r)),
+                            }));
                         }
                         // Rebooted since the last look: kernel, updates and the
                         // reboot flag have likely changed, so read everything next time.

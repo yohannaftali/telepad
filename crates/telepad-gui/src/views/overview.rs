@@ -121,14 +121,21 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
                             n: 0,
                             used: &mut used,
                         };
-                        host_row(&mut cells, i, &m.hosts[i], reorder);
+                        host_row(&mut cells, i, &m.hosts[i], m.host_paused(&m.hosts[i]), reorder);
                         let resp = row.response();
                         if resp.clicked() {
                             out.push(Msg::Select(Some(i)));
                         }
                         // SSH, Files, databases, edit… on right-click (#83).
                         resp.context_menu(|ui| {
-                            host_menu(ui, &m.hosts[i], i, m.rdp.contains_key(&m.hosts[i].entry.alias), out)
+                            host_menu(
+                                ui,
+                                &m.hosts[i],
+                                i,
+                                m.rdp.contains_key(&m.hosts[i].entry.alias),
+                                m.host_paused(&m.hosts[i]),
+                                out,
+                            )
                         });
                         if reorder {
                             drop_target(&row.response(), i, accent, out);
@@ -187,7 +194,7 @@ impl Cells<'_, '_, '_> {
     }
 }
 
-fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, grip: bool) {
+fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, paused: bool, grip: bool) {
     row.col(|ui| {
         if grip {
             grip_handle(ui, i);
@@ -205,12 +212,20 @@ fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, grip: bool) {
         Some(r) => report_cells(row, h, r),
         None => {
             row.col(|ui| {
+                let known = h
+                    .known
+                    .as_ref()
+                    .map(|k| k.os_pretty.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map_or(String::new(), |os| format!(" · last known: {os}"));
                 let msg = if let Some(e) = &h.error {
-                    RichText::new(e).color(usage_color(95.0))
+                    RichText::new(format!("{e}{known}")).color(usage_color(95.0))
                 } else if h.loading {
-                    RichText::new("loading…").weak()
+                    RichText::new(format!("loading…{known}")).weak()
+                } else if paused {
+                    RichText::new(format!("paused{known}")).color(usage_color(75.0))
                 } else {
-                    RichText::new("queued").weak()
+                    RichText::new(format!("queued{known}")).weak()
                 };
                 clipped(ui, msg);
             });
@@ -220,7 +235,14 @@ fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, grip: bool) {
         }
     }
     row.col(|ui| {
-        ui.label(RichText::new(ago(h.updated)).weak());
+        if paused {
+            ui.label(
+                RichText::new(icons::label(icons::PAUSE, &ago(h.updated))).color(usage_color(75.0)),
+            )
+            .on_hover_text("Updates paused for this host (right-click → Resume updates)");
+        } else {
+            ui.label(RichText::new(ago(h.updated)).weak());
+        }
     });
 }
 

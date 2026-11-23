@@ -21,6 +21,7 @@ mod picker;
 mod ports;
 mod run_info;
 mod sensors;
+mod strategy;
 mod text_editor;
 mod update_window;
 mod workspace;
@@ -41,7 +42,7 @@ pub fn draw(root: &mut egui::Ui, m: &Model, d: &mut Drafts, now: Instant) -> Vec
     let mut out = Vec::new();
 
     egui::Panel::top("top").show(root, |ui| panels::top_bar(ui, m, d, &mut out));
-    egui::Panel::bottom("status").show(root, |ui| panels::status_bar(ui, m, now));
+    egui::Panel::bottom("status").show(root, |ui| panels::status_bar(ui, m, now, &mut out));
 
     if let Some(f) = &m.fatal {
         egui::CentralPanel::default().show(root, |ui| {
@@ -112,12 +113,22 @@ fn page(
             let shown_by = telepad_app::cluster_shown_by(m, i)
                 .and_then(|j| m.hosts.get(j))
                 .map(|o| o.entry.alias.clone());
-            detail::detail(ui, h, i, shown_by.as_deref(), &mut d.ports_nginx_only, out);
+            let paused = m.host_paused(h);
+            detail::detail(
+                ui,
+                h,
+                i,
+                shown_by.as_deref(),
+                paused,
+                &mut d.ports_nginx_only,
+                out,
+            );
         }
         Win::Kube => cluster::cluster_page(ui, m, telepad_app::ClusterKind::Kube, out),
         Win::Swarm => cluster::cluster_page(ui, m, telepad_app::ClusterKind::Swarm, out),
         Win::HostSync => host_sync::host_sync_page(ui, m, d, out),
         Win::Keys => keys::keys_page(ui, m, d, out),
+        Win::Strategy => strategy::strategy_page(ui, m, d, out),
         Win::Files(id) => files::files_page(ui, m, d, id, focused, out, now),
         Win::Db(id) => database::db_page(ui, m, d, id, out),
         Win::Editor(id) => text_editor::editor_page(ui, m, d, id, focused, out),

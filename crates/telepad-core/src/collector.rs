@@ -11,25 +11,19 @@ use std::time::{Duration, Instant};
 
 use crate::config::{Access, HostEntry};
 use crate::model::HostReport;
+use crate::strategy::{SlowFacts, StaticFacts};
 use crate::{parse, platform};
 
 const SCRIPT: &str = include_str!("script.sh");
-
-/// Static facts (hostname, OS release, kernel, CPU model) are re-read this often.
-pub const STATIC_EVERY: Duration = Duration::from_secs(24 * 3600);
-/// IP addresses, listening ports, pending updates and reboot flag.
-pub const SLOW_EVERY: Duration = Duration::from_secs(6 * 3600);
-/// A host without ping reply is only pinged; ssh is still tried this often
-/// (for hosts whose firewall drops ICMP).
-pub const DOWN_SSH_RETRY: Duration = Duration::from_secs(10 * 60);
 
 /// Which parts of the remote script one collection runs. Live metrics (uptime,
 /// load, CPU, memory, disks, sensors, Docker, Swarm, Kubernetes) always run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Scope {
-    /// Hostname, OS release, kernel, architecture, CPU model ([`STATIC_EVERY`]).
+    /// Hostname, OS release, kernel, architecture, CPU model (daily by default,
+    /// see [`crate::strategy::Strategy`]).
     pub static_info: bool,
-    /// IP addresses, listening ports, updates / reboot ([`SLOW_EVERY`]).
+    /// IP addresses, listening ports, updates / reboot (every 6 hours by default).
     pub slow: bool,
     /// The host was down without a ping reply: ping first and skip ssh while it
     /// stays silent. When it answers, everything is collected.
@@ -61,16 +55,7 @@ impl Scope {
     /// Fill what this collection skipped from the previous report of the same host.
     pub fn carry_over(self, new: &mut HostReport, prev: &HostReport) {
         if !self.static_info {
-            new.hostname.clone_from(&prev.hostname);
-            new.os_name.clone_from(&prev.os_name);
-            new.os_pretty.clone_from(&prev.os_pretty);
-            new.os_id.clone_from(&prev.os_id);
-            new.os_version_id.clone_from(&prev.os_version_id);
-            new.kernel.clone_from(&prev.kernel);
-            new.os_type.clone_from(&prev.os_type);
-            new.arch.clone_from(&prev.arch);
-            new.cpu_model.clone_from(&prev.cpu_model);
-            new.cpu_cores = prev.cpu_cores;
+            StaticFacts::of(prev).apply(new);
         }
         if self.slow {
             // Parsed without the OS release: look the end of support up again.
@@ -78,9 +63,7 @@ impl Scope {
                 crate::eol::end_of_support(&new.os_id, &new.os_version_id, &new.os_pretty)
                     .map(str::to_string);
         } else {
-            new.addresses.clone_from(&prev.addresses);
-            new.listeners.clone_from(&prev.listeners);
-            new.maintenance.clone_from(&prev.maintenance);
+            SlowFacts::of(prev).apply(new);
         }
     }
 }

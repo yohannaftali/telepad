@@ -175,7 +175,7 @@ pub fn host_os(h: &HostState) -> icons::OsKind {
     if h.entry.access == Access::Rdp {
         return icons::OsKind::Windows;
     }
-    match &h.report {
+    match h.shown() {
         Some(r) => icons::detect(&r.os_name, &r.os_pretty, &r.os_type, &r.kernel),
         None => icons::OsKind::Unknown,
     }
@@ -278,18 +278,25 @@ pub fn bar(ui: &mut egui::Ui, pct: f32, text: String, width: f32) {
 }
 
 pub fn ago(t: Option<Instant>) -> String {
-    match t {
-        None => "never".into(),
-        Some(t) => {
-            let s = t.elapsed().as_secs();
-            if s < 60 {
-                format!("{s}s ago")
-            } else if s < 3600 {
-                format!("{}m ago", s / 60)
-            } else {
-                format!("{}h {}m ago", s / 3600, s % 3600 / 60)
-            }
-        }
+    t.map_or("never".into(), |t| ago_secs(t.elapsed().as_secs()))
+}
+
+/// [`ago`] for a time that may lie before this run (#122, saved facts).
+pub fn ago_seen(t: Option<telepad_app::Seen>) -> String {
+    t.map_or("never".into(), |t| {
+        ago_secs(t.age(Instant::now()).as_secs())
+    })
+}
+
+fn ago_secs(s: u64) -> String {
+    if s < 60 {
+        format!("{s}s ago")
+    } else if s < 3600 {
+        format!("{}m ago", s / 60)
+    } else if s < 2 * 86400 {
+        format!("{}h {}m ago", s / 3600, s % 3600 / 60)
+    } else {
+        format!("{}d {}h ago", s / 86400, s % 86400 / 3600)
     }
 }
 
@@ -446,7 +453,14 @@ fn act_widget(
 /// Right-click menu of a host row or card (#83): SSH / RDP, Files, the
 /// databases Telepad detected on it (host and containers), then open, edit,
 /// clone and delete. Coloured like the buttons they replace.
-pub fn host_menu(ui: &mut egui::Ui, h: &HostState, i: usize, has_rdp: bool, out: &mut Vec<Msg>) {
+pub fn host_menu(
+    ui: &mut egui::Ui,
+    h: &HostState,
+    i: usize,
+    has_rdp: bool,
+    paused: bool,
+    out: &mut Vec<Msg>,
+) {
     let item = |ui: &mut egui::Ui, text: RichText, msg: Msg, out: &mut Vec<Msg>| {
         if ui.button(text).clicked() {
             out.push(msg);
@@ -505,6 +519,23 @@ pub fn host_menu(ui: &mut egui::Ui, h: &HostState, i: usize, has_rdp: bool, out:
         }
     }
     ui.separator();
+    // Pause this host's automatic checks (#122).
+    if !h.entry.unmonitored {
+        let (icon, text) = if paused {
+            (icons::PLAY, "Resume updates")
+        } else {
+            (icons::PAUSE, "Pause updates")
+        };
+        item(
+            ui,
+            RichText::new(icons::label(icon, text)),
+            Msg::PauseHosts {
+                aliases: vec![h.entry.alias.clone()],
+                paused: !paused,
+            },
+            out,
+        );
+    }
     item(
         ui,
         RichText::new(icons::label(icons::DESKTOP, "Open host window")),

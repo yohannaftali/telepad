@@ -8,16 +8,16 @@ How to use Telepad once it is [installed](../README.md#install). For a first run
 ## How Telepad works
 
 Telepad runs on your computer only. It reaches your hosts with the same OpenSSH client and
-keys you use in a terminal, and keeps what it knows in three files next to each other.
+keys you use in a terminal, and keeps what it knows in a few files next to each other.
 
 ```mermaid
 flowchart TB
     you(["You"]) --> ui["Telepad window<br/>sidebar · workspaces · inner windows"]
     ui --> run["Background workers<br/>(the window never waits)"]
-    run -->|"ssh -F telepad.ssh_config … sh -s<br/>read-only, every 60 s"| hosts["Hosts"]
+    run -->|"ssh -F telepad.ssh_config … sh -s<br/>read-only, see Update Strategy"| hosts["Hosts"]
     run -->|"sftp / scp / rsync,<br/>when you copy"| hosts
     run -->|"ssh -N -L tunnel,<br/>when you open a database"| dbs["Databases on the hosts"]
-    run --> files[("telepad.db · preference.db · history.db")]
+    run --> files[("telepad.db · preference.db · history.db · update.db")]
     ui -->|"Open SSH / RDP"| apps["Terminal · Remote Desktop"]
 ```
 
@@ -27,8 +27,9 @@ flowchart TB
 | `telepad.ssh_config` | the ssh config Telepad generates from `telepad.db` | — (rewritten on every change; do not edit) |
 | `preference.db` | workspaces: which windows, where, which folders / files / database | file contents, passwords |
 | `history.db` | transfers, file changes and SQL statements, 90 days | file contents, passwords (masked in SQL) |
+| `update.db` | the [Update Strategy](#update-strategy) (pause, paused hosts, which checks run and how often) and each host's last known OS / CPU info, addresses, ports and pending updates | live metrics, passwords |
 
-On macOS and Linux Telepad keeps `telepad.db`, `preference.db` and `history.db` (and
+On macOS and Linux Telepad keeps `telepad.db`, `preference.db`, `history.db` and `update.db` (and
 SQLite's `-wal` / `-shm` files next to them) readable by your user only (mode `600`);
 if it cannot, the status bar says which file. On Windows the folder's permissions apply:
 the per-user data folder (`%APPDATA%\Telepad`) is private; a portable copy next to the exe
@@ -45,9 +46,9 @@ Delete, Save).
 Telepad is one window (like MikroTik WinBox): pages open as windows **inside** it.
 
 ```
-------------------------------------------------------------------
-Telepad | Refresh all | ▤ <own> ▾ | ▣ Hosts · 3 ▾ | Arrange | 2 up ☰ |
-------------------------------------------------------------------
+--------------------------------------------------------------------------
+Telepad | Refresh all | ▤ <own> ▾ | ▣ Hosts · 3 ▾ | Arrange | 2 up         ☰ |
+--------------------------------------------------------------------------
 Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
  Hosts           | | search | Table / Cards                     | |
  Docker / Podman | | web1  192.0.2.10  …  (right-click: menu)  | |
@@ -61,7 +62,7 @@ Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
 
 | Area | What it shows |
 |---|---|
-| **Top bar** | **Refresh all**, **Auto every _N_ s**, the **workspace** dropdown and the **window picker** (the window in front and how many are open; see below), **Arrange**, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Settings ▸ Theme**, **Software update…**; Host Management and Authorized keys are in the sidebar, adding, importing and exporting hosts is on the Host Management page) |
+| **Top bar** | **Refresh all**, the **workspace** dropdown and the **window picker** (the window in front and how many are open; see below), **Arrange**, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Settings ▸ Theme**, **Update Strategy…**, **Software update…**; Host Management and Authorized keys are in the sidebar, adding, importing and exporting hosts is on the Host Management page) |
 | **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
@@ -398,15 +399,20 @@ capped (500 services, 1000 workloads per kind, 100 problem pods).
 
 ## Refreshing
 
-All monitored hosts are checked at start, then every 60 s while **Auto every** is ticked
-(change the interval next to it, 15–3600 s). **Refresh all** checks every host now;
-**Refresh** on a host checks only that one.
+All monitored hosts are checked at start, then by themselves as set on the
+[Update Strategy](#update-strategy) page. **Refresh all** checks every host now;
+**Refresh** on a host checks only that one. Pausing — all hosts or single hosts — is on the
+same page: **Pause all** stops every automatic check until **Resume**, and a paused host is
+not checked by itself (no SSH, no ping) and skipped by **Refresh all**, while its own
+**Refresh** still reads it. The status bar says *Paused …* or *N hosts paused*; click it to
+open the page.
 
-Not everything is read on every round. Automatic rounds read:
+Not everything is read on every round. By default automatic checks read:
 
-| What | How often |
+| What | How often (default) |
 |---|---|
-| Uptime, load, CPU, memory, disks, sensors, Docker, Swarm, Kubernetes | every round (**Auto every**) |
+| Ping (host up or down, no SSH) | every 30 s |
+| Uptime, load, CPU, memory, disks, sensors, Docker, Swarm, Kubernetes | every minute |
 | IP addresses, listening ports, pending updates, reboot needed | every 6 hours |
 | Hostname, OS release, kernel, architecture, CPU model | once a day |
 
@@ -415,6 +421,66 @@ Not everything is read on every round. Automatic rounds read:
 pinged on the following rounds (no ssh connection, no timeout to wait for); as soon as it
 answers ping everything is read again, and ssh is still tried every 10 minutes for hosts
 whose firewall drops ping. Remote Desktop hosts are always just ping + port check.
+
+Pending updates are what the host's own package lists say: Telepad never runs
+`apt-get update`, `dnf makecache` or anything else that changes a host. A host refreshes its
+lists itself (e.g. `unattended-upgrades`, `dnf-automatic`, or you).
+
+### Last known info after a restart
+
+OS and CPU info, addresses, listening ports and pending updates are kept in `update.db`
+each time they are read. When Telepad starts, every host shows them at once — the
+Hosts table says *last known: Ubuntu 24.04 LTS* until the host answers, and the host page
+shows **Last known: …** and how old the info is (*OS and CPU info read 3h 10m ago*). They
+are not read again before they are due, so a restart does not re-read every host's OS and
+updates. A deleted or renamed host's saved info is dropped.
+
+## Update Strategy
+
+**☰ ▸ Update Strategy…** opens a page (an inner window that comes back with its workspace)
+for everything about refreshing: pause all or single hosts, and what Telepad checks by itself:
+
+```
+Automatic checks are running.   [⏸ Pause all]
+On  Check                            Reads                                         Every       Allowed
+☑   Ping                             Host up or down, without SSH (RDP: probe)     30  [s  ▾]  10 s – 1 h
+☑   Live metrics                     CPU, memory, disks, sensors, Docker, …        1   [min▾]  15 s – 1 d
+☑   Network & updates                IP addresses, listening ports, updates, …     6   [h  ▾]  1 min – 7 d
+☑   System info                      Hostname, OS release, kernel, CPU model       1   [d  ▾]  1 min – 7 d
+    Retry SSH for unreachable hosts  Hosts without ping reply are only pinged; …   10  [min▾]  1 min – 1 d
+[✓ Save]  [Revert]  [Reset to defaults]
+
+Hosts
+[search host, IP, OS]  [⏸ Pause 54 listed]  [▶ Resume 2 listed]   2 paused
+    Host      Updated           Ping
+●   web01     12s ago           3 ms      [⏸ Pause]  [⟳ Refresh]
+●   backup01  ⏸ paused · 2h ago  —        [▶ Resume] [⟳ Refresh]
+```
+
+| Control | Does |
+|---|---|
+| **Pause all** / **Resume** | Stops / restarts every automatic check (SSH and ping) for all hosts. Saved, so Telepad starts paused after a restart if you left it paused. |
+| **On** | Turn a check off: it never runs by itself (Refresh still reads it). The interval stays for when you turn it on again. Live metrics off still reads *Network & updates* and *System info* when they are due. |
+| **Every** | Number and unit (s, min, h, d). Values outside **Allowed** are refused on Save with the reason. |
+| **Save** | Checks and saves the form to `update.db`; applies from the next round, no restart. |
+| **Revert** | Back to what is saved. |
+| **Reset to defaults** | Puts the defaults in the form (ping 30 s, live 1 min, network & updates 6 h, system info 1 d, SSH retry 10 min); **Save** keeps them. |
+| **Hosts** list | Every monitored host with its state, when it was last read and its last ping. **Pause** / **Resume** on a row pauses that host (saved in `update.db`, kept when the host is renamed, dropped when it is deleted); **Pause _N_ listed** / **Resume _N_ listed** do it for the hosts the search box lists; **Refresh** reads that host now. |
+
+A host can also be paused from its host page (**Pause updates** / **Resume updates** next to
+**Refresh**) and from its right-click menu. The Hosts table shows ⏸ in the *Updated* column
+of a paused host; its last values stay on screen.
+
+**Ping check.** Every monitored host is pinged on its own timer, without SSH, so the up /
+down count moves between live rounds. A host that answered ping before and misses two pings
+in a row is shown down at once (*no ping reply — the host looks down (ping check)*) instead
+of waiting for an SSH timeout; when it answers again it is read straight away. Hosts whose
+firewall drops ping are never marked down by the ping check. The host page shows the last
+ping (*ping 12 ms · 5s ago*). Remote Desktop hosts get their usual ping + port probe on the
+ping timer.
+
+If `update.db` cannot be opened the status bar says so; the defaults apply and changes last
+until Telepad closes.
 
 Up to 12 hosts are checked at the same time,
 each with an 8 s connect timeout and a 40 s total timeout, so one slow host never holds
@@ -1173,6 +1239,7 @@ telepad.exe --db D:\other\telepad.db     # use another database
 telepad.exe --config D:\ssh\config       # import from this config on first start
 telepad.exe --prefs D:\other\preference.db  # workspaces from another file
 telepad.exe --history D:\other\history.db   # transfer history and SQL log elsewhere
+telepad.exe --update-db D:\other\update.db  # Update Strategy and last known info elsewhere
 telepad-check.exe                        # check all monitored hosts once, text
 telepad-check.exe web01 nas01 --json     # selected hosts, JSON
 telepad-check.exe --check-update         # newer release on GitHub?
@@ -1189,6 +1256,7 @@ is available and 2 when the check failed.
 | Generated ssh config | `telepad.ssh_config` next to the database (do not edit: rewritten on every change) |
 | Workspaces | `--prefs <path>`, `TELEPAD_PREFS`, else `preference.db` next to the database |
 | Transfer history and SQL log | `--history <path>`, `TELEPAD_HISTORY`, else `history.db` next to the database (90 days, 50 000 lines) |
+| Update Strategy and last known info | `--update-db <path>`, `TELEPAD_UPDATE_DB`, else `update.db` next to the database |
 | Fallback key for hosts without IdentityFile | `SSH_IDENTITY_FILE=` in a `.env` file next to `config` |
 | ssh binary | `TELEPAD_SSH` (default: Windows `System32\OpenSSH\ssh.exe`, else `ssh` on `PATH`) |
 

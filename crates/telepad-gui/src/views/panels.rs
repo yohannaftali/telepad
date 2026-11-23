@@ -60,13 +60,23 @@ fn hosts_menu(ui: &mut egui::Ui, theme: ThemePref, out: &mut Vec<Msg>) {
             }
         });
         ui.separator();
+        if ui
+            .button(il(icons::CLOCK, "Update Strategy…"))
+            .on_hover_text(
+                "Pause all or single hosts, and what Telepad checks by itself and how often",
+            )
+            .clicked()
+        {
+            out.push(Msg::StrategyOpen);
+            ui.close();
+        }
         if ui.button(il(icons::IMPORT, "Software update…")).clicked() {
             out.push(Msg::UpdateWindow(true));
             ui.close();
         }
     })
     .response
-    .on_hover_text("Settings (theme) · Software update");
+    .on_hover_text("Settings (theme) · Update Strategy · Software update");
 }
 
 fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
@@ -116,12 +126,6 @@ fn top_bar_items(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
     {
         out.push(Msg::RefreshAll);
     }
-    ui.checkbox(&mut d.auto_refresh, "Auto every");
-    ui.add(
-        egui::DragValue::new(&mut d.interval_secs)
-            .range(15..=3600)
-            .suffix(" s"),
-    );
     ui.separator();
     super::workspaces::workspace_picker(ui, m, d, out);
     window_picker(ui, m, d, out);
@@ -181,7 +185,7 @@ fn window_picker(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
     }
 }
 
-pub fn status_bar(ui: &mut egui::Ui, m: &Model, now: Instant) {
+pub fn status_bar(ui: &mut egui::Ui, m: &Model, now: Instant, out: &mut Vec<Msg>) {
     ui.horizontal(|ui| {
         if let Some(db) = &m.db_path {
             let label = ui.label(RichText::new(format!("database: {}", db.display())).weak());
@@ -196,6 +200,26 @@ pub fn status_bar(ui: &mut egui::Ui, m: &Model, now: Instant) {
             v.on_hover_text(&tip);
             ui.label(RichText::new(icons::WARNING).weak())
                 .on_hover_text(tip);
+        }
+        // Pauses (#122): a click opens the Update Strategy page.
+        let paused = if m.strategy.paused {
+            Some(super::strategy::paused_text(m))
+        } else {
+            match m.paused_hosts.len() {
+                0 => None,
+                1 => Some("1 host paused".to_string()),
+                n => Some(format!("{n} hosts paused")),
+            }
+        };
+        if let Some(text) = paused {
+            ui.separator();
+            if ui
+                .link(RichText::new(il(icons::PAUSE, &text)).color(usage_color(75.0)))
+                .on_hover_text("Open Update Strategy (menu at the top right) to resume")
+                .clicked()
+            {
+                out.push(Msg::StrategyOpen);
+            }
         }
         let bg = telepad_app::background_transfers(m);
         if bg > 0 {

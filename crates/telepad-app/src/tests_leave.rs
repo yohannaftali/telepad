@@ -47,6 +47,7 @@ fn started(own: &str) -> (State, Vec<Effect>) {
             imported_from: None,
             update_config: Ok(UpdateConfig::default()),
             ui_prefs: UiPrefs::default(),
+            strategy: Ok(Default::default()),
             prefs: Ok(WorkspacePrefs {
                 own: own.into(),
                 custom: vec![("b".into(), "|0|0|docker|docker".into())],

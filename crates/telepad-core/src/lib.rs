@@ -15,6 +15,7 @@ pub mod platform;
 pub mod prefs;
 pub mod rdp;
 pub mod store;
+pub mod strategy;
 pub mod update;
 
 use std::path::{Path, PathBuf};

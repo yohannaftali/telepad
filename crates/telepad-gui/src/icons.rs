@@ -51,6 +51,9 @@ pub const NOT_EQUALS: &str = "\u{eda6}";
 // Database window.
 pub const TABLE: &str = "\u{e476}";
 pub const PLAY: &str = "\u{e3d0}";
+// Update Strategy (#122).
+pub const PAUSE: &str = "\u{e39e}";
+pub const CLOCK: &str = "\u{e19a}";
 pub const STOP: &str = "\u{e46c}";
 pub const LOCK: &str = "\u{e2fa}";
 pub const LOCK_OPEN: &str = "\u{e306}";
