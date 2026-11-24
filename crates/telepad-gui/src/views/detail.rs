@@ -167,6 +167,7 @@ pub fn detail(
     if let Some(ping) = h.ping {
         let text = match ping {
             Some(ms) => format!("ping {ms:.0} ms · {}", ago(h.ping_at)),
+            None if h.port_open => format!("no ping reply, SSH port open · {}", ago(h.ping_at)),
             None => format!("no ping reply · {}", ago(h.ping_at)),
         };
         ui.label(RichText::new(text).weak().small());

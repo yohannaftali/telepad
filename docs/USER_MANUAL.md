@@ -524,10 +524,16 @@ Not everything is read on every round. By default automatic checks read:
 | Hostname, OS release, kernel, architecture, CPU model | once a day |
 
 **Refresh** and **Refresh all**, a new or edited host and a host that has just rebooted
-(uptime went down) read everything. A host that is down and does not answer ping is only
-pinged on the following rounds (no ssh connection, no timeout to wait for); as soon as it
-answers ping everything is read again, and ssh is still tried every 10 minutes for hosts
-whose firewall drops ping. Remote Desktop hosts are always just ping + port check.
+(uptime went down) read everything. When SSH fails, Telepad checks whether the machine is
+up: ping first, and for hosts whose firewall drops ping a TCP connect to their SSH port
+(opened and closed again, nothing sent). A host that answers either is tried over SSH again
+on the next round. A host that answers neither is only checked on the following rounds (no
+ssh connection, no timeout to wait for); as soon as it answers ping or its SSH port opens
+everything is read again, and ssh is still tried after the SSH retry time (10 minutes by
+default). Hosts reached through ProxyJump / ProxyCommand cannot be checked from this
+computer: they are tried over SSH again on the next round after one failure, and wait for
+the SSH retry time after two failures in a row. Remote Desktop hosts are always just ping +
+port check.
 
 Pending updates are what the host's own package lists say: Telepad never runs
 `apt-get update`, `dnf makecache` or anything else that changes a host. A host refreshes its
@@ -554,7 +560,7 @@ On  Check                            Reads                                      
 ☑   Live metrics                     CPU, memory, disks, sensors, Docker, …        1   [min▾]  15 s – 1 d
 ☑   Network & updates                IP addresses, listening ports, updates, …     6   [h  ▾]  1 min – 7 d
 ☑   System info                      Hostname, OS release, kernel, CPU model       1   [d  ▾]  1 min – 7 d
-    Retry SSH for unreachable hosts  Hosts without ping reply are only pinged; …   10  [min▾]  1 min – 1 d
+    Retry SSH for unreachable hosts  Down hosts (no ping, SSH port closed) are only …   10  [min▾]  1 min – 1 d
 [✓ Save]  [Revert]  [Reset to defaults]
 
 Hosts
@@ -582,9 +588,12 @@ of a paused host; its last values stay on screen.
 down count moves between live rounds. A host that answered ping before and misses two pings
 in a row is shown down at once (*no ping reply — the host looks down (ping check)*) instead
 of waiting for an SSH timeout; when it answers again it is read straight away. Hosts whose
-firewall drops ping are never marked down by the ping check. The host page shows the last
-ping (*ping 12 ms · 5s ago*). Remote Desktop hosts get their usual ping + port probe on the
-ping timer.
+firewall drops ping are never marked down by the ping check. For a host that is down, the
+ping check also tries its SSH port when ping gets no reply, so a host that drops ping comes
+back as soon as SSH is listening; hosts that are up are only pinged (no extra connections in
+their sshd log). The host page shows the last check (*ping 12 ms · 5s ago*, *no ping reply,
+SSH port open · 5s ago*). Hosts behind ProxyJump / ProxyCommand are not ping checked.
+Remote Desktop hosts get their usual ping + port probe on the ping timer.
 
 If `update.db` cannot be opened the status bar says so; the defaults apply and changes last
 until Telepad closes.
@@ -671,8 +680,8 @@ Desktop's own *Remember me* puts it, so **Open RDP** logs in without asking. The
 shows whether one is saved; **Forget** removes it. Telepad never reads it back. On macOS
 and Linux the client asks and keeps it in its own keychain.
 
-When an SSH check fails, the error says whether the host still answers ping, so a
-machine that is down looks different from one where only SSH is broken.
+When an SSH check fails, the error says whether the host still answers ping or has its SSH
+port open, so a machine that is down looks different from one where only SSH is broken.
 
 ## Import and export
 
@@ -1414,7 +1423,9 @@ also pauses automatic installs until the next start.
 | `authentication failed` | The key is not accepted or the host wants a password. Try `ssh <alias>` in a terminal; check IdentityFile and the server's `authorized_keys`. A key with a passphrase must be loaded in the ssh agent first (macOS: `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`). |
 | `private key … is readable by other users` | ssh ignores private keys that others can read (common after copying keys from another computer). Run the `chmod 600 <key>` shown in the message, and `chmod 700 ~/.ssh`. |
 | `host key mismatch` | The host's key changed. Verify why, then remove the old line from `~/.ssh/known_hosts`. |
-| `connection timed out` + `(no ping reply)` | The host is down or unreachable from your network (VPN?). |
+| `connection timed out` + `(no ping reply, SSH port 22 closed)` | The host is down or unreachable from your network (VPN?). It is checked every round and read again as soon as it answers. |
+| `connection timed out` + `(no ping reply, SSH port 22 open)` | The machine is up and only drops ping; the SSH timeout was passing (busy host, slow network). It is tried again on the next round. |
+| `not reachable: no ping reply, SSH port 22 closed` | The host was down at the last attempt and still is; SSH is skipped until it answers ping or its SSH port opens. |
 | `connection timed out` + `(host answers ping …)` | The machine is up but SSH is blocked or not running. |
 | `no common SSH algorithm (legacy host)` | Add e.g. `KexAlgorithms +diffie-hellman-group1-sha1` under **Other ssh options**. |
 | Sensors: `ipmitool not installed` / `sudo rule missing` | Use **Set up BMC access…** on that host. |

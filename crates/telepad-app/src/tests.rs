@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use telepad_core::collector::{Scope, Update};
+use telepad_core::collector::{Reach, Scope, Update};
 use telepad_core::config::{Access, HostEntry, Inventory};
 use telepad_core::model::HostReport;
 use telepad_core::store::{ImportMode, ImportSummary, UiPrefs};
@@ -206,7 +206,7 @@ fn finished(
     alias: &str,
     result: Result<HostReport, String>,
     scope: Scope,
-    no_ping: bool,
+    silent: bool,
     now: Instant,
 ) {
     update(
@@ -215,7 +215,11 @@ fn finished(
             alias: alias.into(),
             result: result.map(Box::new),
             scope,
-            no_ping,
+            reach: if silent {
+                Reach::Silent
+            } else {
+                Reach::Unchecked
+            },
             elapsed: Duration::from_millis(300),
         }),
         now,
@@ -837,7 +841,7 @@ fn collection_results_update_host_state() {
         alias: "web01".into(),
         result,
         scope: Scope::FULL,
-        no_ping: false,
+        reach: Reach::Unchecked,
         elapsed: Duration::from_millis(300),
     };
     let t1 = t0 + Duration::from_secs(1);

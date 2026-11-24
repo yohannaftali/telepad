@@ -181,6 +181,7 @@ fn hosts(ui: &mut egui::Ui, m: &Model, filter: &mut String, out: &mut Vec<Msg>) 
                 ui.label(
                     RichText::new(match h.ping {
                         Some(Some(ms)) => format!("{ms:.0} ms"),
+                        Some(None) if h.port_open => "no reply, SSH port open".into(),
                         Some(None) => "no reply".into(),
                         None => "—".into(),
                     })
@@ -293,7 +294,9 @@ fn reads(c: Check) -> &'static str {
         Check::Live => "CPU, memory, disks, sensors, Docker, Kubernetes / Swarm",
         Check::Slow => "IP addresses, listening ports, pending updates, reboot needed",
         Check::Static => "Hostname, OS release, kernel, architecture, CPU model",
-        Check::SshRetry => "Hosts without ping reply are only pinged; SSH is tried this often",
+        Check::SshRetry => {
+            "Down hosts (no ping, SSH port closed) are only checked; SSH again after"
+        }
     }
 }
 

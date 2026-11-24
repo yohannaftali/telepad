@@ -46,7 +46,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/lib.rs` | Workspace: find `config` / `telepad.db`, first-run import, `.env` fallback key, `open_ssh_alias` |
 | `src/config.rs` | OpenSSH config import/export: hosts (alias, HostName, User, Port, IdentityFile, description, other options, not-monitored tag, RDP-only tag) + global `Host *`/`Match` text; renders the file `ssh -F` reads |
 | `src/store.rs` | SQLite inventory (`rusqlite`, bundled): `hosts` + `settings` + `db_connections` (saved database connections, no passwords) tables, `PRAGMA user_version` schema version, transactional import (Merge/Replace), `parse_pasted` (pasted config / JSON / `[alias] [user@]host[:port]` lines), JSON + OpenSSH export, generated `telepad.ssh_config` (atomic write) |
-| `src/collector.rs` | Runs `ssh -F <config> -T -o BatchMode=yes ... <alias> sh -s` with `script.sh` on stdin; `Scope` (which tiers, ping first for hosts without ping reply; intervals from `strategy::Strategy`, #122) and `carry_over` of skipped facts; timeouts; bounded worker pool; sends `Update`s over a channel; RDP-only hosts get ping + TCP probe |
+| `src/collector.rs` | Runs `ssh -F <config> -T -o BatchMode=yes ... <alias> sh -s` with `script.sh` on stdin; `Scope` (which tiers, ping first for hosts without ping reply; intervals from `strategy::Strategy`, #122) and `carry_over` of skipped facts; timeouts; bounded worker pool; sends `Update`s over a channel; RDP-only hosts get ping + TCP probe; `reach` (#125: ping, else a TCP connect to the SSH port → `Reach`; `Indirect` for `ProxyJump` / `ProxyCommand` hosts) after a failed SSH attempt, in the ping-first path and (down hosts only, `PingJob::port`) in the ping round |
 | `src/script.sh` | Remote read-only collection script, `===SECTION===` markers; tiers `TP_STATIC` (daily by default) / `TP_SLOW` (6 h by default) switched by `collector::Scope`, live sections every round; pending updates only from the local package cache (never `apt-get update`) |
 | `src/bmc_setup.sh` | Interactive, user-started BMC (`ipmitool`) setup — see Conventions |
 | `src/parse.rs` | Pure parsers for each section, unit-tested against `tests/fixtures/` |
@@ -307,7 +307,7 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #111 | fix(history): neutralise formula cells in the CSV export | closed | 2026-11-22 |
 | #112 | fix(keys): restrict the generated key before moving it; ACL by SID, permission failure as a warning | closed | 2026-11-22 |
 | #122 | feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db | closed | 2026-11-23 |
-| #125 | fix(collector): hosts that drop ICMP ping stay down until the SSH retry after one failed SSH attempt | open | 2026-11-23 |
+| #125 | fix(collector): hosts that drop ICMP ping stay down until the SSH retry after one failed SSH attempt | ready-for-review | 2026-11-24 |
 | #126 | feat(keys): Log info page — SSH logins from the systemd journal per host, Register / Unregister journal access | closed | 2026-11-24 |
 | #129 | feat(local): My Computer page — monitor this PC like a host, terminal, files and local databases | closed | 2026-11-24 |
 | #130 | fix(files): whole file row (.. row, icon, Modified, Size cells) selects on click; centre text vertically | closed | 2026-11-24 |
@@ -319,3 +319,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #138 | feat(db): data grid filter row, column chooser and pager footer (Senar / wtbapp style, 100 rows default) | closed | 2026-11-24 |
 | #139 | feat(db): export and import table data (SQL, CSV, Excel) | closed | 2026-11-24 |
 | #140 | feat(keys): Log info pager as a sticky footer with record info and first / previous / next / last | closed | 2026-11-24 |
+| #143 | fix(ui): Hosts table fills the page width, auto-resizes columns, Flags not clipped and readable | open | 2026-11-24 |
+| #144 | feat(hosts): optional host groups — Groups page, Ungrouped, Hosts - [Group] page, group on cards | open | 2026-11-24 |
+| #145 | feat(hosts): user-defined clusters separate from groups — Clusters page, Hosts - [Cluster] page, cluster on cards | open | 2026-11-24 |

@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use telepad_core::collector::{Scope, Update as CUpdate};
+use telepad_core::collector::{Reach, Scope, Update as CUpdate};
 use telepad_core::config::HostEntry;
 use telepad_core::db::{DbTarget, Engine, Profile};
 use telepad_core::files::{Entry, Kind};
@@ -244,7 +244,7 @@ fn report_done(alias: &str, result: Result<Box<telepad_core::model::HostReport>,
         alias: alias.into(),
         result,
         scope: Scope::FULL,
-        no_ping: false,
+        reach: Reach::Unchecked,
         elapsed: Duration::from_millis(10),
     })
 }

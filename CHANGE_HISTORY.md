@@ -2,6 +2,35 @@
 
 Newest first.
 
+## [2026-11-24] — fix(collector): hosts that drop ICMP ping are tried over SSH again next round (#125)
+- Issue #125 addressed on GitHub (branch `125-ping-blocked-hosts`).
+- `collector::reach`: ping, else a TCP connect to the SSH port (`Reach::Ping` / `Port` /
+  `Silent` / `Indirect`); used after a failed SSH attempt and in the ping-first path, and
+  in the ping round only for hosts that are down (`PingJob { host, port }`), so up hosts
+  get no extra connections in their sshd log. `Outcome` / `Update::Done` carry `reach`
+  instead of `no_ping`; `HostEntry::is_proxied`.
+- App: `no_ping` (check before SSH) only for `Silent` hosts, or proxied hosts after two SSH
+  failures in a row (`HostState::ssh_fails`); `port_open` shown on the host page and the
+  Update Strategy list; a down host whose SSH port opens is read at once.
+- Messages: *(no ping reply, SSH port 22 open / closed)*; skipped: *not reachable: no ping
+  reply, SSH port 22 closed — SSH is tried again when the host answers ping or its SSH port
+  opens*.
+- Files: `core/src/collector.rs`, `core/src/config.rs`, `core/src/strategy.rs`,
+  `app/src/{msg,lib,state,update}.rs`, tests (`tests_strategy.rs` +4), `gui/src/runtime.rs`,
+  `gui/src/views/{detail,strategy}.rs`, `docs/USER_MANUAL.md`, `AGENTS.md`.
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 223, app 185, gui 7).
+  Not verified yet: GUI down count against `telepad-check` on the real inventory (tester).
+
+## [2026-11-24] — Issues #143–#145 created (Hosts table width, host groups, clusters)
+- #143 fix(ui): Hosts table fills the page width, auto-resizes columns, Flags not clipped and readable — labels: bug
+- #144 feat(hosts): optional host groups — Groups page, Ungrouped, Hosts - [Group] page, group on cards — labels: enhancement
+- #145 feat(hosts): user-defined clusters separate from groups — Clusters page, Hosts - [Cluster] page, cluster on cards — labels: enhancement
+- Platform: GitHub; scope: telepad-core (store schema 5, config tags), telepad-app, telepad-gui
+
+## [2026-11-24] — Telepad 0.9.8 released
+- Tag `v0.9.8` (PR #142); release workflow green, 8 assets with `.sha256` published;
+  `telepad-check --check-update` finds it.
+
 ## [2026-11-24] — Telepad 0.9.8
 - **Database grid** (#138): a filter box under every column (contains, `=x`, `!x`, `>x`,
   `<x`, `NULL`, `!NULL`) together with a Custom WHERE; **Columns** chooser with search,

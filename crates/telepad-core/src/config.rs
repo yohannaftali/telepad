@@ -81,6 +81,15 @@ impl HostEntry {
         self.alias == LOCAL_ALIAS
     }
 
+    /// Reached through `ProxyJump` / `ProxyCommand` (#125): neither ping nor a
+    /// TCP connect from this computer says whether the host is up.
+    pub fn is_proxied(&self) -> bool {
+        self.options.iter().any(|(k, v)| {
+            (k.eq_ignore_ascii_case("ProxyJump") || k.eq_ignore_ascii_case("ProxyCommand"))
+                && !v.trim().eq_ignore_ascii_case("none")
+        })
+    }
+
     pub fn new(alias: &str) -> Self {
         Self {
             alias: alias.to_string(),
