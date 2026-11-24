@@ -1095,7 +1095,7 @@ impl Runtime {
                             Side::Local => {
                                 let p =
                                     telepad_core::expand_home(path.trim()).display().to_string();
-                                cf::list_local(&p).map(|v| (p, v))
+                                cf::list_local_at(&p)
                             }
                             Side::Remote => match sftp.as_mut() {
                                 Some(c) => c

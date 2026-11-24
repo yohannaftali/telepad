@@ -309,3 +309,10 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #129 | feat(local): My Computer page — monitor this PC like a host, terminal, files and local databases | closed | 2026-11-24 |
 | #130 | fix(files): whole file row (.. row, icon, Modified, Size cells) selects on click; centre text vertically | closed | 2026-11-24 |
 | #131 | feat(files): compare directories, synchronize, diff between panes and transfer settings | closed | 2026-11-24 |
+| #134 | fix(files): Windows legacy junctions (My Documents) — hide system folders, open the link target instead of Access denied | open | 2026-11-24 |
+| #135 | feat(editor): git-style Diff colours (+ green added, - red deleted) and synchronized scrolling | open | 2026-11-24 |
+| #136 | fix(ui): opening an already open page restores and raises its window (minimized or behind) | open | 2026-11-24 |
+| #137 | fix(ui): table cells and headers react to clicks anywhere in the cell — database grid select / centring, sort on header click | open | 2026-11-24 |
+| #138 | feat(db): data grid filter row, column chooser and pager footer (Senar / wtbapp style, 100 rows default) | open | 2026-11-24 |
+| #139 | feat(db): export and import table data (SQL, CSV, Excel) | open | 2026-11-24 |
+| #140 | feat(keys): Log info pager as a sticky footer with record info and first / previous / next / last | open | 2026-11-24 |

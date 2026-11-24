@@ -796,7 +796,11 @@ windows can be open at once, one per host.
     adds or removes rows, Shift+click selects every row from the one clicked last. The pane
     title shows how many are selected. The **..** row can be highlighted too, but it is
     never copied, deleted or changed.
-  - Double-click a folder (or **..**) to open it; drag any part of a row to copy it.
+  - Double-click a folder (or **..**) to open it; drag any part of a row to copy it. A link
+    or junction opens at the folder it points to (the path bar shows that folder): Windows' old
+    `My Documents`, `Application Data` … junctions open `Documents`, `AppData\Roaming` ….
+  - On this computer, files and folders Windows marks hidden or system are shown only with
+    **Hidden files**, as in Explorer.
   - Both folders are remembered per host for the next time the window opens.
 - **Copy** the selected files and folders (folders with everything in them):
   - **Upload** (local → host folder) or **Download** (host → local folder), or

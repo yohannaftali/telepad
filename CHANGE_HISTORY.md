@@ -2,6 +2,16 @@
 
 Newest first.
 
+## [2026-11-24] — Issues #134–#140 created on GitHub
+- #134 fix(files): Windows legacy junctions (My Documents) — hide system folders, open the link target instead of Access denied (bug; core files, app files)
+- #135 feat(editor): git-style Diff colours (+ green added, - red deleted) and synchronized scrolling (enhancement; core compare, gui text_editor)
+- #136 fix(ui): opening an already open page restores and raises its window (minimized or behind) (bug; app workspace)
+- #137 fix(ui): table cells and headers react to clicks anywhere in the cell — database grid select / centring, sort on header click (bug; gui database, files)
+- #138 feat(db): data grid filter row, column chooser and pager footer (Senar / wtbapp style, 100 rows default) (enhancement; core db, app db, gui)
+- #139 feat(db): export and import table data (SQL, CSV, Excel) (enhancement; core db, app db, gui)
+- #140 feat(keys): Log info pager as a sticky footer with record info and first / previous / next / last (enhancement; gui logins, widgets)
+- Reference for #138 / #140: wtbapp `code2/public/js/y.panel.js` (`pager_*`, `filter_build`), `y.app.js` (`y_record_info`, `y_page_size_ask`, `y_filter_match`), `y.select.js`; Senar.
+
 ## [2026-11-24] — Telepad 0.9.7
 - **My Computer** (#129): a page above **Hosts** for the PC Telepad runs on, without SSH —
   System, Maintenance, Usage, Disks, Network, Sensors, Docker, Ports in use; **Open
