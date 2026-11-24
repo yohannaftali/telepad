@@ -658,7 +658,9 @@ mod tests {
         let port = l.local_addr().unwrap().port();
         assert!(tcp_open("127.0.0.1", port, Duration::from_secs(2)).is_ok());
         drop(l);
-        assert!(tcp_open("127.0.0.1", port, Duration::from_secs(2)).is_err());
+        // Not the freed port: a parallel test may take it. A documentation
+        // address (RFC 5737) never answers.
+        assert!(tcp_open("192.0.2.1", 22, Duration::from_millis(300)).is_err());
     }
 
     #[test]
