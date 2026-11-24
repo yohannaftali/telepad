@@ -307,7 +307,7 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #111 | fix(history): neutralise formula cells in the CSV export | closed | 2026-11-22 |
 | #112 | fix(keys): restrict the generated key before moving it; ACL by SID, permission failure as a warning | closed | 2026-11-22 |
 | #122 | feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db | closed | 2026-11-23 |
-| #125 | fix(collector): hosts that drop ICMP ping stay down until the SSH retry after one failed SSH attempt | ready-for-review | 2026-11-24 |
+| #125 | fix(collector): hosts that drop ICMP ping stay down until the SSH retry after one failed SSH attempt | closed | 2026-11-24 |
 | #126 | feat(keys): Log info page — SSH logins from the systemd journal per host, Register / Unregister journal access | closed | 2026-11-24 |
 | #129 | feat(local): My Computer page — monitor this PC like a host, terminal, files and local databases | closed | 2026-11-24 |
 | #130 | fix(files): whole file row (.. row, icon, Modified, Size cells) selects on click; centre text vertically | closed | 2026-11-24 |
