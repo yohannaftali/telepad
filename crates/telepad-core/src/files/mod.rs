@@ -10,6 +10,7 @@
 //! - [`edit`], [`text`], [`syntax`]: the editor (#64): load / save with a
 //!   changed-on-disk check, line endings and find / replace, syntax colours.
 
+pub mod compare;
 pub mod edit;
 pub mod fallback;
 pub mod ops;

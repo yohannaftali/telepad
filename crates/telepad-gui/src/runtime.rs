@@ -938,6 +938,17 @@ impl Runtime {
                     .ws
                     .as_ref()
                     .and_then(|ws| ws.store.files_paths(&host.alias).ok().flatten());
+                // Transfer settings of this host (#131).
+                if let Some(o) = self
+                    .ws
+                    .as_ref()
+                    .and_then(|ws| ws.store.files_options(&host.alias).ok().flatten())
+                {
+                    let _ = self.tx.send(fm(FmMsg::OptionsLoaded {
+                        id,
+                        opts: telepad_core::files::transfer::Options::from_setting(&o),
+                    }));
+                }
                 let (jobs, inbox) = mpsc::channel::<FileJob>();
                 let stop = Arc::new(AtomicBool::new(false));
                 if let Some(old) = self.files.insert(
@@ -1114,11 +1125,12 @@ impl Runtime {
                 direction,
                 sources,
                 dest,
+                opts,
             } => {
                 let (ssh, cancel, host) = self.transfer_setup(id, tid)?;
                 self.background(move || {
                     let result = open_remote(&ssh, &host).and_then(|mut c| {
-                        transfer::plan(c.as_mut(), direction, &sources, &dest, &cancel)
+                        transfer::plan(c.as_mut(), direction, &sources, &dest, &opts, &cancel)
                     });
                     fm(FmMsg::Planned {
                         id,
@@ -1134,6 +1146,7 @@ impl Runtime {
                 direction,
                 items,
                 decisions,
+                opts,
             } => {
                 let (ssh, cancel, host) = self.transfer_setup(id, tid)?;
                 let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
@@ -1161,6 +1174,7 @@ impl Runtime {
                         direction,
                         &items,
                         &decisions,
+                        &opts,
                         &cancel,
                         &mut |ev| match ev {
                             transfer::Event::Bytes(n) => {
@@ -1256,12 +1270,14 @@ impl Runtime {
                 sources,
                 dest,
                 dry_run,
+                opts,
             } => {
                 let (ssh, _cancel, host) = self.transfer_setup(id, tid)?;
                 self.background(move || {
                     let upload = direction == transfer::Direction::Upload;
-                    let result =
-                        crsync::run(&crsync::args(&ssh, &host, upload, &sources, &dest, dry_run));
+                    let result = crsync::run(&crsync::args(
+                        &ssh, &host, upload, &sources, &dest, dry_run, &opts,
+                    ));
                     if dry_run {
                         fm(FmMsg::RsyncPreviewed {
                             id,
@@ -1381,6 +1397,35 @@ impl Runtime {
                 .with_store(|s| s.set_files_paths(&alias, &local, &remote))
                 .err()
                 .map(Msg::Notice),
+            FmEffect::SaveOptions { alias, opts } => self
+                .with_store(|s| s.set_files_options(&alias, &opts.to_setting()))
+                .err()
+                .map(Msg::Notice),
+            FmEffect::SyncPlan {
+                id,
+                left,
+                right,
+                req,
+                opts,
+            } => {
+                let ssh = self.ssh.clone()?;
+                let host = self.files.get(&id)?.host.clone();
+                self.background(move || {
+                    let never = AtomicBool::new(false);
+                    let result = open_remote(&ssh, &host).and_then(|mut c| {
+                        telepad_core::files::compare::sync_plan(
+                            c.as_mut(),
+                            &left,
+                            &right,
+                            req,
+                            &opts,
+                            &never,
+                        )
+                    });
+                    fm(FmMsg::SyncPlanned { id, result })
+                });
+                None
+            }
         }
     }
 

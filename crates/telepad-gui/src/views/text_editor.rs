@@ -185,6 +185,25 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
             }
         }
     }
+    // Diff of the file window (#131): both files side by side.
+    if let Some((a, b)) = e.compare
+        && (tid == a || tid == b)
+        && let (Some(ta), Some(tb)) = (e.tab(a), e.tab(b))
+    {
+        egui::Panel::top(("ed-tabs", id)).show(ui, |ui| {
+            egui::ScrollArea::horizontal()
+                .id_salt(("ed-tabs-scroll", id))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for x in &e.tabs {
+                            tab_button(ui, s, x, x.id == a || x.id == b, dr, out);
+                        }
+                    });
+                });
+        });
+        compare_view(ui, s, ta, tb, dr, out);
+        return;
+    }
     egui::Panel::top(("ed-tabs", id)).show(ui, |ui| {
         egui::ScrollArea::horizontal()
             .id_salt(("ed-tabs-scroll", id))
@@ -276,7 +295,130 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
                     }
                 });
             }
-            TabState::Ready => code(ui, id, t, dr),
+            TabState::Ready => code(ui, id, t, dr, None),
+        });
+}
+
+/// Lines that differ between the two compared texts, kept while the texts
+/// stay the same (the LCS is not redone every frame).
+type LineMarks = std::sync::Arc<(Vec<bool>, Vec<bool>)>;
+
+fn compare_marks(ctx: &egui::Context, win: u64, left: &str, right: &str) -> LineMarks {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    left.hash(&mut h);
+    right.hash(&mut h);
+    let hash = h.finish();
+    // One entry per window: replaced when the texts change.
+    let key = egui::Id::unique(("telepad-ed-compare", win));
+    if let Some((k, m)) = ctx.data(|d| d.get_temp::<(u64, LineMarks)>(key))
+        && k == hash
+    {
+        return m;
+    }
+    let m: LineMarks = std::sync::Arc::new(telepad_core::files::compare::line_marks(left, right));
+    ctx.data_mut(|d| d.insert_temp(key, (hash, m.clone())));
+    m
+}
+
+/// The two files of a Diff (#131) side by side: each editable and saved on
+/// its own, differing lines marked.
+fn compare_view(
+    ui: &mut egui::Ui,
+    s: &FileSession,
+    a: &EdTab,
+    b: &EdTab,
+    dr: &mut EdDraft,
+    out: &mut Vec<Msg>,
+) {
+    let id = s.id;
+    let ready = a.state == TabState::Ready && b.state == TabState::Ready;
+    let marks = if ready {
+        let (l, r) = (
+            dr.texts.get(&a.id).cloned().unwrap_or_default(),
+            dr.texts.get(&b.id).cloned().unwrap_or_default(),
+        );
+        Some(compare_marks(ui.ctx(), id, &l, &r))
+    } else {
+        None
+    };
+    egui::Panel::top(("ed-head", id)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            let n = marks
+                .as_ref()
+                .map_or(0, |m| m.0.iter().chain(&m.1).filter(|x| **x).count());
+            ui.label(RichText::new(il(icons::NOT_EQUALS, "Compare")).strong());
+            if ready {
+                ui.label(if n == 0 {
+                    "the files are the same".to_string()
+                } else {
+                    format!("{n} line(s) differ")
+                });
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button(il(icons::X, "Close compare"))
+                    .on_hover_text("Back to one file at a time; both tabs stay open")
+                    .clicked()
+                {
+                    send(out, id, EdMsg::EndCompare);
+                }
+            });
+        });
+        for t in [a, b] {
+            if let Some(err) = &t.error {
+                ui.colored_label(red(), format!("{} {}: {err}", icons::X_CIRCLE, t.name));
+            }
+            if t.conflict.is_some() {
+                conflict(ui, s, t, out);
+            }
+        }
+    });
+    let fill = ui.visuals().extreme_bg_color;
+    egui::CentralPanel::default()
+        .frame(egui::Frame::new().fill(fill))
+        .show(ui, |ui| {
+            ui.columns(2, |cols| {
+                for (k, (t, col)) in [a, b].into_iter().zip(cols.iter_mut()).enumerate() {
+                    col.horizontal(|ui| {
+                        let icon = match t.side {
+                            Side::Local => icons::DESKTOP,
+                            Side::Remote => icons::DISKS,
+                        };
+                        let dirty = dr.dirty(t);
+                        if ui
+                            .add_enabled(
+                                dirty && t.saving.is_none(),
+                                egui::Button::new(il(icons::SAVE, "Save")).small(),
+                            )
+                            .clicked()
+                        {
+                            send(out, id, EdMsg::Save(t.id));
+                        }
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("{icon} {}: {}", place(s, t.side), t.path))
+                                    .monospace()
+                                    .weak(),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(&t.path);
+                    });
+                    match &t.state {
+                        TabState::Loading => {
+                            col.spinner();
+                        }
+                        TabState::Failed(why) => {
+                            col.colored_label(red(), format!("{} {why}", icons::WARNING));
+                        }
+                        TabState::Ready => {
+                            let m = marks.as_ref().map(|m| if k == 0 { &m.0 } else { &m.1 });
+                            code(col, id, t, dr, m.map(Vec::as_slice));
+                        }
+                    }
+                }
+            });
         });
 }
 
@@ -820,7 +962,8 @@ fn layout(ui: &egui::Ui, txt: &str, lang: Lang, font: &egui::FontId) -> LayoutJo
     job
 }
 
-fn code(ui: &mut egui::Ui, win: u64, t: &EdTab, dr: &mut EdDraft) {
+/// `marks`: lines to highlight (the differing lines of a compare, #131).
+fn code(ui: &mut egui::Ui, win: u64, t: &EdTab, dr: &mut EdDraft, marks: Option<&[bool]>) {
     let eid = edit_id(win, t.id);
     let ctx = ui.ctx().clone();
     let Some(buf) = dr.texts.get_mut(&t.id) else {
@@ -905,6 +1048,28 @@ fn code(ui: &mut egui::Ui, win: u64, t: &EdTab, dr: &mut EdDraft) {
                 });
                 let mut shapes = Vec::new();
                 let v = ui.visuals();
+                if let Some(marks) = marks {
+                    let tint = if v.dark_mode {
+                        Color32::from_rgba_unmultiplied(220, 120, 40, 46)
+                    } else {
+                        Color32::from_rgba_unmultiplied(230, 150, 40, 70)
+                    };
+                    for (i, row) in galley.rows.iter().enumerate() {
+                        if !marks.get(i).copied().unwrap_or(false) {
+                            continue;
+                        }
+                        let y0 = origin.y + row.rect().min.y;
+                        let y1 = origin.y + row.rect().max.y;
+                        if y1 < clip.top() || y0 > clip.bottom() {
+                            continue;
+                        }
+                        shapes.push(egui::Shape::rect_filled(
+                            egui::Rect::from_x_y_ranges(clip.x_range(), y0..=y1),
+                            0.0,
+                            tint,
+                        ));
+                    }
+                }
                 if let Some(r) = cur_rect {
                     let line = egui::Rect::from_x_y_ranges(clip.x_range(), r.y_range());
                     shapes.push(egui::Shape::rect_filled(

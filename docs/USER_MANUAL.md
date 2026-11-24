@@ -861,6 +861,45 @@ you clicked last, never while you are typing in a field.
 - On a host **without SFTP** the host side's actions are disabled (*Needs SFTP on the
   host*); copying and this computer's side still work.
 
+### Compare, Synchronize, Diff and Transfer settings
+
+The top bar of a file window has four tools that work between the two panes:
+
+- **Compare** marks every entry of both panes against the same name in the other pane:
+  a plus: only on this side (green); an up caret: newer on this side (blue), with a grey
+  down caret on the older copy; not-equal: same time but another size (amber); equals: the
+  same (grey). Times within 2 seconds count
+  as the same. **Hide identical** leaves only what differs; clicking **Compare** again
+  shows the plain lists. It compares the two folders shown, not the folders inside.
+- **Synchronize…** makes one folder match the other:
+  - **Left → right**, **Right → left** or **Both ways (newer wins)**;
+  - **Also the folders inside (recursive)**; without it only the files of the two folders;
+  - **Delete files the source does not have** (off by default, not for both ways).
+  **Preview** compares the folders and lists every copy (→ / ←, *copy* or *replace*) and
+  every delete (in red) before anything happens; **Synchronize** then runs exactly that:
+  one transfer each way in the transfer panel (existing files are replaced without a
+  question, the preview showed them) and the deletes, all in the history. One way without
+  *New and updated files only*, a file that differs is copied even when the target is
+  newer. Links are never followed or copied; folders in **Exclude folders** stay out.
+  Needs SFTP on the host.
+- **Diff** opens a file of each pane side by side in the [editor](#editor), the lines that
+  differ marked in orange. Select one file in each pane, or one file whose name is also in
+  the other pane. Both sides can be edited and each has its own **Save** (with the usual
+  changed-on-disk check); **Close compare** goes back to normal tabs. Binary files and
+  files over the editor's size limit say so instead.
+- **Transfer settings…** (kept per host): 
+  - **Mode**: **Default** copies known text files (`.txt`, `.conf`, `.sh`, `.php`, `.json`,
+    `Dockerfile` …) as text and everything else as is; **Text** copies every file as text;
+    **Binary** never changes a byte. As text, line endings become the target's: CRLF on
+    this computer when it runs Windows, LF on hosts. A file with a NUL byte or over 64 MiB
+    is always copied as is. scp and rsync always copy bytes as they are.
+  - **New and updated files only**: an existing file is replaced only when the copied one
+    is newer, without the overwrite question (rsync: `--update`).
+  - **Exclude folders**: names or patterns with `*` and `?`, separated by `;` (for example
+    `node_modules; .git; dist`); such folders are never copied, also inside copied folders
+    (rsync: `--exclude`).
+  They apply to Upload / Download, drag and drop, F5 and Synchronize.
+
 ### Transfer history
 
 ![The History tab of a file window](images/files-history.png)

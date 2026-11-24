@@ -582,6 +582,21 @@ PRAGMA user_version = {SCHEMA_VERSION};"
         Ok(())
     }
 
+    /// Transfer settings of a host's file window (#131), as
+    /// `files::transfer::Options::to_setting` writes them.
+    pub fn files_options(&self, alias: &str) -> Result<Option<String>, StoreError> {
+        self.setting(&format!("files_opts:{alias}"))
+    }
+
+    pub fn set_files_options(&self, alias: &str, value: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![format!("files_opts:{alias}"), value],
+        )?;
+        Ok(())
+    }
+
     /// The config file Host Management compares with (`None`: `~/.ssh/config`).
     pub fn host_sync_path(&self) -> Result<Option<String>, StoreError> {
         self.setting("hostsync_config_path")

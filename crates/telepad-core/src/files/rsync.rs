@@ -62,6 +62,7 @@ pub fn args(
     sources: &[String],
     dest_dir: &str,
     dry_run: bool,
+    opts: &super::transfer::Options,
 ) -> Vec<String> {
     let mut a = vec![
         "-a".to_string(),
@@ -73,6 +74,13 @@ pub fn args(
     ];
     if dry_run {
         a.push("--dry-run".into());
+    }
+    // Transfer settings (#131): rsync copies bytes as they are (no Text mode).
+    if opts.newer_only {
+        a.push("--update".into());
+    }
+    for p in &opts.exclude {
+        a.push(format!("--exclude={p}/"));
     }
     a.push("--".into());
     let remote = |p: &str| format!("{}:{p}", host.alias);
@@ -139,7 +147,14 @@ mod tests {
         let mut s = SshSettings::new(PathBuf::from("/home/me/my telepad/telepad.ssh_config"));
         s.ssh_program = PathBuf::from("/usr/bin/ssh");
         let h = HostEntry::new("web1");
-        let up = args(&s, &h, true, &["/tmp/site".into()], "/srv/www", true);
+        let opts = super::super::transfer::Options {
+            newer_only: true,
+            exclude: vec!["node_modules".into()],
+            ..Default::default()
+        };
+        let up = args(&s, &h, true, &["/tmp/site".into()], "/srv/www", true, &opts);
+        assert!(up.contains(&"--update".to_string()));
+        assert!(up.contains(&"--exclude=node_modules/".to_string()));
         assert_eq!(
             up[up.iter().position(|a| a == "-e").unwrap() + 1],
             "'/usr/bin/ssh' -F '/home/me/my telepad/telepad.ssh_config' -o BatchMode=yes -o ConnectTimeout=8"
@@ -151,7 +166,16 @@ mod tests {
             &up[up.len() - 2..],
             &["/tmp/site".to_string(), "web1:/srv/www/".into()]
         );
-        let down = args(&s, &h, false, &["/srv/a b.log".into()], "/tmp/in", false);
+        let down = args(
+            &s,
+            &h,
+            false,
+            &["/srv/a b.log".into()],
+            "/tmp/in",
+            false,
+            &Default::default(),
+        );
+        assert!(!down.contains(&"--update".to_string()));
         assert_eq!(
             &down[down.len() - 2..],
             &["web1:/srv/a b.log".to_string(), "/tmp/in/".into()]

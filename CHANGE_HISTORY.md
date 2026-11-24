@@ -2,6 +2,24 @@
 
 Newest first.
 
+## [2026-11-24] — feat(files): compare, synchronize, diff, transfer settings (#131)
+- Issue #131 addressed on GitHub (branch `131-files-compare-sync`, on top of `129-my-computer`).
+- **Compare** marks both panes (only here / newer / different size / same, 2 s slack),
+  **Hide identical**. **Synchronize…**: left → right, right → left or both (newer wins),
+  recursive, optional delete (off by default, never both ways); **Preview** lists every
+  copy and delete, **Synchronize** runs one transfer each way + the deletes (history).
+  **Diff** opens one file of each pane side by side in the editor with differing lines
+  marked, each side saved on its own. **Transfer settings…** per host (`files_opts:<alias>`):
+  Default / Text / Binary (CRLF on Windows, LF on hosts; NUL or > 64 MiB stay binary),
+  new and updated files only (no question; rsync `--update`), excluded folders (globs;
+  rsync `--exclude`).
+- Files: core `files/compare.rs` (new), `files/transfer.rs`, `files/rsync.rs`,
+  `files/live_tests.rs`, `store.rs`; app `files.rs`, `editor.rs`, `tests_files.rs`; gui
+  `views/files.rs`, `views/text_editor.rs`, `runtime.rs`; `docs/USER_MANUAL.md`,
+  `README.md`, `AGENTS.md`.
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 213, app 171, gui 7).
+  Not verified yet: GUI (tester).
+
 ## [2026-11-24] — feat(local): My Computer page (#129)
 - Issue #129 addressed on GitHub (branch `129-my-computer`, on top of `130-file-row-click`).
 - **My Computer** above **Hosts** in the sidebar (`Win::MyComputer`, layout key `local`): the
