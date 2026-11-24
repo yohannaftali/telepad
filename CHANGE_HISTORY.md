@@ -2,6 +2,52 @@
 
 Newest first.
 
+## [2026-11-24] — feat(local): My Computer page (#129)
+- Issue #129 addressed on GitHub (branch `129-my-computer`, on top of `130-file-row-click`).
+- **My Computer** above **Hosts** in the sidebar (`Win::MyComputer`, layout key `local`): the
+  host page of this PC without SSH — System, Maintenance (reboot pending), Usage, Disks,
+  Network, Sensors ("not available" without admin on Windows), Docker, Ports in use. Read
+  while the page is open (live interval, not while paused) and on Refresh.
+- Windows: `sysinfo`, `netstat -ano`, `reg query`, `docker` / `podman` CLI; Linux / macOS:
+  `script.sh` via local `sh -s`. Buttons: Open Terminal (local shell), Open files… (this
+  computer on both sides), Open MariaDB / MySQL / PostgreSQL on 127.0.0.1 (owner decision:
+  no SSH for this computer's databases). No Copy ssh / Edit / Clone / Delete.
+- Transfers go through a `transfer::Remote` trait (`Sftp` or `ThisComputer`).
+- `telepad-check --local [--json]`.
+- Files: core `local.rs` (new), `config.rs`, `platform.rs`, `eol.rs`, `parse.rs`,
+  `files/transfer.rs`, `db/client.rs`, `Cargo.toml` (`sysinfo` 0.40.4, Windows only); app
+  `state.rs`, `msg.rs`, `update.rs`, `workspace.rs`, `files.rs`, `editor.rs`,
+  `tests_local.rs` (new); gui `views/detail.rs`, `docker.rs`, `sensors.rs`, `files.rs`,
+  `workspace.rs`, `mod.rs`, `runtime.rs`; check `main.rs`; `docs/USER_MANUAL.md`,
+  `README.md`, `SECURITY.md`, `AGENTS.md`.
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 208, app 167, gui 7);
+  `telepad-check --local` on Windows 11 (≈ 2 s: OS, CPU, memory, disks, IPs, 50 containers,
+  ports). Not verified yet: GUI page, Linux / macOS local read.
+
+## [2026-11-24] — fix(files): whole file row selects on click (#130)
+- Issue #130 addressed on GitHub (branch `130-file-row-click`).
+- Every cell is plain non-selectable text; the row takes click, Ctrl / Shift+click,
+  double-click, drag and right-click; the `..` row can be highlighted (never copied);
+  cells centred vertically (`cell_layout`).
+- Files: gui `views/files.rs`; app `files.rs` (`click_row`, `click_parent`,
+  `clear_selection`), `tests_files.rs`; `docs/USER_MANUAL.md`.
+- Verified: fmt, clippy, tests. Not verified yet: GUI clicks.
+
+## [2026-11-24] — feat(files): compare directories, synchronize, diff between panes and transfer settings
+- Issue #131 created on GitHub
+- Scope: files (core `files/`, app `files.rs`, gui `views/files.rs`)
+- Labels: enhancement
+
+## [2026-11-24] — fix(files): whole file row (.. row, icon, Modified, Size cells) selects on click; centre text vertically
+- Issue #130 created on GitHub
+- Scope: gui `views/files.rs`
+- Labels: bug
+
+## [2026-11-24] — feat(local): My Computer page — monitor this PC like a host, terminal, files and local databases
+- Issue #129 created on GitHub
+- Scope: core (local collector, platform), app, gui
+- Labels: enhancement
+
 ## [2026-11-24] — Telepad 0.9.6
 - **Log info** (#126): a host's **Log info** button opens a page of who logged in over SSH,
   as which user, from where, how and with which key (the host's systemd journal, last 30

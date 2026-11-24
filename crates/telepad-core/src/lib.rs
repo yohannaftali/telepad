@@ -8,6 +8,7 @@ pub mod eol;
 pub mod files;
 pub mod history;
 pub mod hostsync;
+pub mod local;
 pub mod local_keys;
 pub mod login_log;
 pub mod model;

@@ -96,6 +96,29 @@ pub fn days_from_iso(date: &str) -> Option<i64> {
     Some(era * 146_097 + doe - 719_468)
 }
 
+/// `YYYY-MM-DD` of a day count since 1970-01-01 (inverse of [`days_from_iso`]).
+pub fn iso_from_days(z: i64) -> String {
+    // Howard Hinnant's civil_from_days.
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// This computer's date (UTC), as the remote script's `date +%F` gives it.
+pub fn today() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    iso_from_days(secs.div_euclid(86_400))
+}
+
 /// Support status of a release on the host's `today`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Support {
@@ -169,6 +192,15 @@ mod tests {
             "leap year"
         );
         assert_eq!(days_from_iso("not a date"), None);
+        for d in [
+            "1970-01-01",
+            "2000-02-29",
+            "2024-12-31",
+            "2026-11-24",
+            "1969-07-20",
+        ] {
+            assert_eq!(iso_from_days(days_from_iso(d).unwrap()), d);
+        }
         assert_eq!(
             support("2024-06-30", "2026-11-17"),
             Some(Support::Ended { days_ago: 870 })

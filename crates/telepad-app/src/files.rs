@@ -32,6 +32,8 @@ pub enum Mode {
     Sftp,
     /// No SFTP server: `sh` listing and `scp -O` copies.
     Fallback,
+    /// My Computer (#129): this computer on both sides, no SSH.
+    Local,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -291,6 +293,11 @@ impl FileSession {
             Side::Local => &mut self.local,
             Side::Remote => &mut self.remote,
         }
+    }
+    /// The pane shows this computer: the left one always, the right one
+    /// for My Computer (#129).
+    pub fn local_side(&self, side: Side) -> bool {
+        side == Side::Local || self.host.is_local()
     }
     pub fn transfer(&self, id: u64) -> Option<&Transfer> {
         self.transfers.iter().find(|t| t.id == id)
@@ -695,17 +702,20 @@ fn list(fx: &mut Vec<FmEffect>, s: &mut FileSession, d: &mut FileDraft, side: Si
     });
 }
 
-fn join(side: Side, dir: &str, name: &str) -> String {
-    match side {
-        Side::Local => local_join(dir, name),
-        Side::Remote => sftp::join(dir, name),
+/// `local`: a path of this computer (see [`FileSession::local_side`]).
+fn join(local: bool, dir: &str, name: &str) -> String {
+    if local {
+        local_join(dir, name)
+    } else {
+        sftp::join(dir, name)
     }
 }
 
-fn parent(side: Side, dir: &str) -> Option<String> {
-    match side {
-        Side::Local => local_parent(dir),
-        Side::Remote => (dir != "/").then(|| sftp::parent(dir)),
+fn parent(local: bool, dir: &str) -> Option<String> {
+    if local {
+        local_parent(dir)
+    } else {
+        (dir != "/").then(|| sftp::parent(dir))
     }
 }
 
@@ -717,8 +727,8 @@ fn fallback_items(s: &FileSession, from: Side, names: &[String]) -> Vec<Item> {
         .iter()
         .filter_map(|n| src.entries.iter().find(|e| &e.name == n))
         .map(|e| Item {
-            src: join(from, &src.path, &e.name),
-            dst: join(other(from), &dst.path, &e.name),
+            src: join(s.local_side(from), &src.path, &e.name),
+            dst: join(s.local_side(other(from)), &dst.path, &e.name),
             label: e.name.clone(),
             is_dir: e.is_dir(),
             size: e.size,
@@ -773,7 +783,7 @@ fn next_or_run(s: &mut FileSession, transfer: u64, fx: &mut Vec<FmEffect>, now: 
         .map(|(_, it)| it.size)
         .sum();
     match mode {
-        Mode::Sftp => fx.push(FmEffect::Run {
+        Mode::Sftp | Mode::Local => fx.push(FmEffect::Run {
             id,
             transfer,
             direction: t.direction,
@@ -1077,12 +1087,12 @@ pub fn update(
             }
         }
         FmMsg::Enter { side, name, .. } => {
-            let p = join(side, &s.pane(side).path, &name);
+            let p = join(s.local_side(side), &s.pane(side).path, &name);
             d.clear_selection(side);
             list(&mut fx, s, d, side, p);
         }
         FmMsg::Up { side, .. } => {
-            if let Some(p) = parent(side, &s.pane(side).path) {
+            if let Some(p) = parent(s.local_side(side), &s.pane(side).path) {
                 d.clear_selection(side);
                 list(&mut fx, s, d, side, p);
             }
@@ -1154,11 +1164,12 @@ pub fn update(
                 Side::Remote => Direction::Download,
             };
             let src_dir = s.pane(from).path.clone();
+            let src_local = s.local_side(from);
             let dest = s.pane(other(from)).path.clone();
             let sources: Vec<Source> = names
                 .iter()
                 .filter_map(|n| s.pane(from).entries.iter().find(|e| &e.name == n))
-                .map(|e| (join(from, &src_dir, &e.name), e.is_dir()))
+                .map(|e| (join(src_local, &src_dir, &e.name), e.is_dir()))
                 .collect();
             if sources.is_empty() {
                 return fx;
@@ -1373,7 +1384,7 @@ pub fn update(
         FmMsg::OpDone { side, result, .. } => {
             let path = s.pane(side).path.clone();
             if let Some(dl) = s.dialog.as_ref().filter(|dl| dl.side == side) {
-                let (title, detail) = op_text(dl, &d.name, d.mode);
+                let (title, detail) = op_text(dl, s.local_side(dl.side), &d.name, d.mode);
                 let (outcome, error) = match &result {
                     Ok((r, _)) if r.errors.is_empty() => (Outcome::Done, String::new()),
                     Ok((r, _)) => (Outcome::Failed, r.errors.join("\n")),
@@ -1419,7 +1430,7 @@ pub fn update(
                 p.path.clone()
             } else {
                 sel.iter()
-                    .map(|n| join(side, &p.path, n))
+                    .map(|n| join(s.local_side(side), &p.path, n))
                     .collect::<Vec<_>>()
                     .join("\n")
             };
@@ -1509,7 +1520,7 @@ pub fn op_blocked(s: &FileSession, sel: usize, side: Side, op: OpKind) -> Option
         OpKind::Rename | OpKind::Properties if sel != 1 => Some("Select one item"),
         OpKind::Edit if sel != 1 => Some("Select one file"),
         OpKind::Delete if sel == 0 => Some("Select items first"),
-        OpKind::Permissions if side == Side::Local => Some("Host side only"),
+        OpKind::Permissions if s.local_side(side) => Some("Host side only"),
         OpKind::Permissions if sel == 0 => Some("Select items first"),
         _ => None,
     }
@@ -1592,7 +1603,7 @@ fn ask(s: &mut FileSession, d: &mut FileDraft, side: Side, op: OpKind, fx: &mut 
                 Some(Ok(file_measure(&item)))
             };
             DialogKind::Properties {
-                path: join(side, &dir, &item.name),
+                path: join(s.local_side(side), &dir, &item.name),
                 item,
                 measure,
             }
@@ -1626,13 +1637,14 @@ pub fn parse_mode(text: &str) -> Option<u32> {
 
 fn confirm(s: &mut FileSession, d: &FileDraft, fx: &mut Vec<FmEffect>) {
     let id = s.id;
+    let local_host = s.host.is_local();
     let Some(dl) = s.dialog.as_mut() else {
         return;
     };
     if dl.busy {
         return;
     }
-    let local = dl.side == Side::Local;
+    let local = dl.side == Side::Local || local_host;
     let name = d.name.clone();
     let name_ok = |dl: &mut Dialog| match check_name(&name, local) {
         Ok(()) => true,
@@ -1793,6 +1805,7 @@ fn file_entry(
         method: match s.mode {
             Mode::Sftp => "SFTP".into(),
             Mode::Fallback => "sh".into(),
+            Mode::Local => "local".into(),
         },
         ..Default::default()
     }
@@ -1852,6 +1865,7 @@ fn transfer_entry(t: &Transfer, mode: Mode, now: Instant) -> LogEntry {
             match mode {
                 Mode::Sftp => "SFTP".into(),
                 Mode::Fallback => "scp -O".into(),
+                Mode::Local => "local".into(),
             }
         },
         ..Default::default()
@@ -1859,8 +1873,8 @@ fn transfer_entry(t: &Transfer, mode: Mode, now: Instant) -> LogEntry {
 }
 
 /// Title and detail lines of a file operation dialog, for the history.
-fn op_text(dl: &Dialog, name: &str, mode: u32) -> (String, String) {
-    let at = |n: &str| join(dl.side, &dl.dir, n);
+fn op_text(dl: &Dialog, local: bool, name: &str, mode: u32) -> (String, String) {
+    let at = |n: &str| join(local, &dl.dir, n);
     let names = |items: &[Entry]| {
         items
             .iter()

@@ -3,7 +3,7 @@
 How to use Telepad once it is [installed](../README.md#install). For a first run see the
 [quick start](../README.md#quick-start).
 
-**Contents:** [How Telepad works](#how-telepad-works) · [Window layout](#window-layout) · [Workspaces](#workspaces) · [Overview](#overview) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Files](#files-upload--download--manage--edit) · [Authorized keys](#authorized-keys-list-add-revoke) · [Database browser](#database-browser-mariadb--mysql--postgresql) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
+**Contents:** [How Telepad works](#how-telepad-works) · [Window layout](#window-layout) · [Workspaces](#workspaces) · [Overview](#overview) · [My Computer](#my-computer) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Files](#files-upload--download--manage--edit) · [Authorized keys](#authorized-keys-list-add-revoke) · [Database browser](#database-browser-mariadb--mysql--postgresql) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
 
 ## How Telepad works
 
@@ -50,11 +50,11 @@ Telepad is one window (like MikroTik WinBox): pages open as windows **inside** i
 Telepad | Refresh all | ▤ <own> ▾ | ▣ Hosts · 3 ▾ | Arrange | 2 up         ☰ |
 --------------------------------------------------------------------------
 Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
- Hosts           | | search | Table / Cards                     | |
- Docker / Podman | | web1  192.0.2.10  …  (right-click: menu)  | |
- Authorized keys |  +---------------------------------------------+ |
- Host Management |        +-[Files — web1]---------- _ □ × ⧉ +     |
-                 |        | this computer | web1              |     |
+ My Computer     | | search | Table / Cards                     | |
+ Hosts           | | web1  192.0.2.10  …  (right-click: menu)  | |
+ Docker / Podman |  +---------------------------------------------+ |
+ Authorized keys |        +-[Files — web1]---------- _ □ × ⧉ +     |
+ Host Management |        | this computer | web1              |     |
                  |        +----------------------------------+     |
                  | [Host — db01]  (minimized)                      |
 ------------------------------------------------------------------
@@ -308,6 +308,37 @@ section show what needs doing on a host (hover for details):
 Update counts come from the host's local package cache, so they are only as fresh as the
 host's last `apt update` / `dnf makecache`. Releases not in the table show "unknown"
 support. Sort by **Flags** to see the most urgent hosts first.
+
+## My Computer
+
+**My Computer** (at the top of the page sidebar, above **Hosts**) is the host page of the
+computer Telepad runs on. It needs no SSH and is not in the inventory, so it is never
+exported, imported or written into `telepad.ssh_config`. It shows the same sections as a
+[host](#host-detail): **System**, **Maintenance**, **Usage**, **Disks**, **Network**,
+**Sensors**, **Docker** and **Ports in use**. A section this computer cannot fill says so.
+
+- It is read when the page opens and then at the **live** interval of the
+  [Update Strategy](#update-strategy) while the page stays open (not while everything is
+  paused); **Refresh** reads it now. Reading is read-only and needs no administrator
+  rights: on Windows from the system, `netstat -ano` (listening ports and their program),
+  `reg query` (reboot pending) and the `docker` / `podman` command; on Linux and macOS
+  the same script that runs on hosts, run locally.
+- On Windows, temperatures are shown only to administrators, so **Sensors** usually says
+  *not available*; pending updates are *unknown* (Windows Update is not asked).
+- **Open Terminal** opens a shell of this computer in a new terminal window, in your home
+  folder (Windows Terminal, else PowerShell; Terminal on macOS; the first terminal
+  emulator found on Linux).
+- **Open files…** opens a [file window](#files-upload--download--manage--edit) with
+  **This computer** on both sides: two folders of this computer side by side, copied
+  with **Copy to right** / **Copy to left**, F5 or drag and drop, with the same overwrite
+  question, progress and history as for a host.
+- **Open MariaDB / MySQL :3306**, **Open PostgreSQL :5432** appear when a database server
+  listens on this computer; a database container that publishes its port here gets a
+  database button in its row. They open the [database browser](#database-browser-mariadb--mysql--postgresql)
+  on `127.0.0.1` directly, without SSH. A server that listens only on another address (or
+  only on `::1`) is not offered.
+- There is no **Copy ssh command**, **Edit**, **Clone**, **Delete**, **Log info** or
+  Docker action on this page.
 
 ## Host detail
 
@@ -1319,6 +1350,7 @@ telepad-check.exe                        # check all monitored hosts once, text
 telepad-check.exe web01 nas01 --json     # selected hosts, JSON
 telepad-check.exe --check-update         # newer release on GitHub?
 telepad-check.exe --logins web01         # SSH logins from the host's journal (Log info)
+telepad-check.exe --local [--json]       # this computer, as My Computer reads it
 ```
 
 `telepad-check` exits 0 when every host answered and non-zero otherwise, so it fits in

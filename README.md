@@ -17,6 +17,9 @@ minimized, maximized, tabbed and arranged, kept in named workspaces like MikroTi
 - Docker containers and compose stacks: image, state, container IP per network, published ports
 - **Open SSH** (a terminal logged in to the host), **Copy ssh command**, and **Open RDP**
   for Windows hosts without SSH
+- **My Computer**: the same page for the PC Telepad runs on (system, maintenance, usage,
+  disks, network, sensors, Docker, ports), without SSH; **Open Terminal**, **Open files…**
+  with this computer on both sides, and its local MariaDB / MySQL / PostgreSQL
 - **Open files…**: a WinSCP-style file window per host, this computer on the left and the host
   on the right; upload / download with drag and drop, overwrite questions and progress,
   over SFTP (scp when the host has no SFTP server, rsync when both sides have it); new

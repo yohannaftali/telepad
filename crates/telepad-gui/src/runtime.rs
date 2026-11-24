@@ -152,6 +152,19 @@ fn run_file_op(
     })
 }
 
+/// The right-hand pane of a transfer: the host over SFTP, or this computer
+/// for My Computer (#129).
+fn open_remote(
+    ssh: &SshSettings,
+    host: &telepad_core::config::HostEntry,
+) -> Result<Box<dyn telepad_core::files::transfer::Remote>, String> {
+    use telepad_core::files::{sftp::Sftp, transfer::ThisComputer};
+    if host.is_local() {
+        return Ok(Box::new(ThisComputer));
+    }
+    Ok(Box::new(Sftp::connect(ssh, host)?))
+}
+
 type OpDoneResult = Result<(telepad_core::files::ops::Report, Option<String>), String>;
 
 enum FmOpOut {
@@ -577,6 +590,23 @@ impl Runtime {
             Effect::MyKeys(e) => self.run_mykeys(e),
             Effect::Files(e) => self.run_files(e),
             Effect::Logins(e) => self.run_logins(e),
+            Effect::CollectLocal => {
+                self.background(|| {
+                    let start = Instant::now();
+                    let result = telepad_core::local::collect().map(Box::new);
+                    Msg::LocalCollected {
+                        result,
+                        elapsed: start.elapsed(),
+                    }
+                });
+                None
+            }
+            Effect::OpenLocalTerminal => {
+                Some(Msg::Notice(match telepad_core::local::open_terminal() {
+                    Ok(()) => "Opened a terminal on this computer".into(),
+                    Err(e) => e,
+                }))
+            }
             Effect::OpenUrl(url) => platform::open_url(&url).err().map(Msg::Notice),
             Effect::Relaunch => match relaunch() {
                 Ok(()) => {
@@ -926,11 +956,16 @@ impl Runtime {
                 }
                 let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
                 let (h2, s2) = (host.clone(), ssh.clone());
+                let both_local = host.is_local();
                 self.background(move || {
                     fm(FmMsg::RsyncChecked {
                         id,
-                        result: crsync::local_available()
-                            .and_then(|()| crsync::remote_available(&s2, &h2)),
+                        result: if both_local {
+                            Err("not used between two folders of this computer".into())
+                        } else {
+                            crsync::local_available()
+                                .and_then(|()| crsync::remote_available(&s2, &h2))
+                        },
                     })
                 });
                 thread::spawn(move || {
@@ -941,17 +976,24 @@ impl Runtime {
                     let local_home = cf::local_home();
                     // SFTP first; hosts without an SFTP server get the sh / scp fallback.
                     let mut sftp = None;
-                    let result = match Sftp::connect(&ssh, &host).and_then(|mut c| {
-                        let home = c.realpath(".")?;
-                        Ok((c, home))
-                    }) {
-                        Ok((c, home)) => {
-                            sftp = Some(c);
-                            Ok((Mode::Sftp, home, remembered))
+                    let result = if both_local {
+                        // My Computer (#129): this computer on both sides.
+                        Ok((Mode::Local, local_home.clone(), remembered))
+                    } else {
+                        match Sftp::connect(&ssh, &host).and_then(|mut c| {
+                            let home = c.realpath(".")?;
+                            Ok((c, home))
+                        }) {
+                            Ok((c, home)) => {
+                                sftp = Some(c);
+                                Ok((Mode::Sftp, home, remembered))
+                            }
+                            Err(e) if e.contains("no SFTP server") => {
+                                fallback::list(&ssh, &host, "~")
+                                    .map(|(home, _)| (Mode::Fallback, home, remembered))
+                            }
+                            Err(e) => Err(e),
                         }
-                        Err(e) if e.contains("no SFTP server") => fallback::list(&ssh, &host, "~")
-                            .map(|(home, _)| (Mode::Fallback, home, remembered)),
-                        Err(e) => Err(e),
                     };
                     let ok = result.is_ok();
                     send(fm(FmMsg::Connected {
@@ -963,6 +1005,9 @@ impl Runtime {
                         return;
                     }
                     use telepad_core::files::{edit, text};
+                    // Which computer a pane's job runs on: the right pane is
+                    // this computer too for My Computer.
+                    let on = |side: Side| if both_local { Side::Local } else { side };
                     for job in inbox {
                         let (side, path) = match job {
                             FileJob::List(side, path) => (side, path),
@@ -972,7 +1017,7 @@ impl Runtime {
                                 path,
                                 load,
                             } => {
-                                let read = match (side, sftp.as_mut()) {
+                                let read = match (on(side), sftp.as_mut()) {
                                     (Side::Local, _) => edit::read_local(&path),
                                     (Side::Remote, Some(c)) => edit::read_remote(c, &path),
                                     (Side::Remote, None) => Err("Needs SFTP on the host".into()),
@@ -993,7 +1038,7 @@ impl Runtime {
                                 bytes,
                                 expect,
                             } => {
-                                let result = match (side, sftp.as_mut()) {
+                                let result = match (on(side), sftp.as_mut()) {
                                     (Side::Local, _) => edit::save_local(&path, &bytes, expect),
                                     (Side::Remote, Some(c)) => {
                                         edit::save_remote(c, &path, &bytes, expect)
@@ -1009,7 +1054,7 @@ impl Runtime {
                                 continue;
                             }
                             FileJob::Op(side, op) => {
-                                let out = match (side, sftp.as_mut()) {
+                                let out = match (on(side), sftp.as_mut()) {
                                     (Side::Local, _) => run_file_op(
                                         &mut telepad_core::files::ops::LocalFs,
                                         true,
@@ -1035,7 +1080,7 @@ impl Runtime {
                                 continue;
                             }
                         };
-                        let result = match side {
+                        let result = match on(side) {
                             Side::Local => {
                                 let p =
                                     telepad_core::expand_home(path.trim()).display().to_string();
@@ -1072,8 +1117,8 @@ impl Runtime {
             } => {
                 let (ssh, cancel, host) = self.transfer_setup(id, tid)?;
                 self.background(move || {
-                    let result = Sftp::connect(&ssh, &host).and_then(|mut c| {
-                        transfer::plan(&mut c, direction, &sources, &dest, &cancel)
+                    let result = open_remote(&ssh, &host).and_then(|mut c| {
+                        transfer::plan(c.as_mut(), direction, &sources, &dest, &cancel)
                     });
                     fm(FmMsg::Planned {
                         id,
@@ -1097,7 +1142,7 @@ impl Runtime {
                         let _ = tx.send(m);
                         ctx.request_repaint();
                     };
-                    let mut c = match Sftp::connect(&ssh, &host) {
+                    let mut c = match open_remote(&ssh, &host) {
                         Ok(c) => c,
                         Err(e) => {
                             send(fm(FmMsg::Finished {
@@ -1111,15 +1156,28 @@ impl Runtime {
                     // Bytes are summed and sent a few times a second.
                     let mut pending = 0u64;
                     let mut last = Instant::now();
-                    let counts =
-                        transfer::run(&mut c, direction, &items, &decisions, &cancel, &mut |ev| {
-                            match ev {
-                                transfer::Event::Bytes(n) => {
-                                    pending += n;
-                                    if last.elapsed() < Duration::from_millis(150) {
-                                        return;
-                                    }
-                                    last = Instant::now();
+                    let counts = transfer::run(
+                        c.as_mut(),
+                        direction,
+                        &items,
+                        &decisions,
+                        &cancel,
+                        &mut |ev| match ev {
+                            transfer::Event::Bytes(n) => {
+                                pending += n;
+                                if last.elapsed() < Duration::from_millis(150) {
+                                    return;
+                                }
+                                last = Instant::now();
+                                let n = std::mem::take(&mut pending);
+                                send(fm(FmMsg::Progress {
+                                    id,
+                                    transfer: tid,
+                                    event: transfer::Event::Bytes(n),
+                                }));
+                            }
+                            other => {
+                                if pending > 0 {
                                     let n = std::mem::take(&mut pending);
                                     send(fm(FmMsg::Progress {
                                         id,
@@ -1127,23 +1185,14 @@ impl Runtime {
                                         event: transfer::Event::Bytes(n),
                                     }));
                                 }
-                                other => {
-                                    if pending > 0 {
-                                        let n = std::mem::take(&mut pending);
-                                        send(fm(FmMsg::Progress {
-                                            id,
-                                            transfer: tid,
-                                            event: transfer::Event::Bytes(n),
-                                        }));
-                                    }
-                                    send(fm(FmMsg::Progress {
-                                        id,
-                                        transfer: tid,
-                                        event: other,
-                                    }));
-                                }
+                                send(fm(FmMsg::Progress {
+                                    id,
+                                    transfer: tid,
+                                    event: other,
+                                }));
                             }
-                        });
+                        },
+                    );
                     let result = if cancel.load(Ordering::Relaxed) {
                         Err("Cancelled".to_string())
                     } else {
@@ -1463,6 +1512,7 @@ impl Runtime {
                     })
                 });
                 if !target.container_id.is_empty()
+                    && !host.is_local()
                     && let Some(s) = self.ssh.clone()
                 {
                     self.background(move || {

@@ -199,9 +199,10 @@ pub(crate) fn update(
                 return false;
             }
             let (kind, size) = (entry.kind, entry.size);
-            let path = match side {
-                Side::Local => local_join(&pane.path, &name),
-                Side::Remote => sftp::join(&pane.path, &name),
+            let path = if s.local_side(side) {
+                local_join(&pane.path, &name)
+            } else {
+                sftp::join(&pane.path, &name)
             };
             let e = &mut s.editor;
             if let Some(t) = e.tabs.iter().find(|t| t.side == side && t.path == path) {

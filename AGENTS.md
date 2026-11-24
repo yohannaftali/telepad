@@ -52,7 +52,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/parse.rs` | Pure parsers for each section, unit-tested against `tests/fixtures/` |
 | `src/authorized_keys.rs` | Authorized keys page backend: read-only `list` / `list_all` of `~/.ssh/authorized_keys` → `HostKeys` (`AuthKey`: line, options, key, supported, group from the `#` line above; login fingerprints), `parse_authorized_keys`, validate a pasted key (type, base64, embedded type), SHA256 fingerprint, add/revoke script for `~/.ssh/authorized_keys` (Add into a group: `INSERT_AWK`, `check_group`), lockout guard (`login_keys`, public key from the private key when no `.pub` exists, #126), parallel `apply_all` |
 | `src/db/` | Database browser (#52–#54): `detect` (DB containers / host listeners → `DbTarget`, user from container env), `tunnel` (`ssh -N -L`, closed on drop and by `close_all` on exit), `client` (`Session`: MySQL `mysql` / PostgreSQL `postgres` drivers, metadata, pages, queries, transactional row edits, DDL, cancel; live tests via `TELEPAD_TEST_MYSQL` / `TELEPAD_TEST_PG`), `sql` (quoting, statement split, danger / read-only checks, row SQL), `ddl` (structure editor SQL), `secret` (OS password store) |
-| `src/files/` | File window (#62): `sftp` (own SFTP v3 client over `ssh -s <alias> sftp`: list, stat, pipelined download / upload, mkdir, rename, remove, setstat), `fallback` (hosts without SFTP: `sh` listing + `scp -O`), `rsync` (availability check, `-e ssh` args with `--protect-args`, dry run), `transfer` (`plan`: recursive walk + existing files, `run`: copy via `.telepad-part`, keep mtime), `ops` (#63: `Fs` trait for `LocalFs` / `Sftp`, `check_name`, new folder / file, rename, recursive delete / chmod / measure, `dir_mode` / `file_mode`), `edit` (#64: read / save with `Stamp` check, `.telepad-part`, links followed), `text` (#64: decode / encode keeping CRLF / BOM, find / replace incl. regex, go to line, indent), `syntax` (#64: language by name / `#!`, line lexer → `Tok` spans), local listing helpers; live tests via `TELEPAD_TEST_SSH` (`tests/sshd/` lab image) |
+| `src/files/` | File window (#62; `transfer::Remote` trait: `Sftp` or `ThisComputer` for My Computer #129): `sftp` (own SFTP v3 client over `ssh -s <alias> sftp`: list, stat, pipelined download / upload, mkdir, rename, remove, setstat), `fallback` (hosts without SFTP: `sh` listing + `scp -O`), `rsync` (availability check, `-e ssh` args with `--protect-args`, dry run), `transfer` (`plan`: recursive walk + existing files, `run`: copy via `.telepad-part`, keep mtime), `ops` (#63: `Fs` trait for `LocalFs` / `Sftp`, `check_name`, new folder / file, rename, recursive delete / chmod / measure, `dir_mode` / `file_mode`), `edit` (#64: read / save with `Stamp` check, `.telepad-part`, links followed), `text` (#64: decode / encode keeping CRLF / BOM, find / replace incl. regex, go to line, indent), `syntax` (#64: language by name / `#!`, line lexer → `Tok` spans), local listing helpers; live tests via `TELEPAD_TEST_SSH` (`tests/sshd/` lab image) |
 | `src/docker_actions.rs` | Docker/compose action commands + terminal script (show, confirm, run), read-only "How it runs" (`docker inspect` → `docker run`, compose files, secrets masked) |
 | `src/cluster.rs` | Docker Swarm (managers) and Kubernetes (kubectl / k3s / microk8s) model + parsers for `===SWARM===` / `===KUBE===`; cluster key so several managers show one cluster |
 | `src/hostsync.rs` | Host Management (#58): block-preserving OpenSSH config model (`ConfigFile`: managed single-alias blocks vs kept text), `compare` (rows by alias), `apply` (upsert / delete blocks, new hosts before `Host *` / `Match`), `line_diff`, `write` (only if unchanged since loading; timestamped `.bak`, atomic, permissions kept) |
@@ -65,6 +65,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/rdp.rs` | Remote Desktop settings (#102): `RdpSettings` (address, port, user / domain, `Screen`, multimon, colours, clipboard / drives / printers, `Audio`, admin, gateway, `AuthLevel`, autodetect, extra lines), `validate`, `render` (.rdp text) / `parse` (drops `password 51:b:`), `decode_file` / `encode_file` (UTF-16 LE BOM), `xfreerdp_args` |
 | `src/strategy.rs` | `update.db` (#122): `Strategy` (paused, `Every` on / seconds for ping, live, slow, static; SSH retry), `Check` (title, allowed `range`), `validate`, `human_secs`; `StaticFacts` / `SlowFacts` (`of` / `apply`, also used by `collector::Scope::carry_over`), `Facts`, `SavedFacts` (with age); `UpdateDb` (`open`, `load(now)` → `Loaded`, `load_strategy` / `save_strategy`, `save_facts` / `load_facts(now)`, `set_host_paused` / `paused_hosts`, `prune`), `strategy_path`, `PRAGMA user_version` |
 | `src/login_log.rs` | Log info (#126): read-only `script` (identity, `$SSH_CLIENT`, ancestor pids, journal access probe, `journalctl -t sshd -t sshd-session --since -30d` `Accepted` lines capped at `LIMIT`, plus `authorized_keys::list_script`), `parse` / `parse_line` (short-iso times incl. `+07:00`, publickey / password / keyboard-interactive / certificates, IPv6) → `LoginLog` (`JournalAccess`, `this_session`: the key sshd accepted for this read, `own` keys), `read`, `register_script` / `unregister_script` / `terminal_args` (exact sudo command after Enter) |
+| `src/local.rs` | My Computer (#129): `collect` this computer without SSH (Windows: `sysinfo`, `netstat -ano` → `parse_netstat`, `reg query` reboot pending, `docker` / `podman` CLI in the remote script's formats → `parse::parse_docker`; Linux / macOS: `script.sh` via local `sh -s`), `db_targets` (127.0.0.1 only), `open_terminal` (`platform::open_local_shell`) |
 | `src/prefs.rs` | `preference.db` (#94): named workspaces (`WorkspacePrefs`: `<own>` layout, custom (label, layout), `Current`), `check_label`, `prefs_path`, one-time `import_legacy` of `ui_workspace`, `PRAGMA user_version` |
 
 ### telepad-app (Model–View–Update)
@@ -94,6 +95,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/logins.rs` | Log info pages (#126): `LoginSession` (model), `LoginDraft` (sort asc / desc / newest first, per-column filters, page, typed rows per page, show this PC's logins), `rows` (key names from `authorized_keys` / own keys / My keys, `Who`), `filter_match` (wtbapp rules), `page_range`, `LgMsg` / `LgEffect` (handled in `update.rs` `logins`, restored as `logins:<alias>`) |
 | `src/tests_logins.rs` | Behaviour tests for #126 |
 | `src/tests_strategy.rs` | Behaviour tests for #122 (pause, Update Strategy page, ping rounds, last known facts) |
+| `src/tests_local.rs` | Behaviour tests for #129 (My Computer page, local reads, local file and database windows) |
 
 ### telepad-gui
 
@@ -102,7 +104,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/main.rs` | Arguments, `--open-ssh`; no console window in Windows release builds |
 | `src/app.rs` | eframe app: each frame `runtime.frame()`, `views::draw()`, dispatch the returned `Msg`s |
 | `src/runtime.rs` | Executes `Effect`s (database, ssh, collector, update threads, dialogs, clipboard read/write via `arboard`, OS) and feeds results back as `Msg`s |
-| `src/views/` | One module per screen: `panels` (top bar, status bar), `workspace` (page sidebar, inner windows: title bar, tabs, move / resize / minimize / maximize, minimized strip), `overview`, `detail`, `sensors`, `docker`, `docker_overview`, `ports`, `editor`, `import`, `keys`, `strategy` (Update Strategy page, #122), `logins` (Log info page, #126), `database` (one inner window per connection), `files` (one inner window per host), `text_editor` (its editor window: tabs, gutter, colours, find bar), `host_sync`, `confirm`, `update_window`. Only the main OS window exists; pages and dialogs are drawn inside it |
+| `src/views/` | One module per screen: `panels` (top bar, status bar), `detail` (host page and `local_page`, My Computer #129), `workspace` (page sidebar, inner windows: title bar, tabs, move / resize / minimize / maximize, minimized strip), `overview`, `detail`, `sensors`, `docker`, `docker_overview`, `ports`, `editor`, `import`, `keys`, `strategy` (Update Strategy page, #122), `logins` (Log info page, #126), `database` (one inner window per connection), `files` (one inner window per host), `text_editor` (its editor window: tabs, gutter, colours, find bar), `host_sync`, `confirm`, `update_window`. Only the main OS window exists; pages and dialogs are drawn inside it |
 | `src/widgets.rs` | Shared drawing helpers and colours (bars, status dot, fan, thresholds, action buttons `Act`: red danger / yellow edit / green add / amber caution, `host_menu` (right-click host menu), `light_visuals`) |
 | `src/icons.rs` | Phosphor icon font glyphs and OS logo detection; `assets/` holds the font and logos |
 | `assets/icon/` | App icon (`telepad.png` window icon, `.ico` exe/installer, `.icns` macOS app), generated by `scripts/make-icon.py` |
@@ -120,6 +122,11 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
                                                    (db, ssh, collector, http, OS)
 ```
 
+- **My Computer** (#129): `Win::MyComputer` (layout key `local`) shows `Model::local` (a `HostState` with
+  `HostEntry::local()`, alias `config::LOCAL_ALIAS` = "This computer", which no inventory alias can be);
+  read by `Effect::CollectLocal` while the page is open (`update.rs` `local_due`). File and database
+  windows find it through `update.rs` `host_of`; its file window is `files::Mode::Local` (both panes
+  this computer, `FileSession::local_side`, transfers through `transfer::Remote` = `ThisComputer`).
 - **Views** read `&Model`, may edit `&mut Drafts` (form text, search filter, toggles —
   never I/O), and return `Msg`s. They never call core I/O, `platform`, `rfd` or threads.
 - **`update()`** is the only code that changes the `Model`. It does no I/O, takes the time
@@ -157,8 +164,9 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
   Fourth exception, in-app (owner decision on #52–#54): the **database browser** (`db/`) changes
   database rows and structure only after the user saw the exact SQL and clicked Run (DROP /
   TRUNCATE: table name typed); grid edits post in one transaction, one row per statement. It
-  reaches databases only through `ssh -N -L` (never a direct database port), changes nothing on
-  the host, and stores passwords only in the OS password store (`keyring`), never in `telepad.db`.
+  reaches databases only through `ssh -N -L` (never a direct database port; owner decision on #129:
+  the databases of **My Computer** connect straight to `127.0.0.1:<port>`, no SSH, no other address,
+  `db::client::Session::connect_local`), changes nothing on the host, and stores passwords only in the OS password store (`keyring`), never in `telepad.db`.
   New connections are editable; Read-only is a per-connection switch.
   Fifth exception, in-app (owner decision on #62): the **file window** (`files/`) copies files
   to or from the host only on a user action (Upload / Download, F5, drag and drop), over the
@@ -225,6 +233,7 @@ cargo build --release
 cargo run --release --bin telepad-check -- <alias> [--json]
 cargo run --release --bin telepad-check -- --check-update
 cargo run --release --bin telepad-check -- --logins <alias>   # Log info read (#126)
+cargo run --release --bin telepad-check -- --local [--json]   # My Computer read (#129)
 cargo run --release --bin telepad   # GUI
 ```
 
@@ -293,3 +302,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #122 | feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db | closed | 2026-11-23 |
 | #125 | fix(collector): hosts that drop ICMP ping stay down until the SSH retry after one failed SSH attempt | open | 2026-11-23 |
 | #126 | feat(keys): Log info page — SSH logins from the systemd journal per host, Register / Unregister journal access | closed | 2026-11-24 |
+| #129 | feat(local): My Computer page — monitor this PC like a host, terminal, files and local databases | ready-for-review | 2026-11-24 |
+| #130 | fix(files): whole file row (.. row, icon, Modified, Size cells) selects on click; centre text vertically | ready-for-review | 2026-11-24 |
+| #131 | feat(files): compare directories, synchronize, diff between panes and transfer settings | open | 2026-11-24 |

@@ -2,6 +2,7 @@
 //! Usage: telepad-check [--config <path>] [--json] [alias ...]
 //!        telepad-check --check-update   (ask GitHub for a newer release)
 //!        telepad-check --logins alias ...  (SSH logins from the journal, #126)
+//!        telepad-check --local [--json]  (this computer, #129)
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ fn main() -> ExitCode {
     let (mut cfg, mut db, mut json, mut aliases) = (None, None, false, Vec::new());
     let mut check_update = false;
     let mut logins = false;
+    let mut local = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--config" => cfg = args.next(),
@@ -22,15 +24,20 @@ fn main() -> ExitCode {
             "--json" => json = true,
             "--check-update" => check_update = true,
             "--logins" => logins = true,
+            "--local" => local = true,
             "-h" | "--help" => {
                 println!(
                     "telepad-check [--db <telepad.db>] [--config <ssh config>] [--json] [alias ...]
-\n                     telepad-check [--db <telepad.db>] --check-update"
+\n                     telepad-check [--db <telepad.db>] --check-update\n                     telepad-check --local [--json]"
                 );
                 return ExitCode::SUCCESS;
             }
             _ => aliases.push(a),
         }
+    }
+    if local {
+        let r = telepad_core::local::collect();
+        return report(&[(telepad_core::config::HostEntry::local(), r)], json);
     }
     let ws = match open_workspace(cfg.as_deref(), db.as_deref()) {
         Ok(w) => w,
@@ -91,6 +98,16 @@ fn main() -> ExitCode {
         })
         .collect();
     let results: Vec<_> = handles.into_iter().filter_map(|t| t.join().ok()).collect();
+    report(&results, json)
+}
+
+type Collected = (
+    telepad_core::config::HostEntry,
+    Result<telepad_core::model::HostReport, String>,
+);
+
+/// Print the results (text or JSON); fails when any host failed.
+fn report(results: &[Collected], json: bool) -> ExitCode {
     let failed = results.iter().filter(|(_, r)| r.is_err()).count();
 
     if json {
@@ -106,7 +123,7 @@ fn main() -> ExitCode {
             Err(e) => eprintln!("{e}"),
         }
     } else {
-        for (h, r) in &results {
+        for (h, r) in results {
             println!("== {} ({})", h.alias, h.target());
             match r {
                 Err(e) => println!("   ERROR: {e}"),

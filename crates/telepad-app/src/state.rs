@@ -98,6 +98,9 @@ pub struct Model {
     /// Key sshd accepted for Telepad's login, by alias (from the last Log
     /// info read): shown on the Authorized keys page.
     pub telepad_key: std::collections::BTreeMap<String, String>,
+    /// My Computer (#129): this computer's report, read without SSH while
+    /// its page is open. `entry` is [`HostEntry::local`].
+    pub local: HostState,
 }
 
 /// A key added to / revoked from several hosts.

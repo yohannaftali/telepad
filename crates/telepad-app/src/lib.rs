@@ -53,6 +53,8 @@ mod tests_keys;
 #[cfg(test)]
 mod tests_leave;
 #[cfg(test)]
+mod tests_local;
+#[cfg(test)]
 mod tests_logins;
 #[cfg(test)]
 mod tests_mykeys;

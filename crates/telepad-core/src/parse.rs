@@ -455,7 +455,7 @@ pub fn parse_ipmi(lines: &[String]) -> (bool, Option<String>, Vec<Sensor>) {
 }
 
 /// `[::]`, `*`, `0.0.0.0` -> as-is but unbracketed; strips `%iface` scope.
-fn split_host_port(s: &str) -> Option<(String, u16)> {
+pub(crate) fn split_host_port(s: &str) -> Option<(String, u16)> {
     let (addr, port) = s.rsplit_once(':')?;
     let port = port.parse().ok()?;
     let addr = addr.trim_start_matches('[').trim_end_matches(']');

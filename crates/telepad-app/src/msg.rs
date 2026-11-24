@@ -57,6 +57,17 @@ pub enum Msg {
     /// Results of a ping round: (alias, round trip in ms or no reply).
     Pinged(Vec<(String, Option<f32>)>),
 
+    // ---- My Computer (#129)
+    /// Read this computer again now.
+    LocalRefresh,
+    /// This computer was read (`elapsed`: how long it took).
+    LocalCollected {
+        result: Result<Box<telepad_core::model::HostReport>, String>,
+        elapsed: std::time::Duration,
+    },
+    /// A shell of this computer in a new terminal window.
+    LocalTerminal,
+
     // ---- hosts (views)
     RefreshAll,
     Refresh(usize),
@@ -387,4 +398,8 @@ pub enum Effect {
     Files(crate::files::FmEffect),
     /// Log info pages (#126): read the journal, open the access terminal.
     Logins(crate::logins::LgEffect),
+    /// Read this computer (#129, background) → [`Msg::LocalCollected`].
+    CollectLocal,
+    /// Errors come back as [`Msg::Notice`].
+    OpenLocalTerminal,
 }

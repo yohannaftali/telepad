@@ -99,8 +99,13 @@ fn window(
             ui.label(
                 RichText::new(il(icons::FOLDER, &format!("Files — {}", s.host.alias))).strong(),
             );
-            ui.label(RichText::new(s.host.target()).monospace().weak());
+            if !s.host.is_local() {
+                ui.label(RichText::new(s.host.target()).monospace().weak());
+            }
             match (s.status, s.mode) {
+                (Status::Ready, Mode::Local) => {
+                    ui.label(RichText::new("this computer on both sides").weak());
+                }
                 // A failed connect shows its error and Retry below, not a spinner.
                 (Status::Connecting, _) if s.error.is_some() => {}
                 (Status::Connecting, _) => {
@@ -240,6 +245,7 @@ fn pane(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, side: Side, out: 
     ui.horizontal(|ui| {
         let (icon, title) = match side {
             Side::Local => (icons::DESKTOP, "This computer".to_string()),
+            Side::Remote if s.host.is_local() => (icons::DESKTOP, "This computer".to_string()),
             Side::Remote => (icons::DISKS, s.host.alias.clone()),
         };
         ui.label(RichText::new(il(icon, &title)).strong());
@@ -499,9 +505,11 @@ fn table(
                 d.active = Some(side);
             }
             name_resp.context_menu(|ui| {
-                let (copy, label) = match side {
-                    Side::Local => (Side::Local, "Upload"),
-                    Side::Remote => (Side::Remote, "Download"),
+                let (copy, label) = match (side, s.host.is_local()) {
+                    (Side::Local, false) => (Side::Local, "Upload"),
+                    (Side::Remote, false) => (Side::Remote, "Download"),
+                    (Side::Local, true) => (Side::Local, "Copy to the right"),
+                    (Side::Remote, true) => (Side::Remote, "Copy to the left"),
                 };
                 if ui
                     .button(il(
@@ -574,12 +582,28 @@ fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Ms
         let ready = s.status == Status::Ready;
         let up: Vec<String> = d.selected_local.iter().cloned().collect();
         let down: Vec<String> = d.selected_remote.iter().cloned().collect();
+        let both_local = s.host.is_local();
+        let (up_text, up_tip, down_text, down_tip) = if both_local {
+            (
+                "Copy to right",
+                "Copy the selected files of the left folder into the right one (F5, or drag them)",
+                "Copy to left",
+                "Copy the selected files of the right folder into the left one (F5, or drag them)",
+            )
+        } else {
+            (
+                "Upload",
+                "Copy the selected local files to the host folder (F5, or drag them)",
+                "Download",
+                "Copy the selected host files to the local folder (F5, or drag them)",
+            )
+        };
         if ui
             .add_enabled(
                 ready && !up.is_empty(),
-                egui::Button::new(il(icons::ARROW_RIGHT, "Upload")),
+                egui::Button::new(il(icons::ARROW_RIGHT, up_text)),
             )
-            .on_hover_text("Copy the selected local files to the host folder (F5, or drag them)")
+            .on_hover_text(up_tip)
             .clicked()
         {
             send(
@@ -594,9 +618,9 @@ fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Ms
         if ui
             .add_enabled(
                 ready && !down.is_empty(),
-                egui::Button::new(il(icons::ARROW_LEFT, "Download")),
+                egui::Button::new(il(icons::ARROW_LEFT, down_text)),
             )
-            .on_hover_text("Copy the selected host files to the local folder (F5, or drag them)")
+            .on_hover_text(down_tip)
             .clicked()
         {
             send(

@@ -24,6 +24,11 @@ Only the latest release is supported.
   (not only SSH), which may hold sensitive text; it gives no write access and no root.
 - **Open database…** reaches a database only through `ssh -N -L` over the host's normal
   login (`BatchMode=yes`); no database port is opened and nothing on the host is changed.
+  The one exception is **My Computer**: its own databases are opened on `127.0.0.1` directly
+  (no SSH); any other address is refused.
+- **My Computer** reads this computer read-only and without administrator rights (system
+  information, `netstat -ano`, `reg query`, `docker` / `podman` on Windows; the host script
+  run locally with `sh -s` on Linux / macOS, `sudo -n` only as on hosts).
   Data and structure change only after the user saw the exact SQL and clicked Run
   (`DROP` / `TRUNCATE` also need the table name typed); values are bound parameters and
   names are quoted. **Read-only** makes the server refuse writes for that connection.

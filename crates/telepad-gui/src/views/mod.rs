@@ -95,6 +95,7 @@ fn page(
     now: Instant,
 ) {
     match win {
+        Win::MyComputer => detail::local_page(ui, &m.local, &mut d.ports_nginx_only, out),
         Win::Overview => {
             overview_toolbar(ui, d, out);
             if d.overview_cards {

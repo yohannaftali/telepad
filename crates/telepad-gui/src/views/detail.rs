@@ -239,7 +239,113 @@ pub fn detail(
         }
         return;
     };
+    report_body(ui, h, r, Some(i), cluster_shown_by, nginx_only, out);
+}
 
+/// My Computer (#129): the host page of this computer, read without SSH.
+/// No Copy ssh command, Edit, Clone, Delete, Log info or Remote Desktop:
+/// it is not in the inventory.
+pub fn local_page(ui: &mut egui::Ui, h: &HostState, nginx_only: &mut bool, out: &mut Vec<Msg>) {
+    ui.horizontal_wrapped(|ui| {
+        status_dot(ui, h);
+        icons::os_logo(ui, host_os(h), 26.0);
+        ui.heading("My Computer");
+        if let Some(r) = &h.report
+            && !r.hostname.is_empty()
+        {
+            ui.label(RichText::new(&r.hostname).monospace());
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        if act_button(
+            ui,
+            true,
+            Act::Caution,
+            &il(icons::TERMINAL, "Open Terminal"),
+        )
+        .on_hover_text("A shell of this computer in a new terminal window")
+        .clicked()
+        {
+            out.push(Msg::LocalTerminal);
+        }
+        if act_button(ui, true, Act::Edit, &il(icons::FOLDER, "Open files…"))
+            .on_hover_text(
+                "This computer on both sides: browse folders side by side and copy between them",
+            )
+            .clicked()
+        {
+            out.push(Msg::Files(telepad_app::files::FmMsg::Open(
+                telepad_core::config::LOCAL_ALIAS.to_string(),
+            )));
+        }
+        if ui
+            .add_enabled(!h.loading, egui::Button::new(il(icons::REFRESH, "Refresh")))
+            .clicked()
+        {
+            out.push(Msg::LocalRefresh);
+        }
+        if h.loading {
+            ui.spinner();
+        }
+        if let Some(r) = &h.report {
+            let dbs = telepad_core::local::db_targets(r);
+            let own: Vec<_> = dbs.iter().filter(|t| t.container.is_empty()).collect();
+            if !own.is_empty() {
+                ui.separator();
+            }
+            for t in own {
+                if ui
+                    .button(il(
+                        icons::DATABASE,
+                        &format!("Open {} :{}", t.engine.title(), t.port),
+                    ))
+                    .on_hover_text("Tables, data and queries on 127.0.0.1 of this computer")
+                    .clicked()
+                {
+                    out.push(Msg::Db(telepad_app::db::DbMsg::Open(t.clone())));
+                }
+            }
+        }
+    });
+    ui.label(
+        RichText::new(format!(
+            "updated {}{}",
+            ago(h.updated),
+            h.elapsed.map_or(String::new(), |e| format!(
+                " · took {:.1}s",
+                e.as_secs_f32()
+            ))
+        ))
+        .weak(),
+    )
+    .on_hover_text(
+        "Read while this page is open, at the live interval of Update Strategy (top-right menu); \
+         read-only, without admin rights",
+    );
+    if let Some(e) = &h.error {
+        ui.colored_label(usage_color(95.0), format!("Last read failed: {e}"));
+    }
+    let Some(r) = &h.report else {
+        if h.error.is_none() {
+            ui.label("Reading this computer…");
+        }
+        return;
+    };
+    report_body(ui, h, r, None, None, nginx_only, out);
+}
+
+/// Everything below the header: system, maintenance, usage, disks, network,
+/// sensors, Docker, cluster and ports. `host`: the inventory index, `None`
+/// for My Computer (no host actions).
+fn report_body(
+    ui: &mut egui::Ui,
+    h: &HostState,
+    r: &telepad_core::model::HostReport,
+    host: Option<usize>,
+    cluster_shown_by: Option<&str>,
+    nginx_only: &mut bool,
+    out: &mut Vec<Msg>,
+) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -358,7 +464,7 @@ pub fn detail(
                 });
 
             section(ui, &il(icons::THERMOMETER, "Sensors"));
-            sensors(ui, r, i, out);
+            sensors(ui, r, host, out);
 
             section(ui, &il(icons::CONTAINER, "Docker"));
             match &r.docker.unavailable {
@@ -370,12 +476,14 @@ pub fn detail(
                     if r.docker.containers.is_empty() {
                         ui.label(RichText::new("No containers").weak());
                     } else {
-                        docker_stacks(ui, r, i, &h.entry.alias, host_address(&h.entry), out);
+                        docker_stacks(ui, r, host, &h.entry.alias, host_address(&h.entry), out);
                     }
                 }
             }
 
-            if super::cluster::has_cluster(r) {
+            if let Some(i) = host
+                && super::cluster::has_cluster(r)
+            {
                 section(ui, &il(icons::STACK, "Cluster"));
                 super::cluster::cluster(ui, r, i, cluster_shown_by, out);
             }
