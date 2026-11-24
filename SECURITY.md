@@ -14,9 +14,14 @@ Only the latest release is supported.
 
 - Monitoring only runs read-only commands on hosts; `sudo` is only used as
   `sudo -n` (never prompts) for the BMC readings. Changes happen only through actions
-  the user starts and confirms: Docker / BMC actions in a terminal, and **Authorized keys**
+  the user starts and confirms: Docker / BMC actions and Log info's Register / Unregister
+  Systemd Journal (`sudo usermod -aG` / `gpasswd -d` for the login user, sudo asks for the
+  password) in a terminal, and **Authorized keys**
   (reads `~/.ssh/authorized_keys` to list the keys — read-only; adds or removes one line in the login user's `~/.ssh/authorized_keys` after the user
   types `add` / `revoke`; it refuses to revoke the key Telepad itself logs in with).
+- **Log info** reads SSH logins with plain `journalctl` (no sudo) only when its page opens or on
+  Refresh. The `systemd-journal` group it can add lets the login user read every system log
+  (not only SSH), which may hold sensitive text; it gives no write access and no root.
 - **Open database…** reaches a database only through `ssh -N -L` over the host's normal
   login (`BatchMode=yes`); no database port is opened and nothing on the host is changed.
   Data and structure change only after the user saw the exact SQL and clicked Run

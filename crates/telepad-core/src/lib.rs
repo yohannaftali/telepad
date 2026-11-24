@@ -9,6 +9,7 @@ pub mod files;
 pub mod history;
 pub mod hostsync;
 pub mod local_keys;
+pub mod login_log;
 pub mod model;
 pub mod parse;
 pub mod platform;

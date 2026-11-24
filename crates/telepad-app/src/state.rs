@@ -92,6 +92,12 @@ pub struct Model {
     pub paused_hosts: BTreeSet<String>,
     /// Facts from `update.db` waiting for their host to be loaded, by alias.
     pub restored: std::collections::BTreeMap<String, telepad_core::strategy::SavedFacts>,
+    /// Log info pages (#126), one per host.
+    pub logins: Vec<crate::logins::LoginSession>,
+    pub logins_next: crate::logins::LogId,
+    /// Key sshd accepted for Telepad's login, by alias (from the last Log
+    /// info read): shown on the Authorized keys page.
+    pub telepad_key: std::collections::BTreeMap<String, String>,
 }
 
 /// A key added to / revoked from several hosts.
@@ -158,6 +164,8 @@ pub struct Drafts {
     pub ws_leave: Option<LeaveAsk>,
     /// Update Strategy page (#122): the form and why Save refused it.
     pub strategy: StrategyDraft,
+    /// Log info pages (#126): sort, filters, page.
+    pub logins: std::collections::BTreeMap<crate::logins::LogId, crate::logins::LoginDraft>,
 }
 
 /// The Update Strategy page's form (#122). `paused` is not part of it (the
@@ -403,6 +411,7 @@ impl Default for Drafts {
             ws_area: [1200.0, 700.0],
             ws_leave: None,
             strategy: StrategyDraft::default(),
+            logins: Default::default(),
         }
     }
 }

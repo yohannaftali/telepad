@@ -576,6 +576,7 @@ impl Runtime {
             Effect::HostSync(e) => self.run_hostsync(e),
             Effect::MyKeys(e) => self.run_mykeys(e),
             Effect::Files(e) => self.run_files(e),
+            Effect::Logins(e) => self.run_logins(e),
             Effect::OpenUrl(url) => platform::open_url(&url).err().map(Msg::Notice),
             Effect::Relaunch => match relaunch() {
                 Ok(()) => {
@@ -1587,6 +1588,37 @@ impl Runtime {
         match &self.ws {
             Some(ws) => f(&ws.store).map_err(|e| e.to_string()),
             None => Err("no database".into()),
+        }
+    }
+
+    /// Log info pages (#126): read in the background; the access terminal
+    /// opens at once.
+    fn run_logins(&mut self, e: telepad_app::logins::LgEffect) -> Option<Msg> {
+        use telepad_app::logins::{LgEffect, LgMsg};
+        match e {
+            LgEffect::Read { id, host } => {
+                let s = self.ssh.clone()?;
+                self.background(move || {
+                    Msg::Logins(LgMsg::Loaded {
+                        id,
+                        result: Box::new(telepad_core::login_log::read(&s, &host)),
+                    })
+                });
+                None
+            }
+            LgEffect::Terminal { host, register } => {
+                let s = self.ssh.as_ref()?;
+                let args = telepad_core::login_log::terminal_args(s, &host, register);
+                let what = if register { "Register" } else { "Unregister" };
+                let text = match platform::open_terminal(&s.ssh_program, &args) {
+                    Ok(()) => format!(
+                        "Opened {what} Systemd Journal on {}: press Enter there, type your sudo password, then Refresh",
+                        host.alias
+                    ),
+                    Err(e) => e,
+                };
+                Some(Msg::Notice(text))
+            }
         }
     }
 

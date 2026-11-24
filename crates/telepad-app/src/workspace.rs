@@ -34,6 +34,8 @@ pub enum Win {
     Db(crate::db::DbId),
     /// The editor of a file window session (#64).
     Editor(crate::files::FmId),
+    /// A host's Log info page (#126).
+    Logins(crate::logins::LogId),
 }
 
 impl Win {
@@ -49,7 +51,7 @@ impl Win {
             Win::HostSync => Some("hostsync"),
             Win::Keys => Some("keys"),
             Win::Strategy => Some("strategy"),
-            Win::Host | Win::Files(_) | Win::Db(_) | Win::Editor(_) => None,
+            Win::Host | Win::Files(_) | Win::Db(_) | Win::Editor(_) | Win::Logins(_) => None,
         }
     }
 
@@ -261,10 +263,18 @@ impl Workspace {
         for s in &m.db {
             want.push(Win::Db(s.id));
         }
+        for s in &m.logins {
+            want.push(Win::Logins(s.id));
+        }
         let session = |w: &Win| {
             matches!(
                 w,
-                Win::Host | Win::HostSync | Win::Files(_) | Win::Db(_) | Win::Editor(_)
+                Win::Host
+                    | Win::HostSync
+                    | Win::Files(_)
+                    | Win::Db(_)
+                    | Win::Editor(_)
+                    | Win::Logins(_)
             )
         };
         let gone: Vec<Win> = self
@@ -498,7 +508,7 @@ impl Workspace {
             }
             for t in f[4].split(';') {
                 let key = token_key(t);
-                let known = ["host:", "files:", "editor:", "db:"]
+                let known = ["host:", "files:", "editor:", "db:", "logins:"]
                     .iter()
                     .any(|p| key.len() > p.len() && key.starts_with(p));
                 if !known || self.pending.iter().any(|p| p.key == key) {
@@ -700,6 +710,10 @@ pub fn session_key(m: &Model, w: Win) -> Option<String> {
         Win::Db(id) => format!(
             "db:{}",
             esc(&m.db.iter().find(|s| s.id == id)?.target.key())
+        ),
+        Win::Logins(id) => format!(
+            "logins:{}",
+            esc(&m.logins.iter().find(|s| s.id == id)?.alias)
         ),
         _ => return None,
     })

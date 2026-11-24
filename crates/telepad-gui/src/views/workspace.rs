@@ -51,6 +51,13 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
                 .map_or("Database".into(), |s| s.target.title()),
         ),
         Win::Editor(id) => (icons::CODE, format!("Editor — {}", alias(id))),
+        Win::Logins(id) => (
+            icons::ROWS,
+            m.logins
+                .iter()
+                .find(|s| s.id == id)
+                .map_or("Log info".into(), |s| format!("Log info — {}", s.alias)),
+        ),
     }
 }
 
@@ -67,6 +74,7 @@ fn close_msg(w: Win) -> Msg {
         Win::Keys => Msg::KeysClose,
         Win::Files(id) => Msg::Files(FmMsg::Close(id)),
         Win::Db(id) => Msg::Db(telepad_app::db::DbMsg::Close(id)),
+        Win::Logins(id) => Msg::Logins(telepad_app::logins::LgMsg::Close(id)),
         Win::Editor(id) => Msg::Files(FmMsg::Editor {
             id,
             msg: telepad_app::editor::EdMsg::CloseWindow,
@@ -86,6 +94,7 @@ fn default_size(w: Win) -> Vec2 {
         Win::Files(_) => egui::vec2(1200.0, 720.0),
         Win::Db(_) => egui::vec2(1150.0, 700.0),
         Win::Editor(_) => egui::vec2(1050.0, 720.0),
+        Win::Logins(_) => egui::vec2(1200.0, 640.0),
     }
 }
 

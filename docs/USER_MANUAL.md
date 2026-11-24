@@ -313,7 +313,9 @@ support. Sort by **Flags** to see the most urgent hosts first.
 
 The header shows the status, OS logo, alias and `user@address`. Below it are the buttons
 **Open SSH** / **Open RDP**, **Open files…** (see [Files](#files-upload--download--manage--edit)),
-**Copy ssh command**, **Refresh**, then **Edit**, **Clone** and **Delete**. On a narrow window the buttons (and the top bar) wrap onto a second line instead
+**Copy ssh command**, **Refresh**, then **Edit**, **Clone** and **Delete**, the database
+buttons (**Open MariaDB / MySQL :3306** …, see [Database browser](#database-browser-mariadb--mysql--postgresql))
+and **Log info** (SSH hosts, see [Log info](#log-info-ssh-logins)). On a narrow window the buttons (and the top bar) wrap onto a second line instead
 of being cut off. Below that:
 
 - **System**: OS, kernel, architecture, uptime, CPU model and cores, load average.
@@ -331,6 +333,72 @@ of being cut off. Below that:
 - **Ports in use**: every listening port with the container or process that owns it
   (the process only when the login user may see it); **nginx only** narrows the list to
   the ports nginx serves.
+
+## Log info (SSH logins)
+
+**Log info** in a host's header opens a page (one per host, it comes back with the
+[workspace](#workspaces)) listing who logged in to that host over SSH: when, as which user,
+from which address, how (public key, password, keyboard-interactive) and with which key.
+Telepad reads it from the host's systemd journal with one SSH call when the page opens and
+on **Refresh**, never in the background rounds: `journalctl` **without sudo**, the sshd lines
+of the last 30 days (newest 5 000 at most) and the login user's `~/.ssh/authorized_keys` to
+name the keys. Nothing on the host changes.
+
+Above the table: the login user, how it reads the journal (`systemd-journal`, `adm`, `wheel`
+or root), since when the journal holds entries (on hosts that keep the journal only since
+the last boot this can be short: few rows does not mean few logins), the number of logins,
+and **Telepad logged in as … with …**: the key sshd actually accepted for this read (its
+journal line carries this session's process id). That key is also marked **last used by
+Telepad** on the [Authorized keys](#authorized-keys-list-add-revoke) page.
+
+The table (made-up example):
+
+| Time (host) | User | From | Method | Key type | Fingerprint | Key name | Telepad |
+|---|---|---|---|---|---|---|---|
+| 2026-11-24 08:37:42 | alice | 192.0.2.10 | publickey | ED25519 | SHA256:Qm3x… | id_ed25519 — alice@pc (this PC) | this read |
+| 2026-11-23 17:00:27 | bob | 198.51.100.7 | publickey | ED25519 | SHA256:7hZp… | [developer] bob@example.com | |
+| 2026-11-23 09:12:03 | carol | 198.51.100.8 | password | | | | |
+
+- **Time** is the host's own clock and time zone. **Key name** is the comment (with its
+  `[group]`) from the login user's `authorized_keys`, else a key of this computer, else
+  *unknown key* (a key in another user's file, or one removed since).
+- **Newest first** by default. Click a header to sort ascending, again for descending, a
+  third time for newest first again; empty cells stay last.
+- One **filter** box under each header: text = contains (any case), `=x` equal, `!x` not
+  equal, `>x` / `<x` (numbers by value, times as text, e.g. `>2026-11-20`), `NULL` empty,
+  `!NULL` not empty. **Clear filters** empties them all.
+- **Pages**: ◀ / ▶ and **Rows per page** (type a number and press Enter; 20 by default).
+- **Show this PC's logins** (off by default): logins from this PC's address with a key
+  Telepad logs in with. Telepad does not reuse connections, so every refresh round is one
+  login (about 1 440 a day per host at the default 60 s, see [Update Strategy](#update-strategy));
+  hidden, they do not bury other people's logins. Your own `ssh` from this PC with the
+  same key is hidden with them.
+
+**Journal access.** A normal user cannot read the system journal. When the login user
+cannot, the page says so and shows **Register Systemd Journal**: it opens an SSH terminal
+on the host that prints
+
+```
+sudo usermod -aG systemd-journal <login user>
+```
+
+and runs it after you press Enter; sudo asks for your password there (Telepad never
+handles it). It takes effect on the next login, so click **Refresh** when the terminal says
+*Done*. **Unregister** (shown while the user is in `systemd-journal`) does the same with
+`sudo gpasswd -d <login user> systemd-journal`. Users in `adm` (Debian / Ubuntu) or `wheel`
+(Fedora / RHEL) and root can already read the journal and need neither.
+
+The group only **reads** logs: no root, and logs cannot be changed or deleted. But logs
+can hold sensitive text (sudo command lines of other users, service output, addresses), so
+give it only to the account Telepad logs in with.
+
+| Distribution | Works | Notes |
+|---|---|---|
+| Debian / Ubuntu | yes | journal kept across reboots; `adm` can read it too |
+| Fedora / RHEL / CentOS / Rocky / Alma | yes | the journal is often kept only since the last boot (until `/var/log/journal` exists); `wheel` can read it too |
+| Alpine, BusyBox, NAS without systemd | no | *Journal not available on this host* |
+
+From the command line: `telepad-check --logins <alias>` prints the same read (newest 15).
 
 ## Docker actions
 
@@ -891,7 +959,10 @@ ssh-ed25519 AAAA…  citra@example.com   ← developer
   is no `authorized_keys`, **failed** with the reason on hover when the host could not be
   read). Pick one to see its keys: type, comment, SHA256 fingerprint and options
   (`from=`, `command=` …). The key Telepad itself logs in with is marked
-  **Telepad logs in with this key** and cannot be revoked. A red **Revoke** removes that key
+  **Telepad logs in with this key** and cannot be revoked (also when only the private key
+  file exists: Telepad then reads the public key from it). After the host's
+  [Log info](#log-info-ssh-logins) page was read, the key sshd actually accepted for
+  Telepad is marked **last used by Telepad**. A red **Revoke** removes that key
   from this server; the green **Add key** opens Add / revoke with this server ticked. Keys
   are shown under their group headings when the file has groups. The yellow **Edit file**
   opens the server's `~/.ssh/authorized_keys` in the [editor](#editor) (its file window
@@ -1243,6 +1314,7 @@ telepad.exe --update-db D:\other\update.db  # Update Strategy and last known inf
 telepad-check.exe                        # check all monitored hosts once, text
 telepad-check.exe web01 nas01 --json     # selected hosts, JSON
 telepad-check.exe --check-update         # newer release on GitHub?
+telepad-check.exe --logins web01         # SSH logins from the host's journal (Log info)
 ```
 
 `telepad-check` exits 0 when every host answered and non-zero otherwise, so it fits in

@@ -2,6 +2,40 @@
 
 Newest first.
 
+## [2026-11-24] — feat(keys): Log info page — SSH logins from the journal (#126)
+- Issue #126 addressed on GitHub (branch `126-login-log`).
+- **Log info** button in the host header (SSH hosts, after the database buttons) opens a
+  page per host (restored with the workspace as `logins:<alias>`): `Accepted …` lines of
+  sshd from the last 30 days (`journalctl -t sshd -t sshd-session`, no sudo, newest 5 000),
+  flat table with header sort (asc → desc → newest first), per-column filters (wtbapp
+  rules), pages with typed rows per page (20), key names from `authorized_keys` / this PC's
+  keys, this PC's logins hidden by default. The key sshd accepted for the read (journal
+  pid = this session's ancestor) is shown and marked **last used by Telepad** on Authorized keys.
+- **Register Systemd Journal / Unregister**: terminal with `sudo usermod -aG systemd-journal "$U"`
+  / `sudo gpasswd -d "$U" systemd-journal`, run after Enter (sudo asks). Access check is
+  "journal readable" (also `adm` / `wheel` / root); no systemd → "not available".
+- `login_keys` reads the public key from the private key when no `.pub` exists (lockout
+  guard covers it). `telepad-check --logins <alias>`.
+- Files: core `login_log.rs` (new), `authorized_keys.rs`, `collector.rs`, `lib.rs`; app
+  `logins.rs`, `tests_logins.rs` (new), `state.rs`, `msg.rs`, `update.rs`, `workspace.rs`;
+  gui `views/logins.rs` (new), `detail.rs`, `keys.rs`, `mod.rs`, `workspace.rs`, `runtime.rs`;
+  check `main.rs`; `docs/USER_MANUAL.md`, `README.md`, `SECURITY.md`, `AGENTS.md`.
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 205, app 160, gui 7);
+  `telepad-check --logins` on `mattermost` (Debian 13, `systemd-journal`) and `dockerho`
+  (Ubuntu, reads via `adm`): logins and this session's key found. Not verified yet: GUI
+  (tester), Register / Unregister terminal on a host, Fedora / RHEL host (none at hand).
+
+## [2026-11-24] — feat(keys): Log info page — SSH logins from the systemd journal per host, Register / Unregister journal access
+- Issue #126 created on GitHub
+- Scope: telepad-core (login_log, authorized_keys), telepad-app, telepad-gui, docs
+- Labels: enhancement
+
+## [2026-11-23] — fix(collector): hosts that drop ICMP ping stay down until the SSH retry after one failed SSH attempt
+- Issue #125 created on GitHub
+- Scope: collector (telepad-core `collector.rs`), telepad-app (`scope_at`, `collected` / `pinged`)
+- Labels: bug
+- Related to: #122, #36
+
 ## [2026-11-23] — Telepad 0.9.5
 - **Update Strategy** (#122, ☰ ▸ Update Strategy…): Pause all, or pause single hosts (page,
   host page, right-click menu); per check on / off and interval — ping 30 s, live metrics

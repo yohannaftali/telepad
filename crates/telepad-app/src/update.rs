@@ -1110,6 +1110,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 .map(Effect::Files),
             );
         }
+        Msg::Logins(lm) => fx.extend(logins(m, d, lm, now)),
         Msg::HostSync(hm) => {
             let db: Vec<_> = m.hosts.iter().map(|h| h.entry.clone()).collect();
             let (effects, follow) =
@@ -1133,6 +1134,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
     if hosts_changed {
         place_pending_host(m);
         fx.extend(start_pending_files(m, d, now));
+        fx.extend(start_pending_logins(m, d, now));
     }
     if hosts_changed || collected_host {
         fx.extend(start_pending_dbs(m, d, now));
@@ -1215,6 +1217,122 @@ fn start_page_sessions(m: &mut Model, d: &mut crate::Drafts) -> Vec<Effect> {
             crate::hostsync::HsMsg::Open,
         );
         fx.extend(effects.into_iter().map(Effect::HostSync));
+    }
+    fx
+}
+
+/// Log info pages (#126).
+fn logins(
+    m: &mut Model,
+    d: &mut crate::Drafts,
+    msg: crate::logins::LgMsg,
+    now: Instant,
+) -> Vec<Effect> {
+    use crate::logins::{LgEffect, LgMsg, LoginSession};
+    use crate::workspace::Win;
+    let entry = |m: &Model, alias: &str| {
+        m.hosts
+            .iter()
+            .find(|h| h.entry.alias == alias)
+            .map(|h| h.entry.clone())
+    };
+    let mut fx = Vec::new();
+    match msg {
+        LgMsg::Open(alias) => {
+            if let Some(s) = m.logins.iter().find(|s| s.alias == alias) {
+                m.ws.open(Win::Logins(s.id));
+                return fx;
+            }
+            let Some(host) = entry(m, &alias) else {
+                return fx;
+            };
+            if host.access != Access::Ssh {
+                say(m, now, format!("{alias}: Log info needs SSH"));
+                return fx;
+            }
+            m.logins_next += 1;
+            let id = m.logins_next;
+            m.logins.push(LoginSession {
+                id,
+                alias,
+                loading: true,
+                log: None,
+                read_at: None,
+            });
+            d.logins.insert(id, Default::default());
+            fx.push(Effect::Logins(LgEffect::Read { id, host }));
+        }
+        LgMsg::Refresh(id) => {
+            let Some(alias) = m
+                .logins
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.alias.clone())
+            else {
+                return fx;
+            };
+            let host = entry(m, &alias);
+            let Some(s) = m.logins.iter_mut().find(|s| s.id == id) else {
+                return fx;
+            };
+            match host {
+                Some(host) if !s.loading => {
+                    s.loading = true;
+                    fx.push(Effect::Logins(LgEffect::Read { id, host }));
+                }
+                Some(_) => {}
+                None => s.log = Some(Err(format!("{alias} is no longer in the host list"))),
+            }
+        }
+        LgMsg::Loaded { id, result } => {
+            let Some(s) = m.logins.iter_mut().find(|s| s.id == id) else {
+                return fx;
+            };
+            s.loading = false;
+            s.read_at = Some(now);
+            if let Ok(log) = &*result
+                && let Some(l) = log.this_session()
+                && !l.fingerprint.is_empty()
+            {
+                m.telepad_key.insert(s.alias.clone(), l.fingerprint.clone());
+            }
+            s.log = Some(*result);
+        }
+        LgMsg::Close(id) => {
+            m.logins.retain(|s| s.id != id);
+            d.logins.remove(&id);
+        }
+        LgMsg::Access { id, register } => {
+            let host = m
+                .logins
+                .iter()
+                .find(|s| s.id == id)
+                .and_then(|s| entry(m, &s.alias));
+            if let Some(host) = host {
+                fx.push(Effect::Logins(LgEffect::Terminal { host, register }));
+            }
+        }
+    }
+    fx
+}
+
+/// Log info pages of a restored layout: read them again; a host that is
+/// gone (or has no SSH) is left out.
+fn start_pending_logins(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec<Effect> {
+    let mut fx = Vec::new();
+    if m.hosts.is_empty() {
+        return fx;
+    }
+    for (key, alias, _) in m.ws.pending_of("logins:") {
+        let ssh = m
+            .hosts
+            .iter()
+            .any(|h| h.entry.alias == alias && h.entry.access == Access::Ssh);
+        if !ssh {
+            m.ws.drop_pending(&key);
+            continue;
+        }
+        fx.extend(logins(m, d, crate::logins::LgMsg::Open(alias), now));
     }
     fx
 }
@@ -1707,6 +1825,14 @@ fn switch_to(
     for id in dbs {
         fx.extend(update(state, Msg::Db(crate::db::DbMsg::Close(id)), now));
     }
+    let logs: Vec<_> = state.model.logins.iter().map(|s| s.id).collect();
+    for id in logs {
+        fx.extend(update(
+            state,
+            Msg::Logins(crate::logins::LgMsg::Close(id)),
+            now,
+        ));
+    }
     if state.model.host_sync.is_some() {
         fx.extend(update(
             state,
@@ -1738,6 +1864,7 @@ fn switch_to(
     fx.extend(start_page_sessions(m, d));
     fx.extend(start_pending_files(m, d, now));
     fx.extend(start_pending_dbs(m, d, now));
+    fx.extend(start_pending_logins(m, d, now));
     let mut ws = std::mem::take(&mut m.ws);
     ws.sync(m);
     ws.sync_keys(d.keys.is_some());

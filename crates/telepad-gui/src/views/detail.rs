@@ -116,6 +116,20 @@ pub fn detail(
                 }
             }
         }
+        if h.entry.access == Access::Ssh {
+            ui.separator();
+            if ui
+                .button(il(icons::ROWS, "Log info"))
+                .on_hover_text(
+                    "Who logged in over SSH, with which key, from where and when                      (the host's systemd journal, read without sudo)",
+                )
+                .clicked()
+            {
+                out.push(Msg::Logins(telepad_app::logins::LgMsg::Open(
+                    h.entry.alias.clone(),
+                )));
+            }
+        }
     });
     if !h.entry.note.is_empty() {
         ui.label(RichText::new(&h.entry.note).size(15.0).italics());

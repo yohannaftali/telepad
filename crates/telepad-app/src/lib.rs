@@ -13,6 +13,7 @@ pub mod db;
 pub mod editor;
 pub mod files;
 pub mod hostsync;
+pub mod logins;
 mod msg;
 pub mod mykeys;
 mod state;
@@ -51,6 +52,8 @@ mod tests_hostsync;
 mod tests_keys;
 #[cfg(test)]
 mod tests_leave;
+#[cfg(test)]
+mod tests_logins;
 #[cfg(test)]
 mod tests_mykeys;
 #[cfg(test)]

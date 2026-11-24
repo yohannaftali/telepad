@@ -104,7 +104,11 @@ pub fn docker_action_args(
     terminal_script_args(settings, host, &plan.script())
 }
 
-fn terminal_script_args(settings: &SshSettings, host: &HostEntry, script: &str) -> Vec<String> {
+pub(crate) fn terminal_script_args(
+    settings: &SshSettings,
+    host: &HostEntry,
+    script: &str,
+) -> Vec<String> {
     let mut a = settings.args(host, false);
     a.insert(0, "-t".into());
     let script = script.replace('\r', "");
