@@ -14,6 +14,7 @@ mod files;
 mod host_sync;
 mod import;
 mod keys;
+mod logins;
 mod mykeys;
 mod overview;
 mod panels;
@@ -132,6 +133,7 @@ fn page(
         Win::Files(id) => files::files_page(ui, m, d, id, focused, out, now),
         Win::Db(id) => database::db_page(ui, m, d, id, out),
         Win::Editor(id) => text_editor::editor_page(ui, m, d, id, focused, out),
+        Win::Logins(id) => logins::logins_page(ui, m, d, id, out),
     }
 }
 

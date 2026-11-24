@@ -284,7 +284,9 @@ pub fn parse_result(out: &str) -> Option<KeyOutcome> {
 }
 
 /// Public keys this computer may log in to `host` with: the `.pub` next to its
-/// IdentityFile, the fallback key, and the default `~/.ssh/id_*` keys.
+/// IdentityFile, the fallback key, and the default `~/.ssh/id_*` keys. A key
+/// without a `.pub` file gets its public key from the private key (#126;
+/// OpenSSH keys hold it unencrypted even with a passphrase).
 pub fn login_keys(settings: &SshSettings, host: &HostEntry) -> Vec<(String, PublicKey)> {
     let mut paths = Vec::new();
     if let Some(id) = &host.identity_file {
@@ -305,12 +307,17 @@ pub fn login_keys(settings: &SshSettings, host: &HostEntry) -> Vec<(String, Publ
     paths
         .into_iter()
         .filter_map(|p| {
-            let mut pub_path = p.into_os_string();
-            pub_path.push(".pub");
-            let pub_path = std::path::PathBuf::from(pub_path);
-            let text = std::fs::read_to_string(&pub_path).ok()?;
-            let key = PublicKey::parse(text.lines().next()?).ok()?;
-            Some((pub_path.display().to_string(), key))
+            let pub_path = crate::local_keys::pub_path(&p);
+            if let Ok(text) = std::fs::read_to_string(&pub_path) {
+                let key = PublicKey::parse(text.lines().next()?).ok()?;
+                return Some((pub_path.display().to_string(), key));
+            }
+            if !p.is_file() {
+                return None;
+            }
+            let line = crate::local_keys::inspect(&p).public_line?;
+            let key = PublicKey::parse(&line).ok()?;
+            Some((p.display().to_string(), key))
         })
         .collect()
 }
@@ -844,6 +851,34 @@ mod tests {
         // Refused before any ssh is started.
         assert!(matches!(
             apply(&s, &host, KeyAction::Revoke, &key, None),
+            KeyOutcome::Refused(why) if why.contains("logs in with this key")
+        ));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_login_key_without_pub_file_is_read_from_the_private_key() {
+        use ssh_key::private::{Ed25519Keypair, Ed25519PrivateKey, KeypairData};
+        let kp = Ed25519Keypair::from(Ed25519PrivateKey::from_bytes(&[7u8; 32]));
+        let private =
+            ssh_key::PrivateKey::new(KeypairData::Ed25519(kp), "nopub@example.com").unwrap();
+        let text = private.to_openssh(ssh_key::LineEnding::LF).unwrap();
+        let want = PublicKey::parse(&private.public_key().to_openssh().unwrap()).unwrap();
+
+        let dir = std::env::temp_dir().join(format!("telepad-nopub-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let id = dir.join("id_nopub");
+        std::fs::write(&id, text.as_bytes()).unwrap();
+        let s = SshSettings::new("missing-config".into());
+        let mut host = HostEntry::new("web01");
+        host.identity_file = Some(id.display().to_string());
+        let found = login_keys(&s, &host);
+        let hit = found.iter().find(|(_, k)| k.same_key(&want));
+        assert!(hit.is_some(), "{found:?}");
+        assert_eq!(hit.unwrap().0, id.display().to_string());
+        // The lockout guard covers it.
+        assert!(matches!(
+            apply(&s, &host, KeyAction::Revoke, &want, None),
             KeyOutcome::Refused(why) if why.contains("logs in with this key")
         ));
         std::fs::remove_dir_all(&dir).unwrap();

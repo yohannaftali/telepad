@@ -258,6 +258,8 @@ pub enum Msg {
     HostSync(crate::hostsync::HsMsg),
     /// File windows (#62).
     Files(crate::files::FmMsg),
+    /// Log info pages (#126).
+    Logins(crate::logins::LgMsg),
 }
 
 /// Work for the runtime. Effects are the only way to reach the database, ssh,
@@ -383,4 +385,6 @@ pub enum Effect {
     MyKeys(crate::mykeys::MkEffect),
     /// File windows: connect, list, copy (worker threads per window).
     Files(crate::files::FmEffect),
+    /// Log info pages (#126): read the journal, open the access terminal.
+    Logins(crate::logins::LgEffect),
 }

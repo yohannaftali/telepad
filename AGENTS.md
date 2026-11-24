@@ -50,7 +50,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/script.sh` | Remote read-only collection script, `===SECTION===` markers; tiers `TP_STATIC` (daily by default) / `TP_SLOW` (6 h by default) switched by `collector::Scope`, live sections every round; pending updates only from the local package cache (never `apt-get update`) |
 | `src/bmc_setup.sh` | Interactive, user-started BMC (`ipmitool`) setup — see Conventions |
 | `src/parse.rs` | Pure parsers for each section, unit-tested against `tests/fixtures/` |
-| `src/authorized_keys.rs` | Authorized keys page backend: read-only `list` / `list_all` of `~/.ssh/authorized_keys` → `HostKeys` (`AuthKey`: line, options, key, supported, group from the `#` line above; login fingerprints), `parse_authorized_keys`, validate a pasted key (type, base64, embedded type), SHA256 fingerprint, add/revoke script for `~/.ssh/authorized_keys` (Add into a group: `INSERT_AWK`, `check_group`), lockout guard (`login_keys`), parallel `apply_all` |
+| `src/authorized_keys.rs` | Authorized keys page backend: read-only `list` / `list_all` of `~/.ssh/authorized_keys` → `HostKeys` (`AuthKey`: line, options, key, supported, group from the `#` line above; login fingerprints), `parse_authorized_keys`, validate a pasted key (type, base64, embedded type), SHA256 fingerprint, add/revoke script for `~/.ssh/authorized_keys` (Add into a group: `INSERT_AWK`, `check_group`), lockout guard (`login_keys`, public key from the private key when no `.pub` exists, #126), parallel `apply_all` |
 | `src/db/` | Database browser (#52–#54): `detect` (DB containers / host listeners → `DbTarget`, user from container env), `tunnel` (`ssh -N -L`, closed on drop and by `close_all` on exit), `client` (`Session`: MySQL `mysql` / PostgreSQL `postgres` drivers, metadata, pages, queries, transactional row edits, DDL, cancel; live tests via `TELEPAD_TEST_MYSQL` / `TELEPAD_TEST_PG`), `sql` (quoting, statement split, danger / read-only checks, row SQL), `ddl` (structure editor SQL), `secret` (OS password store) |
 | `src/files/` | File window (#62): `sftp` (own SFTP v3 client over `ssh -s <alias> sftp`: list, stat, pipelined download / upload, mkdir, rename, remove, setstat), `fallback` (hosts without SFTP: `sh` listing + `scp -O`), `rsync` (availability check, `-e ssh` args with `--protect-args`, dry run), `transfer` (`plan`: recursive walk + existing files, `run`: copy via `.telepad-part`, keep mtime), `ops` (#63: `Fs` trait for `LocalFs` / `Sftp`, `check_name`, new folder / file, rename, recursive delete / chmod / measure, `dir_mode` / `file_mode`), `edit` (#64: read / save with `Stamp` check, `.telepad-part`, links followed), `text` (#64: decode / encode keeping CRLF / BOM, find / replace incl. regex, go to line, indent), `syntax` (#64: language by name / `#!`, line lexer → `Tok` spans), local listing helpers; live tests via `TELEPAD_TEST_SSH` (`tests/sshd/` lab image) |
 | `src/docker_actions.rs` | Docker/compose action commands + terminal script (show, confirm, run), read-only "How it runs" (`docker inspect` → `docker run`, compose files, secrets masked) |
@@ -64,6 +64,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/local_keys.rs` | My keys (#101): `scan` (~/.ssh + IdentityFile paths) / `inspect` → `LocalKey` (format, type, fingerprint, comment, passphrase, permission warning), `detect` / `load` (OpenSSH, PPK v2 / v3 incl. Argon2id / AES, PKCS#1, SEC1, PKCS#8 plain / encrypted, DER, PKCS#12, JWK, OpenPGP armoured / binary via `pgp` (#107)), `convert(Target)` incl. public-only, `unsupported` per key type, `generate` (ssh-keygen into a private folder, `protect` with the passphrase, move into place, never overwrite), `convert_file`; own RSA conversion (`to_rsa`: ssh-key 0.6.7's passes `p` twice); live checks `TELEPAD_TEST_KEYGEN`, `TELEPAD_TEST_PPK_DIR` (also writes `.asc` samples for GnuPG) / `TELEPAD_TEST_PUTTYGEN` / `TELEPAD_TEST_GPG` |
 | `src/rdp.rs` | Remote Desktop settings (#102): `RdpSettings` (address, port, user / domain, `Screen`, multimon, colours, clipboard / drives / printers, `Audio`, admin, gateway, `AuthLevel`, autodetect, extra lines), `validate`, `render` (.rdp text) / `parse` (drops `password 51:b:`), `decode_file` / `encode_file` (UTF-16 LE BOM), `xfreerdp_args` |
 | `src/strategy.rs` | `update.db` (#122): `Strategy` (paused, `Every` on / seconds for ping, live, slow, static; SSH retry), `Check` (title, allowed `range`), `validate`, `human_secs`; `StaticFacts` / `SlowFacts` (`of` / `apply`, also used by `collector::Scope::carry_over`), `Facts`, `SavedFacts` (with age); `UpdateDb` (`open`, `load(now)` → `Loaded`, `load_strategy` / `save_strategy`, `save_facts` / `load_facts(now)`, `set_host_paused` / `paused_hosts`, `prune`), `strategy_path`, `PRAGMA user_version` |
+| `src/login_log.rs` | Log info (#126): read-only `script` (identity, `$SSH_CLIENT`, ancestor pids, journal access probe, `journalctl -t sshd -t sshd-session --since -30d` `Accepted` lines capped at `LIMIT`, plus `authorized_keys::list_script`), `parse` / `parse_line` (short-iso times incl. `+07:00`, publickey / password / keyboard-interactive / certificates, IPv6) → `LoginLog` (`JournalAccess`, `this_session`: the key sshd accepted for this read, `own` keys), `read`, `register_script` / `unregister_script` / `terminal_args` (exact sudo command after Enter) |
 | `src/prefs.rs` | `preference.db` (#94): named workspaces (`WorkspacePrefs`: `<own>` layout, custom (label, layout), `Current`), `check_label`, `prefs_path`, one-time `import_legacy` of `ui_workspace`, `PRAGMA user_version` |
 
 ### telepad-app (Model–View–Update)
@@ -90,6 +91,8 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_keys.rs` | Behaviour tests for the Authorized keys page |
 | `src/mykeys.rs` | My keys tab (#101): `MyKeys` (model), `MyKeysDraft` (selection, `GenForm`, `ConvertForm`; passphrases as `Secret`), `MkMsg` / `MkEffect`, `update`, `used_by` / `authorized_on` |
 | `src/tests_mykeys.rs` | Behaviour tests for the My keys tab |
+| `src/logins.rs` | Log info pages (#126): `LoginSession` (model), `LoginDraft` (sort asc / desc / newest first, per-column filters, page, typed rows per page, show this PC's logins), `rows` (key names from `authorized_keys` / own keys / My keys, `Who`), `filter_match` (wtbapp rules), `page_range`, `LgMsg` / `LgEffect` (handled in `update.rs` `logins`, restored as `logins:<alias>`) |
+| `src/tests_logins.rs` | Behaviour tests for #126 |
 | `src/tests_strategy.rs` | Behaviour tests for #122 (pause, Update Strategy page, ping rounds, last known facts) |
 
 ### telepad-gui
@@ -99,7 +102,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/main.rs` | Arguments, `--open-ssh`; no console window in Windows release builds |
 | `src/app.rs` | eframe app: each frame `runtime.frame()`, `views::draw()`, dispatch the returned `Msg`s |
 | `src/runtime.rs` | Executes `Effect`s (database, ssh, collector, update threads, dialogs, clipboard read/write via `arboard`, OS) and feeds results back as `Msg`s |
-| `src/views/` | One module per screen: `panels` (top bar, status bar), `workspace` (page sidebar, inner windows: title bar, tabs, move / resize / minimize / maximize, minimized strip), `overview`, `detail`, `sensors`, `docker`, `docker_overview`, `ports`, `editor`, `import`, `keys`, `strategy` (Update Strategy page, #122), `database` (one inner window per connection), `files` (one inner window per host), `text_editor` (its editor window: tabs, gutter, colours, find bar), `host_sync`, `confirm`, `update_window`. Only the main OS window exists; pages and dialogs are drawn inside it |
+| `src/views/` | One module per screen: `panels` (top bar, status bar), `workspace` (page sidebar, inner windows: title bar, tabs, move / resize / minimize / maximize, minimized strip), `overview`, `detail`, `sensors`, `docker`, `docker_overview`, `ports`, `editor`, `import`, `keys`, `strategy` (Update Strategy page, #122), `logins` (Log info page, #126), `database` (one inner window per connection), `files` (one inner window per host), `text_editor` (its editor window: tabs, gutter, colours, find bar), `host_sync`, `confirm`, `update_window`. Only the main OS window exists; pages and dialogs are drawn inside it |
 | `src/widgets.rs` | Shared drawing helpers and colours (bars, status dot, fan, thresholds, action buttons `Act`: red danger / yellow edit / green add / amber caution, `host_menu` (right-click host menu), `light_visuals`) |
 | `src/icons.rs` | Phosphor icon font glyphs and OS logo detection; `assets/` holds the font and logos |
 | `assets/icon/` | App icon (`telepad.png` window icon, `.ico` exe/installer, `.icns` macOS app), generated by `scripts/make-icon.py` |
@@ -142,6 +145,10 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
   prints the exact command and runs it only after Enter (`yes` for kill / remove / compose down).
   Container IDs, project names and paths from labels are validated and single-quoted.
   Portainer-managed stacks are never changed from Telepad (Open in Portainer only).
+  Also in a user-opened terminal (owner decision on #126): **Log info**'s Register / Unregister
+  Systemd Journal (`login_log.rs`) prints `sudo usermod -aG systemd-journal "$U"` /
+  `sudo gpasswd -d "$U" systemd-journal` (`U=$(id -un)`), runs it after Enter and lets sudo ask
+  for the password. Reading the logins is plain `journalctl` without sudo, only on open / Refresh.
   Third exception, in-app (owner decision on #49): **Authorized keys** (`authorized_keys.rs`; #78
   lists each host's `~/.ssh/authorized_keys` read-only, `cat` only) adds or
   removes one validated public key in the login user's `~/.ssh/authorized_keys` on the chosen
@@ -217,6 +224,7 @@ cargo test --workspace
 cargo build --release
 cargo run --release --bin telepad-check -- <alias> [--json]
 cargo run --release --bin telepad-check -- --check-update
+cargo run --release --bin telepad-check -- --logins <alias>   # Log info read (#126)
 cargo run --release --bin telepad   # GUI
 ```
 
@@ -283,3 +291,5 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #111 | fix(history): neutralise formula cells in the CSV export | closed | 2026-11-22 |
 | #112 | fix(keys): restrict the generated key before moving it; ACL by SID, permission failure as a warning | closed | 2026-11-22 |
 | #122 | feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db | closed | 2026-11-23 |
+| #125 | fix(collector): hosts that drop ICMP ping stay down until the SSH retry after one failed SSH attempt | open | 2026-11-23 |
+| #126 | feat(keys): Log info page — SSH logins from the systemd journal per host, Register / Unregister journal access | ready-for-review | 2026-11-24 |

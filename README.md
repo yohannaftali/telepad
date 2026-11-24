@@ -26,6 +26,9 @@ minimized, maximized, tabbed and arranged, kept in named workspaces like MikroTi
   and add or revoke one SSH public key on many hosts at once; **My keys** lists the key
   pairs on this computer, generates new ones (`ssh-keygen`, Ed25519 by default) and converts
   them between OpenSSH, PuTTY `.ppk`, PEM, PKCS#8, PKCS#12, JWK, DER and OpenPGP (GPG)
+- **Log info**: per host, who logged in over SSH, with which key, from where and when
+  (the host's systemd journal, read without sudo; one table with sort, filters and pages),
+  with a terminal to give the login user journal access (`systemd-journal`) or take it away
 - **Host Management**: add, import (OpenSSH config, JSON, pasted text) and export hosts;
   Telepad's hosts next to `~/.ssh/config` (or another config file); copy, edit or delete
   per host, merge / replace / sync, with a preview and a backup before the file is written

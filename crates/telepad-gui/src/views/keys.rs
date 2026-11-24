@@ -192,10 +192,14 @@ fn by_server(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>
                                 );
                             }
                             for ak in h.keys.iter().filter(|k| k.group.as_deref() == g) {
+                                let fp = ak.key.fingerprint();
                                 key_row(
                                     ui,
                                     ak,
-                                    h.login.contains(&ak.key.fingerprint()),
+                                    (
+                                        h.login.contains(&fp),
+                                        m.telepad_key.get(&alias) == Some(&fp),
+                                    ),
                                     &alias,
                                     running,
                                     ok,
@@ -213,7 +217,8 @@ fn by_server(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>
 fn key_row(
     ui: &mut egui::Ui,
     ak: &AuthKey,
-    login: bool,
+    // (Telepad logs in with it, sshd accepted it for Telepad's last read)
+    (login, used): (bool, bool),
     alias: &str,
     running: bool,
     ok: egui::Color32,
@@ -230,6 +235,10 @@ fn key_row(
             }));
             if login {
                 ui.colored_label(ok, format!("{} Telepad logs in with this key", icons::LOCK));
+            }
+            if used {
+                ui.colored_label(ok, format!("{} last used by Telepad", icons::CHECK))
+                    .on_hover_text("sshd accepted this key for Telepad's login (seen on the host's Log info page)");
             }
         });
         ui.label(RichText::new(ak.key.fingerprint()).monospace().small());
@@ -358,6 +367,10 @@ fn by_key(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {
                             ui.label(il(icons::DESKTOP, alias));
                             if *login {
                                 ui.colored_label(ok, format!("{} login key", icons::LOCK));
+                            }
+                            if m.telepad_key.get(alias) == Some(&kh.fingerprint) {
+                                ui.colored_label(ok, format!("{} last used by Telepad", icons::CHECK))
+                                    .on_hover_text("sshd accepted this key for Telepad's login (seen on the host's Log info page)");
                             }
                             let why = if *login {
                                 Some("Telepad logs in to this host with this key")

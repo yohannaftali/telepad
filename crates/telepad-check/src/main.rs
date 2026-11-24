@@ -1,6 +1,7 @@
 //! Headless check: collect hosts once and print the result.
 //! Usage: telepad-check [--config <path>] [--json] [alias ...]
 //!        telepad-check --check-update   (ask GitHub for a newer release)
+//!        telepad-check --logins alias ...  (SSH logins from the journal, #126)
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -13,12 +14,14 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let (mut cfg, mut db, mut json, mut aliases) = (None, None, false, Vec::new());
     let mut check_update = false;
+    let mut logins = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--config" => cfg = args.next(),
             "--db" => db = args.next(),
             "--json" => json = true,
             "--check-update" => check_update = true,
+            "--logins" => logins = true,
             "-h" | "--help" => {
                 println!(
                     "telepad-check [--db <telepad.db>] [--config <ssh config>] [--json] [alias ...]
@@ -74,6 +77,9 @@ fn main() -> ExitCode {
     };
 
     let settings = Arc::new(ws.settings());
+    if logins {
+        return run_logins(&settings, &selected);
+    }
     let handles: Vec<_> = selected
         .into_iter()
         .map(|h| {
@@ -245,5 +251,51 @@ fn run_check_update(ws: &telepad_core::Workspace) -> ExitCode {
             eprintln!("update check failed (github.com/{repo}): {e}");
             ExitCode::from(2)
         }
+    }
+}
+
+/// `--logins`: the Log info page's read (#126), newest 15 logins per host.
+fn run_logins(s: &collector::SshSettings, hosts: &[telepad_core::config::HostEntry]) -> ExitCode {
+    use telepad_core::login_log::{self, JournalAccess};
+    let mut failed = false;
+    for h in hosts {
+        println!("== {} ({})", h.alias, h.target());
+        let log = match login_log::read(s, h) {
+            Ok(l) => l,
+            Err(e) => {
+                println!("   ERROR: {e}");
+                failed = true;
+                continue;
+            }
+        };
+        let access = match log.access {
+            JournalAccess::Readable => "readable",
+            JournalAccess::Denied => "denied (Register Systemd Journal)",
+            JournalAccess::NoJournal => "no journal on this host",
+        };
+        println!(
+            "   user {} · groups {} · journal {access} · since {}",
+            log.user,
+            log.groups.join(" "),
+            log.first.as_deref().unwrap_or("?")
+        );
+        let used = log.this_session().map(|l| l.fingerprint.clone());
+        println!(
+            "   logins {}{} · this session: {}",
+            log.logins.len(),
+            if log.truncated { " (limit)" } else { "" },
+            used.as_deref().unwrap_or("not found")
+        );
+        for l in log.logins.iter().rev().take(15) {
+            println!(
+                "   {}  {:<10} {:<16} {:<10} {} {}",
+                l.time, l.user, l.from, l.method, l.key_type, l.fingerprint
+            );
+        }
+    }
+    if failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     }
 }
