@@ -292,11 +292,19 @@ fn table_inner(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::login
                         None if c == Col::Time => format!(" {}", icons::CARET_DOWN),
                         _ => String::new(),
                     };
+                    // The whole title line of the header sorts (#137); the
+                    // filter box under it stays a text field.
+                    let line = ui
+                        .horizontal(|ui| {
+                            crate::widgets::cell_text(
+                                ui,
+                                RichText::new(format!("{}{arrow}", c.title())).strong(),
+                            );
+                            ui.add_space(ui.available_width());
+                        })
+                        .response;
                     if ui
-                        .add(
-                            egui::Label::new(RichText::new(format!("{}{arrow}", c.title())).strong())
-                                .sense(egui::Sense::click()),
-                        )
+                        .interact(line.rect, ui.scope_id().with(("sort", c.title())), egui::Sense::click())
                         .on_hover_text("Click: ascending → descending → newest first")
                         .clicked()
                     {

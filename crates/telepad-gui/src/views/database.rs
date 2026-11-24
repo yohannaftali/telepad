@@ -15,7 +15,7 @@ use telepad_core::db::{
 };
 
 use crate::icons::{self, label as il};
-use crate::widgets::{Act, act_button, act_small, act_text, usage_color};
+use crate::widgets::{Act, act_button, act_small, act_text, cell_click, cell_text, usage_color};
 
 const ROW: f32 = 20.0;
 /// Characters of a value shown in a grid cell.
@@ -1371,6 +1371,7 @@ fn data_grid(
                 .striped(true)
                 .resizable(true)
                 .auto_shrink([false, false])
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .column(TCol::exact(52.0))
                 .columns(TCol::initial(140.0).at_least(40.0).clip(true), ncols)
                 .header(ROW + 2.0, |mut h| {
@@ -1384,11 +1385,8 @@ fn data_grid(
                                 Some((n, true)) if n == c => format!(" {}", icons::CARET_DOWN),
                                 _ => String::new(),
                             };
-                            let resp = ui
-                                .add(
-                                    egui::Label::new(RichText::new(format!("{c}{arrow}")).strong())
-                                        .sense(egui::Sense::click()),
-                                )
+                            cell_text(ui, RichText::new(format!("{c}{arrow}")).strong());
+                            let resp = cell_click(ui, ("sort", c))
                                 .on_hover_text("Sort: ascending → descending → off");
                             if resp.clicked() {
                                 send(
@@ -1423,10 +1421,8 @@ fn data_grid(
                             if deleted {
                                 t = t.strikethrough().color(deleted_color);
                             }
-                            if ui
-                                .add(egui::Label::new(t).sense(egui::Sense::click()))
-                                .clicked()
-                            {
+                            cell_text(ui, t);
+                            if cell_click(ui, "rownum").clicked() {
                                 d.selected_row = Some(r);
                             }
                         });
@@ -1510,7 +1506,8 @@ fn cell(
     if deleted {
         rt = rt.strikethrough().color(red());
     }
-    let resp = ui.add(egui::Label::new(rt).truncate().sense(egui::Sense::click()));
+    cell_text(ui, rt);
+    let resp = cell_click(ui, ("cell", c));
     if resp.clicked() {
         d.selected_row = Some(r);
     }
@@ -1806,6 +1803,7 @@ fn result_grid(
                 .striped(true)
                 .resizable(true)
                 .auto_shrink([false, false])
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .columns(TCol::initial(140.0).at_least(40.0).clip(true), n)
                 .header(ROW + 2.0, |mut h| {
                     for c in &g.columns {
@@ -1824,9 +1822,8 @@ fn result_grid(
                                 if null {
                                     rt = rt.weak().italics();
                                 }
-                                let resp = ui.add(
-                                    egui::Label::new(rt).truncate().sense(egui::Sense::click()),
-                                );
+                                cell_text(ui, rt);
+                                let resp = cell_click(ui, ("q", ci));
                                 resp.context_menu(|ui| {
                                     if let Some(v) = c.as_value() {
                                         if ui.button(il(icons::COPY, "Copy value")).clicked() {

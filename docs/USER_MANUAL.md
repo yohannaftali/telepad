@@ -794,7 +794,7 @@ windows can be open at once, one per host.
 - **Panes**: each has **Up**, **Home** and **Refresh**, the folder path (type a path and
   press Enter to go there; on this computer `~` is your home folder) and a filter box that narrows the list
   by name. The columns are Name, Size, Modified (UTC) and Permissions, plus Owner on the
-  host side; click a header to sort, click it again to reverse. Folders are listed first.
+  host side; click a header (anywhere in it) to sort, click it again to reverse. Folders are listed first.
   - Click anywhere on a row (icon, name, size, date, permissions) to select it; Ctrl+click
     adds or removes rows, Shift+click selects every row from the one clicked last. The pane
     title shows how many are selected. The **..** row can be highlighted too, but it is
@@ -1251,7 +1251,8 @@ cannot reach the database address, the dialog says so.
 **Data tab**
 
 - 1000 rows per page (100 / 500 / 5000 in the page box), **◀ ▶** for the previous /
-  next page, **↻** to reload. Click a column header to sort: ascending, descending, off.
+  next page, **↻** to reload. Click a column header (anywhere in it) to sort: ascending,
+  descending, off. Click anywhere in a cell to select its row.
 - The filter box takes a `WHERE` condition in SQL, e.g. `city = 'Springfield'`; Enter or
   **Filter** applies it, **Clear** removes it.
 - NULL is shown as a grey *NULL*. Long values and binary data are cut (the full length is

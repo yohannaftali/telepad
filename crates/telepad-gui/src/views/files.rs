@@ -465,13 +465,12 @@ fn table(
     tb.header(ROW, |mut h| {
         for (col, title) in &cols {
             h.col(|ui| {
-                if ui
-                    .add(
-                        egui::Label::new(RichText::new(format!("{title}{}", arrow(*col))).strong())
-                            .sense(egui::Sense::click()),
-                    )
-                    .clicked()
-                {
+                cell(
+                    ui,
+                    RichText::new(format!("{title}{}", arrow(*col))).strong(),
+                );
+                // The whole header cell sorts, not only its text (#137).
+                if crate::widgets::cell_click(ui, ("sort", *title)).clicked() {
                     send(
                         out,
                         FmMsg::Sort {

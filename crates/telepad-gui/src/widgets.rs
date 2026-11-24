@@ -612,6 +612,22 @@ pub fn flag_chips(ui: &mut egui::Ui, flags: &[Flag]) {
     }
 }
 
+/// The click of a whole table cell (#137): put the cell's text in as a
+/// plain label (not selectable, not clickable), then this takes clicks,
+/// double-clicks and right-clicks anywhere in the cell, around the text too.
+pub fn cell_click(
+    ui: &mut egui::Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+) -> egui::Response {
+    let rect = ui.max_rect();
+    ui.interact(rect, ui.scope_id().with(salt), egui::Sense::click())
+}
+
+/// Text of a table cell that leaves the click to [`cell_click`].
+pub fn cell_text(ui: &mut egui::Ui, t: impl Into<egui::WidgetText>) -> egui::Response {
+    ui.add(egui::Label::new(t).truncate().selectable(false))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
