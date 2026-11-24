@@ -364,7 +364,9 @@ fn table(
         .resizable(true)
         .auto_shrink([false, false])
         .max_scroll_height(height)
-        .sense(egui::Sense::click())
+        // The whole row selects, opens and drags (#130); cells are plain text.
+        .sense(egui::Sense::click_and_drag())
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(Column::initial(190.0).at_least(100.0).clip(true))
         .column(Column::initial(70.0).clip(true))
         .column(Column::initial(108.0).clip(true))
@@ -415,79 +417,78 @@ fn table(
         }
     })
     .body(|body| {
+        let order: Vec<&str> = rows.iter().map(|e| e.name.as_str()).collect();
         body.rows(ROW, n, |mut row| {
             let i = row.index();
             if has_up && i == 0 {
+                row.set_selected(d.parent_selected.contains(&side));
                 row.col(|ui| {
-                    ui.label(format!("{} ..", icons::FOLDER));
+                    cell(ui, format!("{} ..", icons::FOLDER));
                 });
                 for _ in 1..cols.len() {
                     row.col(|_| {});
                 }
-                if row.response().double_clicked() {
+                let r = row.response();
+                if r.double_clicked() {
                     send(out, FmMsg::Up { id, side });
+                } else if r.clicked() {
+                    d.active = Some(side);
+                    d.click_parent(side);
                 }
                 return;
             }
             let e = &rows[i - usize::from(has_up)];
             let selected = d.selected(side).contains(&e.name);
             row.set_selected(selected);
-            let mut name_resp = None;
             row.col(|ui| {
                 let icon = match (e.is_dir(), e.kind) {
                     (true, _) => icons::FOLDER,
                     (false, Kind::Link) => icons::ARROW_RIGHT,
                     _ => icons::INFO,
                 };
+                let mut t = RichText::new(format!("{icon} {}", e.name));
+                if e.hidden {
+                    t = t.weak();
+                }
+                cell(ui, t);
+            });
+            row.col(|ui| {
+                if !e.is_dir() {
+                    cell(ui, human_size(e.size));
+                }
+            });
+            row.col(|ui| {
+                cell(ui, RichText::new(time_text(e.mtime)).monospace().small());
+            });
+            row.col(|ui| {
+                cell(ui, RichText::new(perm_text(e.perm)).monospace().small());
+            });
+            if remote {
+                row.col(|ui| {
+                    cell(ui, e.owner.as_str());
+                });
+            }
+            // One response for the whole row: click (select), double-click
+            // (open), drag (copy), right-click (menu).
+            let name_resp = row.response();
+            if name_resp.drag_started() {
                 let names: Vec<String> = if selected {
                     d.selected(side).iter().cloned().collect()
                 } else {
                     vec![e.name.clone()]
                 };
-                let mut t = RichText::new(format!("{icon} {}", e.name));
-                if e.hidden {
-                    t = t.weak();
-                }
-                // One widget for click (select), double-click (open) and drag (copy).
-                let r = ui.add(
-                    egui::Label::new(t)
-                        .truncate()
-                        .selectable(false)
-                        .sense(egui::Sense::click_and_drag()),
+                egui::DragAndDrop::set_payload(
+                    &name_resp.ctx,
+                    DragFiles {
+                        window: id,
+                        from: side,
+                        names,
+                    },
                 );
-                if r.drag_started() {
-                    egui::DragAndDrop::set_payload(
-                        ui.ctx(),
-                        DragFiles {
-                            window: id,
-                            from: side,
-                            names,
-                        },
-                    );
-                }
-                if r.dragged() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                }
-                name_resp = Some(r);
-            });
-            row.col(|ui| {
-                if !e.is_dir() {
-                    ui.label(human_size(e.size));
-                }
-            });
-            row.col(|ui| {
-                ui.label(RichText::new(time_text(e.mtime)).monospace().small());
-            });
-            row.col(|ui| {
-                ui.label(RichText::new(perm_text(e.perm)).monospace().small());
-            });
-            if remote {
-                row.col(|ui| {
-                    ui.label(&e.owner);
-                });
             }
-            let resp = row.response();
-            let name_resp = name_resp.map(|r| r | resp.clone()).unwrap_or(resp);
+            if name_resp.dragged() {
+                name_resp.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
             if name_resp.secondary_clicked() && !selected {
                 // Right-click acts on the row under the mouse.
                 let sel = d.selected_mut(side);
@@ -551,21 +552,19 @@ fn table(
                 }
             } else if name_resp.clicked() {
                 d.active = Some(side);
-                let ctrl = name_resp
+                let (ctrl, shift) = name_resp
                     .ctx
-                    .input(|i| i.modifiers.command || i.modifiers.ctrl);
-                let sel = d.selected_mut(side);
-                if ctrl {
-                    if !sel.remove(&e.name) {
-                        sel.insert(e.name.clone());
-                    }
-                } else {
-                    sel.clear();
-                    sel.insert(e.name.clone());
-                }
+                    .input(|i| (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift));
+                d.click_row(side, &e.name, &order, ctrl, shift);
             }
         });
     });
+}
+
+/// Text in a file-list cell: not selectable and not clickable itself, so the
+/// row under it takes the click and the pointer stays an arrow (#130).
+fn cell(ui: &mut egui::Ui, t: impl Into<egui::WidgetText>) {
+    ui.add(egui::Label::new(t).truncate().selectable(false));
 }
 
 fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>, now: Instant) {

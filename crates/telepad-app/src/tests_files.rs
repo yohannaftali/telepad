@@ -1033,3 +1033,39 @@ fn copy_path_and_properties() {
     );
     assert!(fs(&s).dialog.is_none());
 }
+
+#[test]
+fn row_clicks_select_like_a_file_manager() {
+    // #130: plain click, Ctrl toggles, Shift selects a range from the last
+    // clicked row; the `..` row is highlighted alone and leaves on navigation.
+    let mut d = FileDraft::default();
+    let order = ["a", "b", "c", "d"];
+    let sel = |d: &FileDraft| d.selected(Side::Local).iter().cloned().collect::<Vec<_>>();
+    d.click_row(Side::Local, "b", &order, false, false);
+    assert_eq!(sel(&d), ["b"]);
+    d.click_row(Side::Local, "d", &order, false, true);
+    assert_eq!(sel(&d), ["b", "c", "d"]);
+    d.click_row(Side::Local, "c", &order, true, false);
+    assert_eq!(sel(&d), ["b", "d"]);
+    d.click_row(Side::Local, "a", &order, true, true);
+    assert_eq!(sel(&d), ["a", "b", "c", "d"]);
+    d.click_parent(Side::Local);
+    assert!(sel(&d).is_empty());
+    assert!(d.parent_selected.contains(&Side::Local));
+    d.click_row(Side::Local, "a", &order, false, false);
+    assert!(!d.parent_selected.contains(&Side::Local));
+    // Shift without an earlier click selects just the row.
+    d.click_row(Side::Remote, "c", &order, false, true);
+    assert_eq!(d.selected(Side::Remote).len(), 1);
+
+    let (mut s, id) = opened(Mode::Sftp);
+    draft(&mut s).click_parent(Side::Local);
+    send(
+        &mut s,
+        FmMsg::Up {
+            id,
+            side: Side::Local,
+        },
+    );
+    assert!(draft(&mut s).parent_selected.is_empty());
+}

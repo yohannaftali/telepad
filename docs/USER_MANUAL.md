@@ -761,9 +761,11 @@ windows can be open at once, one per host.
   press Enter to go there; on this computer `~` is your home folder) and a filter box that narrows the list
   by name. The columns are Name, Size, Modified (UTC) and Permissions, plus Owner on the
   host side; click a header to sort, click it again to reverse. Folders are listed first.
-  - Click a row to select it; Ctrl+click adds or removes rows. The pane title shows how
-    many are selected.
-  - Double-click a folder (or **..**) to open it.
+  - Click anywhere on a row (icon, name, size, date, permissions) to select it; Ctrl+click
+    adds or removes rows, Shift+click selects every row from the one clicked last. The pane
+    title shows how many are selected. The **..** row can be highlighted too, but it is
+    never copied, deleted or changed.
+  - Double-click a folder (or **..**) to open it; drag any part of a row to copy it.
   - Both folders are remembered per host for the next time the window opens.
 - **Copy** the selected files and folders (folders with everything in them):
   - **Upload** (local → host folder) or **Download** (host → local folder), or

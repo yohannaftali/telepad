@@ -355,6 +355,10 @@ pub struct FileDraft {
     pub history_dir: Option<Direction>,
     pub history_failed: bool,
     pub history_clear: bool,
+    /// Panes whose `..` row is highlighted (#130; never copied or deleted).
+    pub parent_selected: BTreeSet<Side>,
+    /// Row clicked last per pane: Shift+click selects from it (#130).
+    pub anchor: BTreeMap<Side, String>,
 }
 
 impl FileDraft {
@@ -369,6 +373,49 @@ impl FileDraft {
             Side::Local => &mut self.selected_local,
             Side::Remote => &mut self.selected_remote,
         }
+    }
+    /// Nothing selected in this pane (also not its `..` row).
+    pub fn clear_selection(&mut self, side: Side) {
+        self.selected_mut(side).clear();
+        self.parent_selected.remove(&side);
+        self.anchor.remove(&side);
+    }
+    /// A click on a row (#130): plain = only this row, Ctrl = toggle it,
+    /// Shift = the rows from the last clicked one to this (in `order`).
+    pub fn click_row(&mut self, side: Side, name: &str, order: &[&str], ctrl: bool, shift: bool) {
+        self.parent_selected.remove(&side);
+        let from = self
+            .anchor
+            .get(&side)
+            .and_then(|a| order.iter().position(|n| n == a));
+        let to = order.iter().position(|n| *n == name);
+        let sel = self.selected_mut(side);
+        match (shift, from, to) {
+            (true, Some(a), Some(b)) => {
+                if !ctrl {
+                    sel.clear();
+                }
+                for n in &order[a.min(b)..=a.max(b)] {
+                    sel.insert((*n).to_string());
+                }
+                return;
+            }
+            _ if ctrl => {
+                if !sel.remove(name) {
+                    sel.insert(name.to_string());
+                }
+            }
+            _ => {
+                sel.clear();
+                sel.insert(name.to_string());
+            }
+        }
+        self.anchor.insert(side, name.to_string());
+    }
+    /// A click on the `..` row: it alone is highlighted.
+    pub fn click_parent(&mut self, side: Side) {
+        self.clear_selection(side);
+        self.parent_selected.insert(side);
     }
     fn path_mut(&mut self, side: Side) -> &mut String {
         match side {
@@ -1025,18 +1072,18 @@ pub fn update(
         FmMsg::Navigate { side, path, .. } => {
             let p = path.trim().to_string();
             if !p.is_empty() {
-                d.selected_mut(side).clear();
+                d.clear_selection(side);
                 list(&mut fx, s, d, side, p);
             }
         }
         FmMsg::Enter { side, name, .. } => {
             let p = join(side, &s.pane(side).path, &name);
-            d.selected_mut(side).clear();
+            d.clear_selection(side);
             list(&mut fx, s, d, side, p);
         }
         FmMsg::Up { side, .. } => {
             if let Some(p) = parent(side, &s.pane(side).path) {
-                d.selected_mut(side).clear();
+                d.clear_selection(side);
                 list(&mut fx, s, d, side, p);
             }
         }
@@ -1045,7 +1092,7 @@ pub fn update(
                 Side::Local => telepad_core::files::local_home(),
                 Side::Remote => s.remote_home.clone(),
             };
-            d.selected_mut(side).clear();
+            d.clear_selection(side);
             list(&mut fx, s, d, side, p);
         }
         FmMsg::Refresh { side, .. } => {
