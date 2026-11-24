@@ -99,7 +99,14 @@ pub fn logins_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, id: LogId, out:
     let all = rows(log, &mine, draft);
     controls(ui, draft, all.len(), log.logins.len());
     let (start, end, _) = page_range(all.len(), draft);
-    table(ui, draft, &all[start..end]);
+    // The table scrolls above the pager, which stays at the bottom (#140).
+    let h = (ui.available_height() - PAGER_H - 6.0).max(120.0);
+    ui.allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
+        ui.set_min_height(h);
+        table(ui, draft, &all[start..end], h);
+    });
+    ui.separator();
+    pager_bar(ui, &mut draft.pager, Some(all.len()), ("logins", id));
 }
 
 fn access_buttons(ui: &mut egui::Ui, id: LogId, log: &LoginLog, out: &mut Vec<Msg>) {
@@ -195,55 +202,19 @@ fn controls(ui: &mut egui::Ui, d: &mut LoginDraft, shown: usize, total: usize) {
             )
             .changed()
         {
-            d.page = 0;
+            d.pager.reset();
         }
         if d.filters.iter().any(|f| !f.is_empty()) && ui.button("Clear filters").clicked() {
             d.filters = Default::default();
-            d.page = 0;
+            d.pager.reset();
         }
-        ui.separator();
-        let (start, end, pages) = page_range(shown, d);
-        let page = d.page.min(pages - 1);
-        if ui
-            .add_enabled(page > 0, egui::Button::new(icons::CARET_LEFT))
-            .on_hover_text("Previous page")
-            .clicked()
-        {
-            d.page = page - 1;
-        }
-        ui.label(format!("Page {} of {pages}", page + 1));
-        if ui
-            .add_enabled(page + 1 < pages, egui::Button::new(icons::CARET_RIGHT))
-            .on_hover_text("Next page")
-            .clicked()
-        {
-            d.page = page + 1;
-        }
-        ui.label("Rows per page");
-        let r = ui.add(
-            egui::TextEdit::singleline(&mut d.per_page_text)
-                .desired_width(48.0)
-                .hint_text("20"),
-        );
-        r.clone()
-            .on_hover_text("Type a number (20, 50, 100 …) and press Enter");
-        if r.lost_focus() {
-            d.apply_per_page();
-        }
-        let info = if shown == 0 {
-            "no rows".to_string()
-        } else {
-            format!("Rows {}–{} of {shown}", start + 1, end)
-        };
         let hidden = total - shown;
-        ui.label(
-            RichText::new(if hidden > 0 {
-                format!("{info} ({hidden} hidden by filters / this PC)")
-            } else {
-                info
-            })
-            .weak(),
-        );
+        if hidden > 0 {
+            ui.separator();
+            ui.label(
+                RichText::new(format!("{hidden} of {total} hidden by filters / this PC")).weak(),
+            );
+        }
     });
 }
 
@@ -262,21 +233,22 @@ fn width(c: Col) -> Column {
 
 /// The table in a horizontal scroll area, so every column stays reachable
 /// in a narrow window.
-fn table(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::logins::Row]) {
+fn table(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::logins::Row], h: f32) {
     egui::ScrollArea::horizontal()
         .id_salt("login-log-hscroll")
         .show(ui, |ui| {
             ui.set_min_width(1250.0);
-            table_inner(ui, d, page);
+            table_inner(ui, d, page, h);
         });
 }
 
-fn table_inner(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::logins::Row]) {
+fn table_inner(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::logins::Row], h: f32) {
     let mut b = TableBuilder::new(ui)
         .id_salt("login-log-table")
         .striped(true)
         .resizable(true)
         .auto_shrink([false, false])
+        .max_scroll_height((h - 64.0).max(60.0))
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
     for c in Col::ALL {
         b = b.column(width(c));
@@ -350,6 +322,6 @@ fn table_inner(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::login
         }
     });
     if changed {
-        d.page = 0;
+        d.pager.reset();
     }
 }

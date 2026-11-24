@@ -281,25 +281,26 @@ fn filters_follow_the_wtbapp_rules() {
 
 #[test]
 fn pages_and_typed_rows_per_page() {
+    // #140: the footer pager (first / previous / next / last, record info).
+    use crate::pager::Go;
     let mut d = LoginDraft::default();
     assert_eq!(page_range(45, &d), (0, 20, 3));
-    d.page = 2;
+    assert_eq!(d.pager.record_info(45), "Record [1 - 20] of 45");
+    d.pager.go(Go::Last, 45);
     assert_eq!(page_range(45, &d), (40, 45, 3));
-    d.page = 9;
+    assert_eq!(d.pager.record_info(45), "Record [41 - 45] of 45");
+    d.pager.page = 9;
     assert_eq!(page_range(45, &d), (40, 45, 3), "clamped to the last page");
     assert_eq!(page_range(0, &d), (0, 0, 1));
-    d.per_page_text = "50 rows".into();
-    d.apply_per_page();
-    assert_eq!(
-        (d.per_page, d.page, d.per_page_text.as_str()),
-        (50, 0, "50")
-    );
-    d.per_page_text = "abc".into();
-    d.apply_per_page();
-    assert_eq!(d.per_page, 20);
-    d.per_page_text = "999999".into();
-    d.apply_per_page();
-    assert_eq!(d.per_page, crate::logins::PAGE_SIZE_MAX);
+    d.pager.per_page_text = "50 rows".into();
+    d.pager.apply_per_page();
+    assert_eq!((d.pager.per_page, d.pager.page), (50, 0));
+    d.pager.go(Go::Next, 120);
+    d.click(Col::User);
+    assert_eq!(d.pager.page, 0, "a new sort goes back to page 1");
+    d.pager.per_page_text = "abc".into();
+    d.pager.apply_per_page();
+    assert_eq!(d.pager.per_page, 100, "empty / not a number = 100 (wtbapp)");
 }
 
 #[test]

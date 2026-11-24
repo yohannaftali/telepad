@@ -403,7 +403,10 @@ The table (made-up example):
 - One **filter** box under each header: text = contains (any case), `=x` equal, `!x` not
   equal, `>x` / `<x` (numbers by value, times as text, e.g. `>2026-11-20`), `NULL` empty,
   `!NULL` not empty. **Clear filters** empties them all.
-- **Pages**: ◀ / ▶ and **Rows per page** (type a number and press Enter; 20 by default).
+- **Pager** (footer under the table, it stays visible while the rows scroll): *Record [21 - 40]
+  of 279*, then first / previous, **Page [n] of N** (type a page number and press Enter),
+  next / last, and **Rows per page** (type a number and press Enter; 20 by default, empty
+  = 100; more than 100 asks first because a long page is slow).
 - **Show this PC's logins** (off by default): logins from this PC's address with a key
   Telepad logs in with. Telepad does not reuse connections, so every refresh round is one
   login (about 1 440 a day per host at the default 60 s, see [Update Strategy](#update-strategy));
