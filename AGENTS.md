@@ -292,4 +292,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #112 | fix(keys): restrict the generated key before moving it; ACL by SID, permission failure as a warning | closed | 2026-11-22 |
 | #122 | feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db | closed | 2026-11-23 |
 | #125 | fix(collector): hosts that drop ICMP ping stay down until the SSH retry after one failed SSH attempt | open | 2026-11-23 |
-| #126 | feat(keys): Log info page — SSH logins from the systemd journal per host, Register / Unregister journal access | ready-for-review | 2026-11-24 |
+| #126 | feat(keys): Log info page — SSH logins from the systemd journal per host, Register / Unregister journal access | closed | 2026-11-24 |
