@@ -2,6 +2,27 @@
 
 Newest first.
 
+## [2026-11-24] — Telepad 0.9.8
+- **Database grid** (#138): a filter box under every column (contains, `=x`, `!x`, `>x`,
+  `<x`, `NULL`, `!NULL`) together with a Custom WHERE; **Columns** chooser with search,
+  kept per table; pager footer *Record [1 - 100] of 2 345* with first / previous / page /
+  next / last and typed rows per page (100 by default).
+- **Export / Import** (#139): CSV, SQL INSERTs or Excel (.xlsx) — filtered rows, whole
+  table, this page or a query result; import CSV / Excel / SQL INSERTs with a column map
+  and preview, in one transaction (the first error undoes everything).
+- **Diff** (#135): git-style colours (`-` red deleted, `+` green added) and both sides
+  scroll together.
+- **Log info** (#140): the pager is a footer under the table with record info and
+  first / previous / next / last.
+- Fixes: Windows `My Documents` and other legacy junctions (#134) are hidden and open their
+  real folder; an already open window comes back to the front from its button (#136);
+  clicks anywhere in a table cell or header select / sort (#137).
+
+## [2026-11-24] — Tested and merged: #134–#140 (PR #141)
+- Full pass on Windows 11 (UI Automation walkthrough, live database tests); CI green on
+  Windows, macOS, Linux, `db-live`, `files-live`, release builds. Issues closed by the PR;
+  test summary commented on each.
+
 ## [2026-11-24] — Tested #134–#140 (stack ending at `139-db-export-import`)
 - Windows 11, release build; fmt, clippy `-D warnings`, `cargo test --workspace` (core 219,
   app 181, gui 7); live database tests against throwaway MariaDB 11 / PostgreSQL 17
