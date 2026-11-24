@@ -16,9 +16,9 @@ use telepad_app::db::{DbEffect, DbId, DbJob, DbMsg};
 use telepad_app::editor::{EdMsg, Load};
 use telepad_app::files::{FileOp, FmEffect, FmId, FmMsg, Mode, Side};
 use telepad_app::hostsync::{HsEffect, HsMsg};
-use telepad_app::{Effect, Msg, State};
+use telepad_app::{Effect, Msg, PingJob, State};
 use telepad_core::authorized_keys;
-use telepad_core::collector::{self, Collector, SshSettings};
+use telepad_core::collector::{self, Collector, Reach, SshSettings, reach};
 use telepad_core::db::client::{CancelSlot, Session};
 use telepad_core::db::{detect, secret, tunnel};
 use telepad_core::history;
@@ -1825,26 +1825,23 @@ impl Runtime {
 }
 
 /// Ping every host (no SSH), [`WORKERS`] at a time; (alias, ms or no reply).
-fn ping_all(hosts: &[config::HostEntry]) -> Vec<(String, Option<f32>)> {
+/// Ping round (#122); hosts marked `port` (down at the last look) also get the
+/// TCP check of their SSH port when ping stays silent (#125).
+fn ping_all(hosts: &[PingJob]) -> Vec<(String, Reach)> {
     let mut out = Vec::with_capacity(hosts.len());
     for chunk in hosts.chunks(WORKERS) {
         thread::scope(|s| {
             let running: Vec<_> = chunk
                 .iter()
-                .map(|h| {
-                    let target = if h.hostname.is_empty() {
-                        &h.alias
-                    } else {
-                        &h.hostname
-                    };
+                .map(|j| {
                     (
-                        h.alias.clone(),
-                        s.spawn(move || platform::ping(target, Duration::from_secs(2))),
+                        j.host.alias.clone(),
+                        s.spawn(move || reach(&j.host, j.port, Duration::from_secs(3))),
                     )
                 })
                 .collect();
             for (alias, t) in running {
-                out.push((alias, t.join().ok().flatten()));
+                out.push((alias, t.join().unwrap_or(Reach::Silent)));
             }
         });
     }

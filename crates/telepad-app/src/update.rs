@@ -11,7 +11,7 @@ use telepad_core::model::{Container, Manager};
 use telepad_core::store::{ImportMode, ImportSummary};
 use telepad_core::update::{CHECK_EVERY, CURRENT_VERSION, RETRY_AFTER_FAILURE, UpdateConfig};
 
-use crate::msg::{Effect, Msg};
+use crate::msg::{Effect, Msg, PingJob};
 use crate::state::{
     Editor, HostState, ImportDialog, KeyRun, KeysDraft, Model, PasteImport, RunInfoView, Seen,
     State, UpdatePhase, key_selectable,
@@ -2015,7 +2015,10 @@ fn automatic(m: &mut Model, busy: usize, now: Instant, fx: &mut Vec<Effect>) {
             .filter(|h| !h.entry.unmonitored && !m.paused_hosts.contains(&h.entry.alias))
         {
             match h.entry.access {
-                Access::Ssh => ping.push(h.entry.clone()),
+                Access::Ssh => ping.push(PingJob {
+                    host: h.entry.clone(),
+                    port: h.no_ping,
+                }),
                 Access::Rdp => rdp.push(full(&h.entry)),
             }
         }
@@ -2029,14 +2032,37 @@ fn automatic(m: &mut Model, busy: usize, now: Instant, fx: &mut Vec<Effect>) {
     }
 }
 
+/// What a ping / SSH port check found, for the host page (#125).
+fn note_reach(h: &mut HostState, reach: collector::Reach, now: Instant) {
+    use collector::Reach;
+    let ms = match reach {
+        Reach::Ping(ms) => Some(ms),
+        Reach::Port | Reach::Silent => None,
+        Reach::Unchecked | Reach::Indirect => return,
+    };
+    h.ping = Some(ms);
+    h.ping_at = Some(now);
+    h.port_open = reach == Reach::Port;
+    if ms.is_some() {
+        h.ping_replied = true;
+    }
+}
+
 /// A ping round came back. A host that answered ping checks before and now
 /// misses two in a row is marked down at once (no SSH timeout); a host that
-/// was down and answers again is collected now.
-fn pinged(m: &mut Model, results: Vec<(String, Option<f32>)>, now: Instant, fx: &mut Vec<Effect>) {
+/// was down and answers again (ping, or its SSH port for hosts that drop
+/// ping, #125) is collected now. Hosts behind a proxy are not checked.
+fn pinged(
+    m: &mut Model,
+    results: Vec<(String, collector::Reach)>,
+    now: Instant,
+    fx: &mut Vec<Effect>,
+) {
+    use collector::Reach;
     m.pinging = false;
     let st = m.strategy;
     let mut jobs = Vec::new();
-    for (alias, ms) in results {
+    for (alias, reach) in results {
         // Paused while the round ran: leave it as it is.
         if m.paused_hosts.contains(&alias) {
             continue;
@@ -2044,11 +2070,14 @@ fn pinged(m: &mut Model, results: Vec<(String, Option<f32>)>, now: Instant, fx: 
         let Some(h) = m.hosts.iter_mut().find(|h| h.entry.alias == alias) else {
             continue;
         };
-        h.ping = Some(ms);
-        h.ping_at = Some(now);
-        if ms.is_some() {
-            h.ping_replied = true;
-            h.ping_misses = 0;
+        if matches!(reach, Reach::Indirect | Reach::Unchecked) {
+            continue;
+        }
+        note_reach(h, reach, now);
+        if reach.up() {
+            if matches!(reach, Reach::Ping(_)) {
+                h.ping_misses = 0;
+            }
             if h.no_ping {
                 h.no_ping = false;
                 if !st.paused && !h.loading && !h.entry.unmonitored {
@@ -2196,17 +2225,30 @@ fn collected(m: &mut Model, u: collector::Update, now: Instant, fx: &mut Vec<Eff
             alias,
             result,
             scope,
-            no_ping,
+            reach,
             elapsed,
         } => {
             if let Some(h) = m.hosts.iter_mut().find(|h| h.entry.alias == alias) {
                 h.loading = false;
                 h.updated = Some(now);
                 h.elapsed = Some(elapsed);
-                h.no_ping = no_ping;
                 if !scope.ping_first {
                     h.ssh_at = Some(now);
+                    h.ssh_fails = if result.is_ok() {
+                        0
+                    } else {
+                        h.ssh_fails.saturating_add(1)
+                    };
                 }
+                note_reach(h, reach, now);
+                // #125: only a host that is really silent (or, behind a proxy,
+                // failed SSH twice in a row) waits for the check before SSH; one
+                // that drops ping but has its SSH port open is tried next round.
+                h.no_ping = match reach {
+                    collector::Reach::Silent => true,
+                    collector::Reach::Indirect => scope.ping_first || h.ssh_fails >= 2,
+                    _ => false,
+                };
                 match result {
                     Ok(mut r) => {
                         let prev = h.report.take().or_else(|| h.known.take());

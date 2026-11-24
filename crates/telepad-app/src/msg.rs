@@ -54,8 +54,8 @@ pub enum Msg {
     StrategySave,
     /// Put the defaults into the form (Save still needed).
     StrategyReset,
-    /// Results of a ping round: (alias, round trip in ms or no reply).
-    Pinged(Vec<(String, Option<f32>)>),
+    /// Results of a ping round: (alias, ping / SSH port check, #125).
+    Pinged(Vec<(String, collector::Reach)>),
 
     // ---- My Computer (#129)
     /// Read this computer again now.
@@ -364,7 +364,7 @@ pub enum Effect {
     /// Forget saved facts of hosts not in this list (deleted, renamed).
     PruneFacts(Vec<String>),
     /// Ping these hosts (background, no SSH) → [`Msg::Pinged`].
-    Ping(Vec<HostEntry>),
+    Ping(Vec<PingJob>),
     /// Host ids in display order; saved in one transaction, ssh config
     /// regenerated → [`Msg::OrderSaved`].
     SaveOrder(Vec<i64>),
@@ -402,4 +402,12 @@ pub enum Effect {
     CollectLocal,
     /// Errors come back as [`Msg::Notice`].
     OpenLocalTerminal,
+}
+
+/// One host of a ping round (#122). `port`: also try the SSH port when ping
+/// gets no reply (#125; only hosts that were down, to keep sshd logs quiet).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PingJob {
+    pub host: HostEntry,
+    pub port: bool,
 }

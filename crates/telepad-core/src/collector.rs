@@ -81,8 +81,74 @@ pub struct Outcome {
     pub result: Result<HostReport, String>,
     /// What actually ran: `ping_first` stays set only when ssh was skipped.
     pub scope: Scope,
-    /// The host did not answer ping (and ssh failed or was skipped).
-    pub no_ping: bool,
+    /// The "is it up" check after a failed or skipped ssh attempt;
+    /// [`Reach::Unchecked`] when ssh worked.
+    pub reach: Reach,
+}
+
+/// Is the host up, seen from this computer (#125)? ICMP ping first; hosts that
+/// drop ping are tried with a TCP connect to their SSH port (opened and closed,
+/// nothing sent).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Reach {
+    /// Not checked (ssh worked, or an RDP probe).
+    Unchecked,
+    /// Answers ping (round trip in ms).
+    Ping(f32),
+    /// No ping reply, but the SSH port accepts connections.
+    Port,
+    /// No ping reply, and the SSH port is closed or was not tried.
+    Silent,
+    /// Behind `ProxyJump` / `ProxyCommand`: cannot be checked from here.
+    Indirect,
+}
+
+impl Reach {
+    /// The host is known to be up.
+    pub fn up(self) -> bool {
+        matches!(self, Self::Ping(_) | Self::Port)
+    }
+}
+
+/// Port used for the TCP check: the host's SSH port, 22 when unset.
+pub fn ssh_port(host: &HostEntry) -> u16 {
+    if host.port == 0 { 22 } else { host.port }
+}
+
+/// Address used for ping and the TCP check: HostName, else the alias.
+pub fn reach_target(host: &HostEntry) -> &str {
+    if host.hostname.is_empty() {
+        &host.alias
+    } else {
+        &host.hostname
+    }
+}
+
+/// Ping, then (when `port` and ping got no reply) the SSH port.
+pub fn reach(host: &HostEntry, port: bool, timeout: Duration) -> Reach {
+    if host.is_proxied() {
+        return Reach::Indirect;
+    }
+    let target = reach_target(host);
+    if let Some(ms) = platform::ping(target, Duration::from_secs(2)) {
+        return Reach::Ping(ms);
+    }
+    if port && tcp_open(target, ssh_port(host), timeout).is_ok() {
+        return Reach::Port;
+    }
+    Reach::Silent
+}
+
+/// The text added to a failed collection for its reach.
+fn reach_text(reach: Reach, host: &HostEntry) -> String {
+    let port = ssh_port(host);
+    match reach {
+        Reach::Ping(ms) => format!(" (host answers ping, {ms:.0} ms)"),
+        Reach::Port => format!(" (no ping reply, SSH port {port} open)"),
+        Reach::Silent => format!(" (no ping reply, SSH port {port} closed)"),
+        Reach::Indirect => " (behind ProxyJump / ProxyCommand: not checked directly)".into(),
+        Reach::Unchecked => String::new(),
+    }
 }
 const BMC_SETUP: &str = include_str!("bmc_setup.sh");
 
@@ -205,21 +271,17 @@ pub fn collect(settings: &SshSettings, host: &HostEntry, scope: Scope) -> Outcom
         return Outcome {
             result: probe_rdp(host, settings.connect_timeout),
             scope: Scope::FULL,
-            no_ping: false,
+            reach: Reach::Unchecked,
         };
     }
-    let target = if host.hostname.is_empty() {
-        &host.alias
-    } else {
-        &host.hostname
-    };
     let mut scope = scope;
     if scope.ping_first {
-        if platform::ping(target, Duration::from_secs(2)).is_none() {
+        let reach = reach(host, true, settings.connect_timeout);
+        if !reach.up() {
             return Outcome {
-                result: Err("no ping reply — SSH is tried again when the host answers ping".into()),
+                result: Err(skipped_text(reach, host)),
                 scope,
-                no_ping: true,
+                reach,
             };
         }
         // Back after being down: anything may have changed.
@@ -230,21 +292,33 @@ pub fn collect(settings: &SshSettings, host: &HostEntry, scope: Scope) -> Outcom
             return Outcome {
                 result: Ok(parse::parse_report(&out)),
                 scope,
-                no_ping: false,
+                reach: Reach::Unchecked,
             };
         }
         Ok((_, err, code)) => explain_ssh_error(&err, code),
         Err(e) => e,
     };
-    // Tell "machine is down" apart from "only SSH fails".
-    let (ping, no_ping) = match platform::ping(target, Duration::from_secs(2)) {
-        Some(ms) => (format!(" (host answers ping, {ms:.0} ms)"), false),
-        None => (" (no ping reply)".to_string(), true),
-    };
+    // Tell "machine is down" apart from "only SSH fails" (#125: a host that
+    // drops ping but has its SSH port open is up).
+    let reach = reach(host, true, settings.connect_timeout);
     Outcome {
-        result: Err(format!("{ran}{ping}")),
+        result: Err(format!("{ran}{}", reach_text(reach, host))),
         scope,
-        no_ping,
+        reach,
+    }
+}
+
+/// Why ssh was skipped for a host that was down.
+fn skipped_text(reach: Reach, host: &HostEntry) -> String {
+    match reach {
+        Reach::Indirect => "down at the last attempt; behind ProxyJump / ProxyCommand, so SSH \
+                            is tried again after the SSH retry time"
+            .into(),
+        _ => format!(
+            "not reachable: no ping reply, SSH port {} closed — SSH is tried again when the \
+             host answers ping or its SSH port opens (checked every round)",
+            ssh_port(host)
+        ),
     }
 }
 
@@ -445,7 +519,8 @@ pub enum Update {
         result: Result<Box<HostReport>, String>,
         /// What ran (see [`Outcome::scope`]).
         scope: Scope,
-        no_ping: bool,
+        /// See [`Outcome::reach`].
+        reach: Reach,
         elapsed: Duration,
     },
 }
@@ -535,7 +610,7 @@ fn worker(
                 alias,
                 result: o.result.map(Box::new),
                 scope: o.scope,
-                no_ping: o.no_ping,
+                reach: o.reach,
                 elapsed: t.elapsed(),
             })
             .is_err()
@@ -549,6 +624,62 @@ fn worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reach_checks_the_ssh_port_of_the_host_name() {
+        let mut h = HostEntry::new("web");
+        assert_eq!(reach_target(&h), "web");
+        assert_eq!(ssh_port(&h), 22);
+        h.hostname = "192.0.2.10".into();
+        h.port = 2222;
+        assert_eq!(reach_target(&h), "192.0.2.10");
+        assert_eq!(ssh_port(&h), 2222);
+        h.port = 0;
+        assert_eq!(ssh_port(&h), 22);
+    }
+
+    #[test]
+    fn proxied_hosts_are_not_checked_directly() {
+        let mut h = HostEntry::new("db");
+        h.hostname = "198.51.100.7".into();
+        h.options.push(("ProxyJump".into(), "bastion".into()));
+        // No ping, no connect: the answer comes before any network use.
+        assert_eq!(reach(&h, true, Duration::from_millis(1)), Reach::Indirect);
+        assert!(!Reach::Indirect.up());
+        h.options[0] = ("proxyjump".into(), "none".into());
+        assert!(!h.is_proxied());
+        h.options[0] = ("ProxyCommand".into(), "ssh -W %h:%p bastion".into());
+        assert!(h.is_proxied());
+    }
+
+    #[test]
+    fn tcp_check_sees_an_open_and_a_closed_port() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        assert!(tcp_open("127.0.0.1", port, Duration::from_secs(2)).is_ok());
+        drop(l);
+        assert!(tcp_open("127.0.0.1", port, Duration::from_secs(2)).is_err());
+    }
+
+    #[test]
+    fn messages_tell_ping_blocked_hosts_apart() {
+        let h = HostEntry::new("web");
+        assert!(Reach::Port.up() && Reach::Ping(1.0).up() && !Reach::Silent.up());
+        assert_eq!(
+            reach_text(Reach::Port, &h),
+            " (no ping reply, SSH port 22 open)"
+        );
+        assert_eq!(
+            reach_text(Reach::Silent, &h),
+            " (no ping reply, SSH port 22 closed)"
+        );
+        let skipped = skipped_text(Reach::Silent, &h);
+        assert!(
+            skipped.contains("answers ping or its SSH port opens"),
+            "{skipped}"
+        );
+        assert!(skipped_text(Reach::Indirect, &h).contains("SSH retry time"));
+    }
 
     #[test]
     fn scope_switches_tiers_in_front_of_the_script() {

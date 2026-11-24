@@ -41,7 +41,7 @@ pub struct Strategy {
     pub slow: Every,
     /// Hostname, OS release, kernel, architecture, CPU model (`TP_STATIC`).
     pub static_info: Every,
-    /// A host without ping reply is only pinged; SSH is still tried this often
+    /// A down host (no ping reply, SSH port closed) is only checked; SSH is still tried this often
     /// (seconds), for hosts whose firewall drops ICMP.
     pub ssh_retry: u32,
 }

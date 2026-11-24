@@ -451,8 +451,13 @@ pub struct HostState {
     /// marked down by ping), and how many checks in a row it missed since.
     pub ping_replied: bool,
     pub ping_misses: u8,
-    /// Last attempt found the host down without a ping reply: ping it first.
+    /// The last check got no ping reply but the SSH port was open (#125).
+    pub port_open: bool,
+    /// Last attempt found the host down (no ping reply and SSH port closed;
+    /// behind a proxy: two SSH failures in a row): check it before SSH.
     pub no_ping: bool,
+    /// SSH attempts in a row that failed (#125).
+    pub ssh_fails: u8,
     /// Last time ssh was actually tried (not skipped by a failed ping).
     pub ssh_at: Option<Instant>,
 }

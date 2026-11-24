@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use telepad_core::collector::{Scope, Update};
+use telepad_core::collector::{Reach, Scope, Update};
 use telepad_core::config::{Access, HostEntry};
 use telepad_core::model::HostReport;
 use telepad_core::store::UiPrefs;
@@ -72,11 +72,16 @@ fn jobs(fx: &[Effect]) -> Vec<(String, Scope)> {
 fn pinged(fx: &[Effect]) -> Vec<String> {
     fx.iter()
         .filter_map(|e| match e {
-            Effect::Ping(h) => Some(h.iter().map(|h| h.alias.clone())),
+            Effect::Ping(h) => Some(h.iter().map(|h| h.host.alias.clone())),
             _ => None,
         })
         .flatten()
         .collect()
+}
+
+/// A ping round result without the SSH port check.
+fn icmp(ms: Option<f32>) -> Reach {
+    ms.map_or(Reach::Silent, Reach::Ping)
 }
 
 fn saved_facts(fx: &[Effect]) -> Vec<Facts> {
@@ -101,7 +106,7 @@ fn done(
             alias: alias.into(),
             result: r.map(Box::new),
             scope,
-            no_ping: false,
+            reach: Reach::Unchecked,
             elapsed: Duration::from_millis(200),
         }),
         now,
@@ -425,7 +430,7 @@ fn ping_round_marks_down_and_brings_back() {
     let round = |s: &mut State, web: Option<f32>, fw: Option<f32>, at: Instant| {
         update(
             s,
-            Msg::Pinged(vec![("web01".into(), web), ("fw01".into(), fw)]),
+            Msg::Pinged(vec![("web01".into(), icmp(web)), ("fw01".into(), icmp(fw))]),
             at,
         )
     };
@@ -530,7 +535,11 @@ fn hosts_are_paused_one_by_one() {
     let fx = update(&mut s, Msg::Tick { busy: 0 }, at(200));
     assert!(jobs(&fx).is_empty() && pinged(&fx).is_empty());
     // A ping result that arrives after pausing changes nothing.
-    update(&mut s, Msg::Pinged(vec![("web01".into(), None)]), at(200));
+    update(
+        &mut s,
+        Msg::Pinged(vec![("web01".into(), Reach::Silent)]),
+        at(200),
+    );
     assert_eq!(s.model.hosts[0].ping, None);
     let fx = update(
         &mut s,
@@ -597,5 +606,228 @@ fn hosts_are_paused_one_by_one() {
     assert!(
         !jobs(&fx).iter().any(|(a, _)| a == "db02"),
         "paused: not read after the rename"
+    );
+}
+
+// --- #125: hosts that drop ICMP ping -------------------------------------
+
+fn reached(
+    s: &mut State,
+    alias: &str,
+    r: Result<HostReport, String>,
+    scope: Scope,
+    reach: Reach,
+    now: Instant,
+) {
+    update(
+        s,
+        Msg::Collected(Update::Done {
+            alias: alias.into(),
+            result: r.map(Box::new),
+            scope,
+            reach,
+            elapsed: Duration::from_millis(200),
+        }),
+        now,
+    );
+}
+
+fn ping_jobs(fx: &[Effect]) -> Vec<(String, bool)> {
+    fx.iter()
+        .filter_map(|e| match e {
+            Effect::Ping(h) => Some(h.iter().map(|j| (j.host.alias.clone(), j.port))),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+const SKIPPED: Scope = Scope {
+    ping_first: true,
+    ..Scope::FULL
+};
+
+#[test]
+fn a_host_that_drops_ping_is_tried_over_ssh_on_the_next_round() {
+    let t0 = Instant::now();
+    let mut s = start(Ok((Strategy::default(), vec![])), t0);
+    load(&mut s, vec![host(1, "fw01")], t0);
+    // A transient SSH timeout; no ping reply, but its SSH port is open.
+    reached(
+        &mut s,
+        "fw01",
+        Err("connection timed out (no ping reply, SSH port 22 open)".into()),
+        Scope::FULL,
+        Reach::Port,
+        t0,
+    );
+    let h = &s.model.hosts[0];
+    assert!(!h.no_ping, "up: not held back by ping");
+    assert!(h.port_open);
+    assert_eq!(h.ssh_fails, 1);
+    // The next live round runs SSH (not the ping-first check).
+    let fx = update(&mut s, Msg::Tick { busy: 0 }, t0 + Duration::from_secs(61));
+    let live = jobs(&fx);
+    assert_eq!(live.len(), 1);
+    assert!(!live[0].1.ping_first, "{live:?}");
+    // The ping round does not probe its port while it is not down.
+    assert_eq!(ping_jobs(&fx), [("fw01".to_string(), false)]);
+    reached(
+        &mut s,
+        "fw01",
+        Ok(ubuntu()),
+        live[0].1,
+        Reach::Unchecked,
+        t0 + Duration::from_secs(62),
+    );
+    assert_eq!(s.model.hosts[0].online(), Some(true));
+    assert_eq!(s.model.hosts[0].ssh_fails, 0);
+}
+
+#[test]
+fn a_host_that_is_really_down_backs_off_and_comes_back_by_its_ssh_port() {
+    let t0 = Instant::now();
+    let mut s = start(Ok((Strategy::default(), vec![])), t0);
+    load(&mut s, vec![host(1, "fw01")], t0);
+    reached(
+        &mut s,
+        "fw01",
+        Err("connection timed out (no ping reply, SSH port 22 closed)".into()),
+        Scope::FULL,
+        Reach::Silent,
+        t0,
+    );
+    assert!(s.model.hosts[0].no_ping);
+    // Next live round: only the quick check, no SSH timeout.
+    let t1 = t0 + Duration::from_secs(61);
+    let fx1 = update(&mut s, Msg::Tick { busy: 0 }, t1);
+    let live = jobs(&fx1);
+    assert!(live[0].1.ping_first, "{live:?}");
+    reached(
+        &mut s,
+        "fw01",
+        Err("not reachable".into()),
+        SKIPPED,
+        Reach::Silent,
+        t1,
+    );
+    assert_eq!(s.model.hosts[0].ssh_at, Some(t0), "SSH was not tried");
+    assert_eq!(s.model.hosts[0].ssh_fails, 1);
+    // The ping round checks its SSH port too while it is down.
+    assert_eq!(ping_jobs(&fx1), [("fw01".to_string(), true)]);
+    let t2 = t1 + Duration::from_secs(1);
+    // The port opens: collected at once with everything.
+    let fx = update(&mut s, Msg::Pinged(vec![("fw01".into(), Reach::Port)]), t2);
+    assert_eq!(jobs(&fx), [("fw01".to_string(), Scope::FULL)]);
+    assert!(!s.model.hosts[0].no_ping);
+    assert!(s.model.hosts[0].port_open);
+}
+
+#[test]
+fn a_host_that_answered_ping_before_still_goes_ping_first() {
+    let t0 = Instant::now();
+    let mut s = start(Ok((Strategy::default(), vec![])), t0);
+    load(&mut s, vec![host(1, "web01")], t0);
+    reached(
+        &mut s,
+        "web01",
+        Ok(ubuntu()),
+        Scope::FULL,
+        Reach::Unchecked,
+        t0,
+    );
+    update(
+        &mut s,
+        Msg::Pinged(vec![("web01".into(), Reach::Ping(1.0))]),
+        t0,
+    );
+    assert!(s.model.hosts[0].ping_replied);
+    let t1 = t0 + Duration::from_secs(61);
+    reached(
+        &mut s,
+        "web01",
+        Err("connection timed out (no ping reply, SSH port 22 closed)".into()),
+        Scope::LIVE,
+        Reach::Silent,
+        t1,
+    );
+    assert!(
+        s.model.hosts[0]
+            .scope_at(t1 + Duration::from_secs(60), &Strategy::default())
+            .ping_first
+    );
+    // Two silent ping checks in a row mark an up host down (#122 kept).
+    reached(
+        &mut s,
+        "web01",
+        Ok(ubuntu()),
+        Scope::FULL,
+        Reach::Unchecked,
+        t1,
+    );
+    for _ in 0..2 {
+        update(
+            &mut s,
+            Msg::Pinged(vec![("web01".into(), Reach::Silent)]),
+            t1,
+        );
+    }
+    assert_eq!(s.model.hosts[0].online(), Some(false));
+    assert!(s.model.hosts[0].no_ping);
+}
+
+#[test]
+fn a_host_behind_a_proxy_backs_off_after_two_ssh_failures() {
+    let t0 = Instant::now();
+    let mut s = start(Ok((Strategy::default(), vec![])), t0);
+    let mut db = host(1, "db01");
+    db.options.push(("ProxyJump".into(), "bastion".into()));
+    load(&mut s, vec![db], t0);
+    let fail = |s: &mut State, scope, at| {
+        reached(
+            s,
+            "db01",
+            Err("connection timed out".into()),
+            scope,
+            Reach::Indirect,
+            at,
+        )
+    };
+    fail(&mut s, Scope::FULL, t0);
+    assert!(
+        !s.model.hosts[0].no_ping,
+        "one failure: tried again next round"
+    );
+    let t1 = t0 + Duration::from_secs(61);
+    assert!(
+        !s.model.hosts[0]
+            .scope_at(t1, &Strategy::default())
+            .ping_first
+    );
+    fail(&mut s, Scope::LIVE, t1);
+    assert!(s.model.hosts[0].no_ping, "two in a row: back off");
+    let t2 = t1 + Duration::from_secs(61);
+    assert!(
+        s.model.hosts[0]
+            .scope_at(t2, &Strategy::default())
+            .ping_first
+    );
+    fail(&mut s, SKIPPED, t2);
+    assert!(s.model.hosts[0].no_ping, "still waiting for the SSH retry");
+    // Ping rounds cannot say anything about it.
+    update(
+        &mut s,
+        Msg::Pinged(vec![("db01".into(), Reach::Indirect)]),
+        t2,
+    );
+    assert_eq!(s.model.hosts[0].ping, None);
+    // After the SSH retry time SSH runs again.
+    assert!(
+        !s.model.hosts[0]
+            .scope_at(
+                t1 + Strategy::default().ssh_retry_every(),
+                &Strategy::default()
+            )
+            .ping_first
     );
 }

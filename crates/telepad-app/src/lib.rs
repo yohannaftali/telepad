@@ -22,7 +22,7 @@ mod table;
 mod update;
 pub mod workspace;
 
-pub use msg::{Effect, Msg};
+pub use msg::{Effect, Msg, PingJob};
 pub use state::{
     AkHost, Drafts, Editor, HostState, ImportDialog, KeyHolders, KeyRun, KeysDraft, KeysTab,
     LeaveAsk, MESSAGE_TTL, Model, OverviewPage, PasteImport, PickerDraft, RunInfoView, Seen, State,
