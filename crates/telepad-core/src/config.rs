@@ -66,7 +66,21 @@ pub struct HostEntry {
     pub access: Access,
 }
 
+/// Name of this computer in file windows, database windows and history
+/// (#129, My Computer). It has a space, so no inventory alias can be it.
+pub const LOCAL_ALIAS: &str = "This computer";
+
 impl HostEntry {
+    /// This computer (#129): never saved, never in the ssh config.
+    pub fn local() -> Self {
+        Self::new(LOCAL_ALIAS)
+    }
+
+    /// The entry is this computer, not a host reached over SSH.
+    pub fn is_local(&self) -> bool {
+        self.alias == LOCAL_ALIAS
+    }
+
     pub fn new(alias: &str) -> Self {
         Self {
             alias: alias.to_string(),

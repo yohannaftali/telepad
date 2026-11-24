@@ -12,6 +12,8 @@ use crate::state::Model;
 /// One page that can be shown in an inner window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Win {
+    /// This computer (#129): the host page of the PC Telepad runs on.
+    MyComputer,
     /// Every host as a table or cards.
     Overview,
     /// Every container of every host, grouped by stack (Docker / Podman).
@@ -44,6 +46,7 @@ impl Win {
     /// live sessions (files, databases, editor).
     pub fn key(self) -> Option<&'static str> {
         match self {
+            Win::MyComputer => Some("local"),
             Win::Overview => Some("overview"),
             Win::Docker => Some("docker"),
             Win::Kube => Some("kube"),
@@ -57,6 +60,7 @@ impl Win {
 
     pub fn from_key(k: &str) -> Option<Win> {
         Some(match k {
+            "local" => Win::MyComputer,
             "overview" => Win::Overview,
             "docker" => Win::Docker,
             "kube" => Win::Kube,

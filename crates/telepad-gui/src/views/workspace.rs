@@ -30,6 +30,7 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
             .unwrap_or_default()
     };
     match w {
+        Win::MyComputer => (icons::DESKTOP, "My Computer".into()),
         Win::Overview => (icons::OVERVIEW, "Hosts".into()),
         Win::Docker => (icons::CONTAINER, "Docker / Podman".into()),
         Win::Kube => (icons::NETWORK, "Kubernetes".into()),
@@ -66,7 +67,7 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
 fn close_msg(w: Win) -> Msg {
     use telepad_app::files::FmMsg;
     match w {
-        Win::Overview | Win::Docker | Win::Kube | Win::Swarm | Win::Strategy => {
+        Win::MyComputer | Win::Overview | Win::Docker | Win::Kube | Win::Swarm | Win::Strategy => {
             Msg::Ws(WsMsg::Close(w))
         }
         Win::Host => Msg::Select(None),
@@ -85,6 +86,7 @@ fn close_msg(w: Win) -> Msg {
 /// Default size of a page's window (clamped to the workspace).
 fn default_size(w: Win) -> Vec2 {
     match w {
+        Win::MyComputer => egui::vec2(900.0, 640.0),
         Win::Overview => egui::vec2(1000.0, 600.0),
         Win::Docker | Win::Kube | Win::Swarm => egui::vec2(1000.0, 600.0),
         Win::Host => egui::vec2(900.0, 640.0),
@@ -131,6 +133,12 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
     let shown = |w: Win| focused == Some(w) && m.ws.is_open(w);
 
     for (w, icon, name, tip) in [
+        (
+            Win::MyComputer,
+            icons::DESKTOP,
+            "My Computer",
+            "This computer: system, usage, disks, network, Docker, ports; Terminal and Files",
+        ),
         (
             Win::Overview,
             icons::OVERVIEW,

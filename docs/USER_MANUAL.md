@@ -3,7 +3,7 @@
 How to use Telepad once it is [installed](../README.md#install). For a first run see the
 [quick start](../README.md#quick-start).
 
-**Contents:** [How Telepad works](#how-telepad-works) · [Window layout](#window-layout) · [Workspaces](#workspaces) · [Overview](#overview) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Files](#files-upload--download--manage--edit) · [Authorized keys](#authorized-keys-list-add-revoke) · [Database browser](#database-browser-mariadb--mysql--postgresql) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
+**Contents:** [How Telepad works](#how-telepad-works) · [Window layout](#window-layout) · [Workspaces](#workspaces) · [Overview](#overview) · [My Computer](#my-computer) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Files](#files-upload--download--manage--edit) · [Authorized keys](#authorized-keys-list-add-revoke) · [Database browser](#database-browser-mariadb--mysql--postgresql) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
 
 ## How Telepad works
 
@@ -50,11 +50,11 @@ Telepad is one window (like MikroTik WinBox): pages open as windows **inside** i
 Telepad | Refresh all | ▤ <own> ▾ | ▣ Hosts · 3 ▾ | Arrange | 2 up         ☰ |
 --------------------------------------------------------------------------
 Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
- Hosts           | | search | Table / Cards                     | |
- Docker / Podman | | web1  192.0.2.10  …  (right-click: menu)  | |
- Authorized keys |  +---------------------------------------------+ |
- Host Management |        +-[Files — web1]---------- _ □ × ⧉ +     |
-                 |        | this computer | web1              |     |
+ My Computer     | | search | Table / Cards                     | |
+ Hosts           | | web1  192.0.2.10  …  (right-click: menu)  | |
+ Docker / Podman |  +---------------------------------------------+ |
+ Authorized keys |        +-[Files — web1]---------- _ □ × ⧉ +     |
+ Host Management |        | this computer | web1              |     |
                  |        +----------------------------------+     |
                  | [Host — db01]  (minimized)                      |
 ------------------------------------------------------------------
@@ -308,6 +308,37 @@ section show what needs doing on a host (hover for details):
 Update counts come from the host's local package cache, so they are only as fresh as the
 host's last `apt update` / `dnf makecache`. Releases not in the table show "unknown"
 support. Sort by **Flags** to see the most urgent hosts first.
+
+## My Computer
+
+**My Computer** (at the top of the page sidebar, above **Hosts**) is the host page of the
+computer Telepad runs on. It needs no SSH and is not in the inventory, so it is never
+exported, imported or written into `telepad.ssh_config`. It shows the same sections as a
+[host](#host-detail): **System**, **Maintenance**, **Usage**, **Disks**, **Network**,
+**Sensors**, **Docker** and **Ports in use**. A section this computer cannot fill says so.
+
+- It is read when the page opens and then at the **live** interval of the
+  [Update Strategy](#update-strategy) while the page stays open (not while everything is
+  paused); **Refresh** reads it now. Reading is read-only and needs no administrator
+  rights: on Windows from the system, `netstat -ano` (listening ports and their program),
+  `reg query` (reboot pending) and the `docker` / `podman` command; on Linux and macOS
+  the same script that runs on hosts, run locally.
+- On Windows, temperatures are shown only to administrators, so **Sensors** usually says
+  *not available*; pending updates are *unknown* (Windows Update is not asked).
+- **Open Terminal** opens a shell of this computer in a new terminal window, in your home
+  folder (Windows Terminal, else PowerShell; Terminal on macOS; the first terminal
+  emulator found on Linux).
+- **Open files…** opens a [file window](#files-upload--download--manage--edit) with
+  **This computer** on both sides: two folders of this computer side by side, copied
+  with **Copy to right** / **Copy to left**, F5 or drag and drop, with the same overwrite
+  question, progress and history as for a host.
+- **Open MariaDB / MySQL :3306**, **Open PostgreSQL :5432** appear when a database server
+  listens on this computer; a database container that publishes its port here gets a
+  database button in its row. They open the [database browser](#database-browser-mariadb--mysql--postgresql)
+  on `127.0.0.1` directly, without SSH. A server that listens only on another address (or
+  only on `::1`) is not offered.
+- There is no **Copy ssh command**, **Edit**, **Clone**, **Delete**, **Log info** or
+  Docker action on this page.
 
 ## Host detail
 
@@ -761,9 +792,11 @@ windows can be open at once, one per host.
   press Enter to go there; on this computer `~` is your home folder) and a filter box that narrows the list
   by name. The columns are Name, Size, Modified (UTC) and Permissions, plus Owner on the
   host side; click a header to sort, click it again to reverse. Folders are listed first.
-  - Click a row to select it; Ctrl+click adds or removes rows. The pane title shows how
-    many are selected.
-  - Double-click a folder (or **..**) to open it.
+  - Click anywhere on a row (icon, name, size, date, permissions) to select it; Ctrl+click
+    adds or removes rows, Shift+click selects every row from the one clicked last. The pane
+    title shows how many are selected. The **..** row can be highlighted too, but it is
+    never copied, deleted or changed.
+  - Double-click a folder (or **..**) to open it; drag any part of a row to copy it.
   - Both folders are remembered per host for the next time the window opens.
 - **Copy** the selected files and folders (folders with everything in them):
   - **Upload** (local → host folder) or **Download** (host → local folder), or
@@ -827,6 +860,45 @@ you clicked last, never while you are typing in a field.
 - Telepad never uses `sudo` here: only what the login user may change is changed.
 - On a host **without SFTP** the host side's actions are disabled (*Needs SFTP on the
   host*); copying and this computer's side still work.
+
+### Compare, Synchronize, Diff and Transfer settings
+
+The top bar of a file window has four tools that work between the two panes:
+
+- **Compare** marks every entry of both panes against the same name in the other pane:
+  a plus: only on this side (green); an up caret: newer on this side (blue), with a grey
+  down caret on the older copy; not-equal: same time but another size (amber); equals: the
+  same (grey). Times within 2 seconds count
+  as the same. **Hide identical** leaves only what differs; clicking **Compare** again
+  shows the plain lists. It compares the two folders shown, not the folders inside.
+- **Synchronize…** makes one folder match the other:
+  - **Left → right**, **Right → left** or **Both ways (newer wins)**;
+  - **Also the folders inside (recursive)**; without it only the files of the two folders;
+  - **Delete files the source does not have** (off by default, not for both ways).
+  **Preview** compares the folders and lists every copy (→ / ←, *copy* or *replace*) and
+  every delete (in red) before anything happens; **Synchronize** then runs exactly that:
+  one transfer each way in the transfer panel (existing files are replaced without a
+  question, the preview showed them) and the deletes, all in the history. One way without
+  *New and updated files only*, a file that differs is copied even when the target is
+  newer. Links are never followed or copied; folders in **Exclude folders** stay out.
+  Needs SFTP on the host.
+- **Diff** opens a file of each pane side by side in the [editor](#editor), the lines that
+  differ marked in orange. Select one file in each pane, or one file whose name is also in
+  the other pane. Both sides can be edited and each has its own **Save** (with the usual
+  changed-on-disk check); **Close compare** goes back to normal tabs. Binary files and
+  files over the editor's size limit say so instead.
+- **Transfer settings…** (kept per host): 
+  - **Mode**: **Default** copies known text files (`.txt`, `.conf`, `.sh`, `.php`, `.json`,
+    `Dockerfile` …) as text and everything else as is; **Text** copies every file as text;
+    **Binary** never changes a byte. As text, line endings become the target's: CRLF on
+    this computer when it runs Windows, LF on hosts. A file with a NUL byte or over 64 MiB
+    is always copied as is. scp and rsync always copy bytes as they are.
+  - **New and updated files only**: an existing file is replaced only when the copied one
+    is newer, without the overwrite question (rsync: `--update`).
+  - **Exclude folders**: names or patterns with `*` and `?`, separated by `;` (for example
+    `node_modules; .git; dist`); such folders are never copied, also inside copied folders
+    (rsync: `--exclude`).
+  They apply to Upload / Download, drag and drop, F5 and Synchronize.
 
 ### Transfer history
 
@@ -1317,6 +1389,7 @@ telepad-check.exe                        # check all monitored hosts once, text
 telepad-check.exe web01 nas01 --json     # selected hosts, JSON
 telepad-check.exe --check-update         # newer release on GitHub?
 telepad-check.exe --logins web01         # SSH logins from the host's journal (Log info)
+telepad-check.exe --local [--json]       # this computer, as My Computer reads it
 ```
 
 `telepad-check` exits 0 when every host answered and non-zero otherwise, so it fits in

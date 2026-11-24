@@ -81,6 +81,9 @@ pub struct FileEditor {
     pub ask: Option<Unsaved>,
     /// Close the file window once every save finished.
     pub close_window_after_save: bool,
+    /// Two tabs shown side by side with their differing lines marked
+    /// (Diff of the file window, #131): (left pane's file, right pane's).
+    pub compare: Option<(TabId, TabId)>,
     next: TabId,
 }
 
@@ -174,6 +177,8 @@ pub enum EdMsg {
     /// The editor window's close button.
     CloseWindow,
     SetLang(TabId, Lang),
+    /// Leave the side-by-side compare (#131); both tabs stay open.
+    EndCompare,
 }
 
 /// `true` when the file window should close now (after the question).
@@ -184,9 +189,15 @@ pub(crate) fn update(
     fx: &mut Vec<FmEffect>,
 ) -> bool {
     let id = s.id;
+    if let EdMsg::Close(t) = &msg
+        && s.editor.compare.is_some_and(|(a, b)| a == *t || b == *t)
+    {
+        s.editor.compare = None;
+    }
     let e = &mut s.editor;
     let dr = &mut d.editor;
     match msg {
+        EdMsg::EndCompare => e.compare = None,
         EdMsg::Open { side, name } => {
             if s.status != Status::Ready || (side == Side::Remote && s.mode == Mode::Fallback) {
                 return false;
@@ -199,9 +210,10 @@ pub(crate) fn update(
                 return false;
             }
             let (kind, size) = (entry.kind, entry.size);
-            let path = match side {
-                Side::Local => local_join(&pane.path, &name),
-                Side::Remote => sftp::join(&pane.path, &name),
+            let path = if s.local_side(side) {
+                local_join(&pane.path, &name)
+            } else {
+                sftp::join(&pane.path, &name)
             };
             let e = &mut s.editor;
             if let Some(t) = e.tabs.iter().find(|t| t.side == side && t.path == path) {

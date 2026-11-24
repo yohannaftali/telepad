@@ -60,9 +60,10 @@ fn sftp_list_transfer_plan_and_operations() {
     let big = sample(1_300_000);
     std::fs::write(site.join("big.bin"), &big).unwrap();
     std::fs::write(site.join("img").join("a 'b'.txt"), b"hello").unwrap();
+    let opts = transfer::Options::default();
     let cancel = AtomicBool::new(false);
     let sources = vec![(site.display().to_string(), true)];
-    let items = transfer::plan(&mut c, Direction::Upload, &sources, &base, &cancel).unwrap();
+    let items = transfer::plan(&mut c, Direction::Upload, &sources, &base, &opts, &cancel).unwrap();
     assert_eq!(items.iter().filter(|i| i.is_dir).count(), 2);
     assert!(items.iter().all(|i| i.exists.is_none()));
     let mut bytes = 0;
@@ -71,6 +72,7 @@ fn sftp_list_transfer_plan_and_operations() {
         Direction::Upload,
         &items,
         &HashMap::new(),
+        &opts,
         &cancel,
         &mut |e| {
             if let transfer::Event::Bytes(n) = e {
@@ -93,7 +95,7 @@ fn sftp_list_transfer_plan_and_operations() {
     assert_eq!(list[0].owner, "telepad");
 
     // Second plan sees the existing files; decisions decide.
-    let again = transfer::plan(&mut c, Direction::Upload, &sources, &base, &cancel).unwrap();
+    let again = transfer::plan(&mut c, Direction::Upload, &sources, &base, &opts, &cancel).unwrap();
     let conflicts: Vec<usize> = again
         .iter()
         .enumerate()
@@ -108,6 +110,7 @@ fn sftp_list_transfer_plan_and_operations() {
         Direction::Upload,
         &again,
         &skip_all,
+        &opts,
         &cancel,
         &mut |_| {},
     );
@@ -125,6 +128,7 @@ fn sftp_list_transfer_plan_and_operations() {
         Direction::Upload,
         &again,
         &newer,
+        &opts,
         &cancel,
         &mut |_| {},
     );
@@ -137,6 +141,7 @@ fn sftp_list_transfer_plan_and_operations() {
         Direction::Download,
         &[(remote_site.clone(), true)],
         &dst.display().to_string(),
+        &opts,
         &cancel,
     )
     .unwrap();
@@ -145,6 +150,7 @@ fn sftp_list_transfer_plan_and_operations() {
         Direction::Download,
         &back,
         &HashMap::new(),
+        &opts,
         &cancel,
         &mut |_| {},
     );
@@ -162,13 +168,22 @@ fn sftp_list_transfer_plan_and_operations() {
     // A cancelled upload leaves nothing behind (no part file, old file kept).
     let stop_up = AtomicBool::new(true);
     let one = vec![(site.join("big.bin").display().to_string(), false)];
-    let up_again = transfer::plan(&mut c, Direction::Upload, &one, &remote_site, &cancel).unwrap();
+    let up_again = transfer::plan(
+        &mut c,
+        Direction::Upload,
+        &one,
+        &remote_site,
+        &opts,
+        &cancel,
+    )
+    .unwrap();
     let all: HashMap<usize, Decision> = [(0, Decision::Overwrite)].into();
     let (copied, _, _) = transfer::run(
         &mut c,
         Direction::Upload,
         &up_again,
         &all,
+        &opts,
         &stop_up,
         &mut |_| {},
     );
@@ -288,13 +303,31 @@ fn rsync_when_both_sides_have_it() {
     let mut c = Sftp::connect(&s, &host).unwrap();
     let home = c.realpath(".").unwrap();
     let sources = vec![src.join("site").display().to_string()];
-    let dry = rsync::run(&rsync::args(&s, &host, true, &sources, &home, true)).unwrap();
+    let dry = rsync::run(&rsync::args(
+        &s,
+        &host,
+        true,
+        &sources,
+        &home,
+        true,
+        &transfer::Options::default(),
+    ))
+    .unwrap();
     assert!(dry.iter().any(|p| p == "site/index.html"), "{dry:?}");
     assert!(
         c.stat(&sftp::join(&home, "site")).is_err(),
         "dry run changes nothing"
     );
-    rsync::run(&rsync::args(&s, &host, true, &sources, &home, false)).unwrap();
+    rsync::run(&rsync::args(
+        &s,
+        &host,
+        true,
+        &sources,
+        &home,
+        false,
+        &transfer::Options::default(),
+    ))
+    .unwrap();
     assert_eq!(
         c.stat(&sftp::join(&home, "site/index.html")).unwrap().size,
         Some(14)

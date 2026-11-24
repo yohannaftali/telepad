@@ -8,8 +8,11 @@ use crate::widgets::*;
 use telepad_core::model::{HostReport, SensorKind};
 
 /// Fans (BMC) first, then temperatures; explains why BMC data is missing when it is.
-pub fn sensors(ui: &mut egui::Ui, r: &HostReport, i: usize, out: &mut Vec<Msg>) {
-    if let Some(e) = &r.bmc_error {
+/// `host`: inventory index (`None` for My Computer, #129).
+pub fn sensors(ui: &mut egui::Ui, r: &HostReport, host: Option<usize>, out: &mut Vec<Msg>) {
+    if let Some(e) = &r.bmc_error
+        && let Some(i) = host
+    {
         let fix = if e.contains("not installed") {
             "install it on this host: sudo apt install ipmitool"
         } else {
@@ -34,7 +37,11 @@ pub fn sensors(ui: &mut egui::Ui, r: &HostReport, i: usize, out: &mut Vec<Msg>) 
         ui.add_space(4.0);
     }
     if r.sensors.is_empty() {
-        let why = if r.has_bmc {
+        let why = if host.is_none() && cfg!(windows) {
+            "not available — Windows shows temperatures only to administrators (WMI thermal zones)"
+        } else if host.is_none() {
+            "not available — no temperature or fan sensors readable on this computer"
+        } else if r.has_bmc {
             "No sensor readings"
         } else {
             "No temperature or fan sensors exposed (typical for VMs)"

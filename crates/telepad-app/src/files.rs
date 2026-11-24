@@ -8,9 +8,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Instant;
 
 use telepad_core::config::HostEntry;
+use telepad_core::files::compare::{Gone, SyncPlan, SyncRequest};
 use telepad_core::files::edit::Stamp;
 use telepad_core::files::ops::{Measure, Report, check_name};
-use telepad_core::files::transfer::{Decision, Direction, Event, Item, Source};
+use telepad_core::files::transfer::{Decision, Direction, Event, Item, Options, Source};
 use telepad_core::files::{Entry, Kind, local_join, local_parent, sftp};
 
 use telepad_core::history::{Entry as LogEntry, Kind as LogKind, Outcome};
@@ -32,6 +33,8 @@ pub enum Mode {
     Sftp,
     /// No SFTP server: `sh` listing and `scp -O` copies.
     Fallback,
+    /// My Computer (#129): this computer on both sides, no SSH.
+    Local,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -125,6 +128,8 @@ pub struct Transfer {
     pub bytes_done: u64,
     pub started: Option<Instant>,
     pub errors: Vec<String>,
+    /// Transfer settings when it was started (#131).
+    pub opts: Options,
 }
 
 impl Transfer {
@@ -276,7 +281,24 @@ pub struct FileSession {
     /// History of this host's transfers and file operations (#100),
     /// oldest first.
     pub history: Vec<telepad_core::history::Entry>,
+    /// Transfer settings of this host (#131): mode, new and updated only,
+    /// excluded folders.
+    pub opts: Options,
+    /// The Synchronize dialog (#131).
+    pub sync: Option<SyncView>,
     next_transfer: u64,
+}
+
+/// The Synchronize dialog: the two folders, and the plan once previewed.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SyncView {
+    pub left: String,
+    pub right: String,
+    /// Planning in the runtime.
+    pub busy: bool,
+    pub plan: Option<Result<SyncPlan, String>>,
+    /// The request the plan was made for (Synchronize runs only that).
+    pub planned: Option<SyncRequest>,
 }
 
 impl FileSession {
@@ -291,6 +313,11 @@ impl FileSession {
             Side::Local => &mut self.local,
             Side::Remote => &mut self.remote,
         }
+    }
+    /// The pane shows this computer: the left one always, the right one
+    /// for My Computer (#129).
+    pub fn local_side(&self, side: Side) -> bool {
+        side == Side::Local || self.host.is_local()
     }
     pub fn transfer(&self, id: u64) -> Option<&Transfer> {
         self.transfers.iter().find(|t| t.id == id)
@@ -355,6 +382,19 @@ pub struct FileDraft {
     pub history_dir: Option<Direction>,
     pub history_failed: bool,
     pub history_clear: bool,
+    /// Panes whose `..` row is highlighted (#130; never copied or deleted).
+    pub parent_selected: BTreeSet<Side>,
+    /// Row clicked last per pane: Shift+click selects from it (#130).
+    pub anchor: BTreeMap<Side, String>,
+    /// Compare directories (#131) is on, and identical entries are hidden.
+    pub compare: bool,
+    pub hide_same: bool,
+    /// The Synchronize form.
+    pub sync: SyncRequest,
+    /// The Transfer settings dialog is open, and its form.
+    pub show_opts: bool,
+    pub opts_form: Options,
+    pub opts_exclude: String,
 }
 
 impl FileDraft {
@@ -369,6 +409,49 @@ impl FileDraft {
             Side::Local => &mut self.selected_local,
             Side::Remote => &mut self.selected_remote,
         }
+    }
+    /// Nothing selected in this pane (also not its `..` row).
+    pub fn clear_selection(&mut self, side: Side) {
+        self.selected_mut(side).clear();
+        self.parent_selected.remove(&side);
+        self.anchor.remove(&side);
+    }
+    /// A click on a row (#130): plain = only this row, Ctrl = toggle it,
+    /// Shift = the rows from the last clicked one to this (in `order`).
+    pub fn click_row(&mut self, side: Side, name: &str, order: &[&str], ctrl: bool, shift: bool) {
+        self.parent_selected.remove(&side);
+        let from = self
+            .anchor
+            .get(&side)
+            .and_then(|a| order.iter().position(|n| n == a));
+        let to = order.iter().position(|n| *n == name);
+        let sel = self.selected_mut(side);
+        match (shift, from, to) {
+            (true, Some(a), Some(b)) => {
+                if !ctrl {
+                    sel.clear();
+                }
+                for n in &order[a.min(b)..=a.max(b)] {
+                    sel.insert((*n).to_string());
+                }
+                return;
+            }
+            _ if ctrl => {
+                if !sel.remove(name) {
+                    sel.insert(name.to_string());
+                }
+            }
+            _ => {
+                sel.clear();
+                sel.insert(name.to_string());
+            }
+        }
+        self.anchor.insert(side, name.to_string());
+    }
+    /// A click on the `..` row: it alone is highlighted.
+    pub fn click_parent(&mut self, side: Side) {
+        self.clear_selection(side);
+        self.parent_selected.insert(side);
     }
     fn path_mut(&mut self, side: Side) -> &mut String {
         match side {
@@ -535,6 +618,29 @@ pub enum FmMsg {
         id: FmId,
         msg: EdMsg,
     },
+    /// This host's saved transfer settings (#131).
+    OptionsLoaded {
+        id: FmId,
+        opts: Options,
+    },
+    /// Open the Transfer settings dialog with the current settings.
+    OptionsOpen(FmId),
+    /// Keep the dialog's settings (and save them for the host).
+    OptionsSave(FmId),
+    OptionsClose(FmId),
+    /// Open the Synchronize dialog for the two folders shown.
+    SyncOpen(FmId),
+    /// Plan with the form's request (nothing changes yet).
+    SyncPreview(FmId),
+    SyncPlanned {
+        id: FmId,
+        result: Result<SyncPlan, String>,
+    },
+    /// Run the previewed plan.
+    SyncRun(FmId),
+    SyncClose(FmId),
+    /// Compare one file of each pane in the editor, side by side.
+    Diff(FmId),
 }
 
 #[derive(Debug, Clone)]
@@ -558,6 +664,7 @@ pub enum FmEffect {
         direction: Direction,
         sources: Vec<Source>,
         dest: String,
+        opts: Options,
     },
     /// Copy over SFTP → [`FmMsg::Progress`]…, [`FmMsg::Finished`].
     Run {
@@ -566,6 +673,7 @@ pub enum FmEffect {
         direction: Direction,
         items: Vec<Item>,
         decisions: HashMap<usize, Decision>,
+        opts: Options,
     },
     /// Fallback mode: `scp -O` each source → [`FmMsg::Finished`].
     Scp {
@@ -583,6 +691,7 @@ pub enum FmEffect {
         sources: Vec<String>,
         dest: String,
         dry_run: bool,
+        opts: Options,
     },
     Cancel {
         id: FmId,
@@ -624,6 +733,20 @@ pub enum FmEffect {
         path: String,
         load: Load,
     },
+    /// Plan Synchronize of `left` (this computer) with `right` (#131) →
+    /// [`FmMsg::SyncPlanned`].
+    SyncPlan {
+        id: FmId,
+        left: String,
+        right: String,
+        req: SyncRequest,
+        opts: Options,
+    },
+    /// Keep a host's transfer settings in `telepad.db`.
+    SaveOptions {
+        alias: String,
+        opts: Options,
+    },
     /// Write a file of the editor (only if it still has `expect`, when given)
     /// → [`EdMsg::Saved`].
     Save {
@@ -648,17 +771,20 @@ fn list(fx: &mut Vec<FmEffect>, s: &mut FileSession, d: &mut FileDraft, side: Si
     });
 }
 
-fn join(side: Side, dir: &str, name: &str) -> String {
-    match side {
-        Side::Local => local_join(dir, name),
-        Side::Remote => sftp::join(dir, name),
+/// `local`: a path of this computer (see [`FileSession::local_side`]).
+fn join(local: bool, dir: &str, name: &str) -> String {
+    if local {
+        local_join(dir, name)
+    } else {
+        sftp::join(dir, name)
     }
 }
 
-fn parent(side: Side, dir: &str) -> Option<String> {
-    match side {
-        Side::Local => local_parent(dir),
-        Side::Remote => (dir != "/").then(|| sftp::parent(dir)),
+fn parent(local: bool, dir: &str) -> Option<String> {
+    if local {
+        local_parent(dir)
+    } else {
+        (dir != "/").then(|| sftp::parent(dir))
     }
 }
 
@@ -670,8 +796,8 @@ fn fallback_items(s: &FileSession, from: Side, names: &[String]) -> Vec<Item> {
         .iter()
         .filter_map(|n| src.entries.iter().find(|e| &e.name == n))
         .map(|e| Item {
-            src: join(from, &src.path, &e.name),
-            dst: join(other(from), &dst.path, &e.name),
+            src: join(s.local_side(from), &src.path, &e.name),
+            dst: join(s.local_side(other(from)), &dst.path, &e.name),
             label: e.name.clone(),
             is_dir: e.is_dir(),
             size: e.size,
@@ -726,12 +852,13 @@ fn next_or_run(s: &mut FileSession, transfer: u64, fx: &mut Vec<FmEffect>, now: 
         .map(|(_, it)| it.size)
         .sum();
     match mode {
-        Mode::Sftp => fx.push(FmEffect::Run {
+        Mode::Sftp | Mode::Local => fx.push(FmEffect::Run {
             id,
             transfer,
             direction: t.direction,
             items: t.items.clone(),
             decisions: t.decisions.clone(),
+            opts: t.opts.clone(),
         }),
         Mode::Fallback => {
             let sources: Vec<Source> = t
@@ -760,15 +887,21 @@ fn planned(
     fx: &mut Vec<FmEffect>,
     now: Instant,
 ) {
-    let conflicts: Vec<usize> = items
-        .iter()
-        .enumerate()
-        .filter(|(_, i)| !i.is_dir && i.exists.is_some())
-        .map(|(n, _)| n)
-        .collect();
     let Some(t) = s.transfer_mut(transfer) else {
         return;
     };
+    let mut conflicts: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(n, i)| !i.is_dir && i.exists.is_some() && !t.decisions.contains_key(n))
+        .map(|(n, _)| n)
+        .collect();
+    // New and updated files only (#131): no question, newer sources win.
+    if t.opts.newer_only {
+        for n in conflicts.drain(..) {
+            t.decisions.insert(n, Decision::NewerOnly);
+        }
+    }
     t.items = items;
     if conflicts.is_empty() {
         next_or_run(s, transfer, fx, now);
@@ -1025,18 +1158,18 @@ pub fn update(
         FmMsg::Navigate { side, path, .. } => {
             let p = path.trim().to_string();
             if !p.is_empty() {
-                d.selected_mut(side).clear();
+                d.clear_selection(side);
                 list(&mut fx, s, d, side, p);
             }
         }
         FmMsg::Enter { side, name, .. } => {
-            let p = join(side, &s.pane(side).path, &name);
-            d.selected_mut(side).clear();
+            let p = join(s.local_side(side), &s.pane(side).path, &name);
+            d.clear_selection(side);
             list(&mut fx, s, d, side, p);
         }
         FmMsg::Up { side, .. } => {
-            if let Some(p) = parent(side, &s.pane(side).path) {
-                d.selected_mut(side).clear();
+            if let Some(p) = parent(s.local_side(side), &s.pane(side).path) {
+                d.clear_selection(side);
                 list(&mut fx, s, d, side, p);
             }
         }
@@ -1045,7 +1178,7 @@ pub fn update(
                 Side::Local => telepad_core::files::local_home(),
                 Side::Remote => s.remote_home.clone(),
             };
-            d.selected_mut(side).clear();
+            d.clear_selection(side);
             list(&mut fx, s, d, side, p);
         }
         FmMsg::Refresh { side, .. } => {
@@ -1107,13 +1240,26 @@ pub fn update(
                 Side::Remote => Direction::Download,
             };
             let src_dir = s.pane(from).path.clone();
+            let src_local = s.local_side(from);
             let dest = s.pane(other(from)).path.clone();
+            // Excluded folders (#131) stay out, also when picked themselves.
+            let names: Vec<String> = names
+                .into_iter()
+                .filter(|n| {
+                    !s.pane(from)
+                        .entries
+                        .iter()
+                        .any(|e| &e.name == n && e.is_dir() && s.opts.excluded(n))
+                })
+                .collect();
             let sources: Vec<Source> = names
                 .iter()
                 .filter_map(|n| s.pane(from).entries.iter().find(|e| &e.name == n))
-                .map(|e| (join(from, &src_dir, &e.name), e.is_dir()))
+                .map(|e| (join(src_local, &src_dir, &e.name), e.is_dir()))
                 .collect();
             if sources.is_empty() {
+                s.notice =
+                    Some("Nothing to copy: the folders are excluded in Transfer settings".into());
                 return fx;
             }
             s.next_transfer += 1;
@@ -1149,6 +1295,7 @@ pub fn update(
                 bytes_done: 0,
                 started: None,
                 errors: vec![],
+                opts: s.opts.clone(),
             });
             if rsync {
                 fx.push(FmEffect::Rsync {
@@ -1158,6 +1305,7 @@ pub fn update(
                     sources: sources.into_iter().map(|(p, _)| p).collect(),
                     dest,
                     dry_run: true,
+                    opts: s.opts.clone(),
                 });
             } else if s.mode == Mode::Fallback {
                 let items = fallback_items(s, from, &names);
@@ -1169,6 +1317,7 @@ pub fn update(
                     direction,
                     sources,
                     dest,
+                    opts: s.opts.clone(),
                 });
             }
         }
@@ -1326,7 +1475,7 @@ pub fn update(
         FmMsg::OpDone { side, result, .. } => {
             let path = s.pane(side).path.clone();
             if let Some(dl) = s.dialog.as_ref().filter(|dl| dl.side == side) {
-                let (title, detail) = op_text(dl, &d.name, d.mode);
+                let (title, detail) = op_text(dl, s.local_side(dl.side), &d.name, d.mode);
                 let (outcome, error) = match &result {
                     Ok((r, _)) if r.errors.is_empty() => (Outcome::Done, String::new()),
                     Ok((r, _)) => (Outcome::Failed, r.errors.join("\n")),
@@ -1372,7 +1521,7 @@ pub fn update(
                 p.path.clone()
             } else {
                 sel.iter()
-                    .map(|n| join(side, &p.path, n))
+                    .map(|n| join(s.local_side(side), &p.path, n))
                     .collect::<Vec<_>>()
                     .join("\n")
             };
@@ -1417,11 +1566,256 @@ pub fn update(
                     sources: t.sources.iter().map(|(p, _)| p.clone()).collect(),
                     dest: t.dest.clone(),
                     dry_run: false,
+                    opts: t.opts.clone(),
                 });
             }
         }
+        FmMsg::OptionsLoaded { opts, .. } => s.opts = opts,
+        FmMsg::OptionsOpen(_) => {
+            d.opts_form = s.opts.clone();
+            d.opts_exclude = s.opts.exclude.join("; ");
+            d.show_opts = true;
+        }
+        FmMsg::OptionsSave(_) => {
+            let opts = Options {
+                exclude: Options::parse_exclude(&d.opts_exclude),
+                ..d.opts_form.clone()
+            };
+            d.show_opts = false;
+            if opts != s.opts {
+                s.opts = opts.clone();
+                fx.push(FmEffect::SaveOptions {
+                    alias: s.host.alias.clone(),
+                    opts,
+                });
+            }
+        }
+        FmMsg::OptionsClose(_) => d.show_opts = false,
+        FmMsg::SyncOpen(_) => {
+            if s.status != Status::Ready {
+                return fx;
+            }
+            if s.mode == Mode::Fallback {
+                s.notice = Some("Synchronize needs SFTP on the host".into());
+                return fx;
+            }
+            s.sync = Some(SyncView {
+                left: s.local.path.clone(),
+                right: s.remote.path.clone(),
+                ..Default::default()
+            });
+        }
+        FmMsg::SyncPreview(_) => {
+            if let Some(v) = s.sync.as_mut()
+                && !v.busy
+            {
+                v.busy = true;
+                v.plan = None;
+                v.planned = Some(d.sync);
+                fx.push(FmEffect::SyncPlan {
+                    id,
+                    left: v.left.clone(),
+                    right: v.right.clone(),
+                    req: d.sync,
+                    opts: s.opts.clone(),
+                });
+            }
+        }
+        FmMsg::SyncPlanned { result, .. } => {
+            if let Some(v) = s.sync.as_mut() {
+                v.busy = false;
+                v.plan = Some(result);
+            }
+        }
+        FmMsg::SyncRun(_) => {
+            let ready = matches!(
+                &s.sync,
+                Some(SyncView {
+                    busy: false,
+                    plan: Some(Ok(_)),
+                    planned: Some(_),
+                    ..
+                })
+            );
+            if !ready {
+                return fx;
+            }
+            let Some(SyncView {
+                left,
+                right,
+                plan: Some(Ok(plan)),
+                planned: Some(_),
+                ..
+            }) = s.sync.take()
+            else {
+                return fx;
+            };
+            run_sync(s, plan, &left, &right, &mut fx, now);
+        }
+        FmMsg::SyncClose(_) => s.sync = None,
+        FmMsg::Diff(_) => diff(s, d, &mut fx),
     }
     fx
+}
+
+/// Run a previewed Synchronize plan: one transfer each way (existing files
+/// replaced without asking: the preview showed them), and the deletes.
+fn run_sync(
+    s: &mut FileSession,
+    plan: SyncPlan,
+    left: &str,
+    right: &str,
+    fx: &mut Vec<FmEffect>,
+    now: Instant,
+) {
+    let id = s.id;
+    for (direction, items, dest) in [
+        (Direction::Upload, plan.upload, right),
+        (Direction::Download, plan.download, left),
+    ] {
+        if items.is_empty() {
+            continue;
+        }
+        s.next_transfer += 1;
+        let tid = s.next_transfer;
+        let decisions: HashMap<usize, Decision> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| !i.is_dir && i.exists.is_some())
+            .map(|(n, _)| (n, Decision::Overwrite))
+            .collect();
+        let files = items.iter().filter(|i| !i.is_dir).count();
+        s.transfers.push(Transfer {
+            id: tid,
+            direction,
+            title: format!("Synchronize {files} file(s) {} {}", "→", short_dir(dest)),
+            sources: vec![],
+            dest: dest.to_string(),
+            rsync: false,
+            state: TState::Planning,
+            items: vec![],
+            decisions,
+            current: String::new(),
+            done_items: 0,
+            bytes_total: 0,
+            bytes_done: 0,
+            started: None,
+            errors: vec![],
+            // Decided already; "newer only" was applied by the plan.
+            opts: Options {
+                newer_only: false,
+                ..s.opts.clone()
+            },
+        });
+        planned(s, tid, items, fx, now);
+    }
+    for (side, gone) in [
+        (Side::Local, plan.delete_left),
+        (Side::Remote, plan.delete_right),
+    ] {
+        let mut by_dir: BTreeMap<String, Vec<Gone>> = BTreeMap::new();
+        for g in gone {
+            by_dir.entry(g.dir.clone()).or_default().push(g);
+        }
+        for (dir, v) in by_dir {
+            let detail = v
+                .iter()
+                .map(|g| g.label.clone())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let e = file_entry(
+                s,
+                LogKind::FileOp,
+                side_label(side, &format!("Synchronize: delete {} item(s)", v.len())),
+                detail,
+                Outcome::Done,
+                String::new(),
+            );
+            log(s, fx, e);
+            fx.push(FmEffect::Op {
+                id,
+                side,
+                op: FileOp::Delete {
+                    dir,
+                    items: v.into_iter().map(|g| g.entry).collect(),
+                },
+            });
+        }
+    }
+}
+
+/// Compare one file of each pane in the editor, side by side (#131): the
+/// selected file of each pane, or the one selected file and the file of the
+/// same name in the other pane.
+fn diff(s: &mut FileSession, d: &mut FileDraft, fx: &mut Vec<FmEffect>) {
+    let one = |side: Side| -> Option<String> {
+        let sel = d.selected(side);
+        if sel.len() != 1 {
+            return None;
+        }
+        let n = sel.iter().next()?;
+        s.pane(side)
+            .entries
+            .iter()
+            .find(|e| &e.name == n && !e.is_dir())
+            .map(|e| e.name.clone())
+    };
+    let has = |side: Side, n: &str| {
+        s.pane(side)
+            .entries
+            .iter()
+            .any(|e| e.name == n && !e.is_dir())
+    };
+    let pair = match (one(Side::Local), one(Side::Remote)) {
+        (Some(l), Some(r)) => Some((l, r)),
+        (Some(l), None) if d.selected(Side::Remote).is_empty() && has(Side::Remote, &l) => {
+            Some((l.clone(), l))
+        }
+        (None, Some(r)) if d.selected(Side::Local).is_empty() && has(Side::Local, &r) => {
+            Some((r.clone(), r))
+        }
+        _ => None,
+    };
+    let Some((l, r)) = pair else {
+        s.notice =
+            Some("Diff: select one file in each pane, or one file whose name is in both".into());
+        return;
+    };
+    if s.mode == Mode::Fallback {
+        s.notice = Some("Diff needs SFTP on the host".into());
+        return;
+    }
+    crate::editor::update(
+        s,
+        d,
+        EdMsg::Open {
+            side: Side::Local,
+            name: l.clone(),
+        },
+        fx,
+    );
+    crate::editor::update(
+        s,
+        d,
+        EdMsg::Open {
+            side: Side::Remote,
+            name: r.clone(),
+        },
+        fx,
+    );
+    let path = |side: Side, n: &str| join(s.local_side(side), &s.pane(side).path, n);
+    let (lp, rp) = (path(Side::Local, &l), path(Side::Remote, &r));
+    let find = |side: Side, p: &str| {
+        s.editor
+            .tabs
+            .iter()
+            .find(|t| t.side == side && t.path == p)
+            .map(|t| t.id)
+    };
+    if let (Some(a), Some(b)) = (find(Side::Local, &lp), find(Side::Remote, &rp)) {
+        s.editor.compare = Some((a, b));
+        s.editor.active = Some(a);
+    }
 }
 
 fn close_session(
@@ -1462,7 +1856,7 @@ pub fn op_blocked(s: &FileSession, sel: usize, side: Side, op: OpKind) -> Option
         OpKind::Rename | OpKind::Properties if sel != 1 => Some("Select one item"),
         OpKind::Edit if sel != 1 => Some("Select one file"),
         OpKind::Delete if sel == 0 => Some("Select items first"),
-        OpKind::Permissions if side == Side::Local => Some("Host side only"),
+        OpKind::Permissions if s.local_side(side) => Some("Host side only"),
         OpKind::Permissions if sel == 0 => Some("Select items first"),
         _ => None,
     }
@@ -1545,7 +1939,7 @@ fn ask(s: &mut FileSession, d: &mut FileDraft, side: Side, op: OpKind, fx: &mut 
                 Some(Ok(file_measure(&item)))
             };
             DialogKind::Properties {
-                path: join(side, &dir, &item.name),
+                path: join(s.local_side(side), &dir, &item.name),
                 item,
                 measure,
             }
@@ -1579,13 +1973,14 @@ pub fn parse_mode(text: &str) -> Option<u32> {
 
 fn confirm(s: &mut FileSession, d: &FileDraft, fx: &mut Vec<FmEffect>) {
     let id = s.id;
+    let local_host = s.host.is_local();
     let Some(dl) = s.dialog.as_mut() else {
         return;
     };
     if dl.busy {
         return;
     }
-    let local = dl.side == Side::Local;
+    let local = dl.side == Side::Local || local_host;
     let name = d.name.clone();
     let name_ok = |dl: &mut Dialog| match check_name(&name, local) {
         Ok(()) => true,
@@ -1671,9 +2066,13 @@ fn msg_id(m: &FmMsg) -> FmId {
         | Measured { id, .. }
         | OpDone { id, .. }
         | CopyPath { id, .. }
+        | OptionsLoaded { id, .. }
+        | SyncPlanned { id, .. }
         | Editor { id, .. } => *id,
         Retry(id) | Close(id) | AskCancel(id) | ClearFinished(id) | Confirm(id)
         | CloseDialog(id) | DismissErrors(id) => *id,
+        OptionsOpen(id) | OptionsSave(id) | OptionsClose(id) | SyncOpen(id) | SyncPreview(id)
+        | SyncRun(id) | SyncClose(id) | Diff(id) => *id,
     }
 }
 
@@ -1746,6 +2145,7 @@ fn file_entry(
         method: match s.mode {
             Mode::Sftp => "SFTP".into(),
             Mode::Fallback => "sh".into(),
+            Mode::Local => "local".into(),
         },
         ..Default::default()
     }
@@ -1805,6 +2205,7 @@ fn transfer_entry(t: &Transfer, mode: Mode, now: Instant) -> LogEntry {
             match mode {
                 Mode::Sftp => "SFTP".into(),
                 Mode::Fallback => "scp -O".into(),
+                Mode::Local => "local".into(),
             }
         },
         ..Default::default()
@@ -1812,8 +2213,8 @@ fn transfer_entry(t: &Transfer, mode: Mode, now: Instant) -> LogEntry {
 }
 
 /// Title and detail lines of a file operation dialog, for the history.
-fn op_text(dl: &Dialog, name: &str, mode: u32) -> (String, String) {
-    let at = |n: &str| join(dl.side, &dl.dir, n);
+fn op_text(dl: &Dialog, local: bool, name: &str, mode: u32) -> (String, String) {
+    let at = |n: &str| join(local, &dl.dir, n);
     let names = |items: &[Entry]| {
         items
             .iter()

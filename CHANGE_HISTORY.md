@@ -2,6 +2,92 @@
 
 Newest first.
 
+## [2026-11-24] — Tested #130, #129, #131 (branches `130-file-row-click` → `129-my-computer` → `131-files-compare-sync`)
+- Windows 11, release build; fmt, clippy `-D warnings`, `cargo test --workspace` (core 213,
+  app 171, gui 7). Headless: `telepad-check --local` (≈ 1.2–2 s; 52 containers = `docker ps -a`,
+  disks / IPs / ports match), all 56 hosts read-only (49 ok, 7 unreachable or password-only as
+  before — remote collection unchanged).
+- GUI on a copy of the inventory via UI Automation + window captures: My Computer above Hosts;
+  System / Maintenance / Usage / Disks / Network / Sensors (not available) / Docker sections;
+  Open Terminal opened a local shell; Open files… = This computer on both sides; Open
+  PostgreSQL :5432 connected straight to 127.0.0.1 (server's own auth error, no SSH); the
+  layout (My Computer, local files, database, editor) came back after a restart.
+  #130: clicks on the Modified cell and on empty cells of `..` select the row, text centred.
+  #131: Compare marks (only here / newer / older / different / same), Hide identical,
+  Transfer settings (exclude `node_modules` saved), Synchronize preview (3 copies, 2
+  deletes) then run: disk matched the preview, History 2 entries; Diff side by side with
+  marked lines, edit + Save of one side written.
+- Fixed during testing: database window said "through the SSH login" for this computer;
+  file hint said Upload / Download for two local folders; rows did not fill the pane without
+  an Owner column; editor label case; `local::run` gated to Windows (Linux / macOS clippy).
+- Noted: Default mode copies known text files with the target's line endings, so a mixed-
+  ending `.conf` shows "different size" after a copy between two Windows folders.
+- Not verified: Linux / macOS (CI builds them), MariaDB local connect (only PostgreSQL here).
+
+## [2026-11-24] — feat(files): compare, synchronize, diff, transfer settings (#131)
+- Issue #131 addressed on GitHub (branch `131-files-compare-sync`, on top of `129-my-computer`).
+- **Compare** marks both panes (only here / newer / different size / same, 2 s slack),
+  **Hide identical**. **Synchronize…**: left → right, right → left or both (newer wins),
+  recursive, optional delete (off by default, never both ways); **Preview** lists every
+  copy and delete, **Synchronize** runs one transfer each way + the deletes (history).
+  **Diff** opens one file of each pane side by side in the editor with differing lines
+  marked, each side saved on its own. **Transfer settings…** per host (`files_opts:<alias>`):
+  Default / Text / Binary (CRLF on Windows, LF on hosts; NUL or > 64 MiB stay binary),
+  new and updated files only (no question; rsync `--update`), excluded folders (globs;
+  rsync `--exclude`).
+- Files: core `files/compare.rs` (new), `files/transfer.rs`, `files/rsync.rs`,
+  `files/live_tests.rs`, `store.rs`; app `files.rs`, `editor.rs`, `tests_files.rs`; gui
+  `views/files.rs`, `views/text_editor.rs`, `runtime.rs`; `docs/USER_MANUAL.md`,
+  `README.md`, `AGENTS.md`.
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 213, app 171, gui 7).
+  Not verified yet: GUI (tester).
+
+## [2026-11-24] — feat(local): My Computer page (#129)
+- Issue #129 addressed on GitHub (branch `129-my-computer`, on top of `130-file-row-click`).
+- **My Computer** above **Hosts** in the sidebar (`Win::MyComputer`, layout key `local`): the
+  host page of this PC without SSH — System, Maintenance (reboot pending), Usage, Disks,
+  Network, Sensors ("not available" without admin on Windows), Docker, Ports in use. Read
+  while the page is open (live interval, not while paused) and on Refresh.
+- Windows: `sysinfo`, `netstat -ano`, `reg query`, `docker` / `podman` CLI; Linux / macOS:
+  `script.sh` via local `sh -s`. Buttons: Open Terminal (local shell), Open files… (this
+  computer on both sides), Open MariaDB / MySQL / PostgreSQL on 127.0.0.1 (owner decision:
+  no SSH for this computer's databases). No Copy ssh / Edit / Clone / Delete.
+- Transfers go through a `transfer::Remote` trait (`Sftp` or `ThisComputer`).
+- `telepad-check --local [--json]`.
+- Files: core `local.rs` (new), `config.rs`, `platform.rs`, `eol.rs`, `parse.rs`,
+  `files/transfer.rs`, `db/client.rs`, `Cargo.toml` (`sysinfo` 0.40.4, Windows only); app
+  `state.rs`, `msg.rs`, `update.rs`, `workspace.rs`, `files.rs`, `editor.rs`,
+  `tests_local.rs` (new); gui `views/detail.rs`, `docker.rs`, `sensors.rs`, `files.rs`,
+  `workspace.rs`, `mod.rs`, `runtime.rs`; check `main.rs`; `docs/USER_MANUAL.md`,
+  `README.md`, `SECURITY.md`, `AGENTS.md`.
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 208, app 167, gui 7);
+  `telepad-check --local` on Windows 11 (≈ 2 s: OS, CPU, memory, disks, IPs, 50 containers,
+  ports). Not verified yet: GUI page, Linux / macOS local read.
+
+## [2026-11-24] — fix(files): whole file row selects on click (#130)
+- Issue #130 addressed on GitHub (branch `130-file-row-click`).
+- Every cell is plain non-selectable text; the row takes click, Ctrl / Shift+click,
+  double-click, drag and right-click; the `..` row can be highlighted (never copied);
+  cells centred vertically (`cell_layout`).
+- Files: gui `views/files.rs`; app `files.rs` (`click_row`, `click_parent`,
+  `clear_selection`), `tests_files.rs`; `docs/USER_MANUAL.md`.
+- Verified: fmt, clippy, tests. Not verified yet: GUI clicks.
+
+## [2026-11-24] — feat(files): compare directories, synchronize, diff between panes and transfer settings
+- Issue #131 created on GitHub
+- Scope: files (core `files/`, app `files.rs`, gui `views/files.rs`)
+- Labels: enhancement
+
+## [2026-11-24] — fix(files): whole file row (.. row, icon, Modified, Size cells) selects on click; centre text vertically
+- Issue #130 created on GitHub
+- Scope: gui `views/files.rs`
+- Labels: bug
+
+## [2026-11-24] — feat(local): My Computer page — monitor this PC like a host, terminal, files and local databases
+- Issue #129 created on GitHub
+- Scope: core (local collector, platform), app, gui
+- Labels: enhancement
+
 ## [2026-11-24] — Telepad 0.9.6
 - **Log info** (#126): a host's **Log info** button opens a page of who logged in over SSH,
   as which user, from where, how and with which key (the host's systemd journal, last 30

@@ -70,9 +70,10 @@ enum Backend {
 }
 
 pub struct Session {
-    /// `None` only in the tests against a local server.
+    /// `None` for this computer's databases (#129) and the tests against a
+    /// local server.
     tunnel: Option<Tunnel>,
-    /// Local end of the tunnel.
+    /// Local end of the tunnel (or the local server's port).
     port: u16,
     login: Login,
     backend: Backend,
@@ -372,9 +373,28 @@ impl Session {
         login: Login,
         read_only: bool,
     ) -> Result<(Self, ServerInfo), String> {
+        if host.is_local() {
+            return Self::connect_local(target, login, read_only);
+        }
         let tunnel = Tunnel::open(settings, host, &target.address, target.port)?;
         let port = tunnel.local_port;
         Self::login(Some(tunnel), port, target.engine, login, read_only)
+    }
+
+    /// A database of this computer (#129, owner decision): straight to its
+    /// port on the loopback address, no SSH; any other address is refused.
+    pub fn connect_local(
+        target: &DbTarget,
+        login: Login,
+        read_only: bool,
+    ) -> Result<(Self, ServerInfo), String> {
+        if target.address != "127.0.0.1" {
+            return Err(format!(
+                "{} is not this computer's loopback address",
+                target.address
+            ));
+        }
+        Self::login(None, target.port, target.engine, login, read_only)
     }
 
     fn login(

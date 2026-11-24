@@ -124,7 +124,23 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             if !m.strategy.paused {
                 automatic(m, busy, now, &mut fx);
             }
+            local_due(m, now, &mut fx);
         }
+        Msg::LocalRefresh => collect_local(m, &mut fx),
+        Msg::LocalCollected { result, elapsed } => {
+            let l = &mut m.local;
+            l.loading = false;
+            l.updated = Some(now);
+            l.elapsed = Some(elapsed);
+            match result {
+                Ok(r) => {
+                    l.report = Some(*r);
+                    l.error = None;
+                }
+                Err(e) => l.error = Some(e),
+            }
+        }
+        Msg::LocalTerminal => fx.push(Effect::OpenLocalTerminal),
         Msg::SetPaused(paused) => {
             if m.strategy.paused != paused {
                 m.strategy.paused = paused;
@@ -1057,12 +1073,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         Msg::Notice(text) => say(m, now, text),
         Msg::Db(dm) => {
             let hosts = &m.hosts;
-            let entry = |alias: &str| {
-                hosts
-                    .iter()
-                    .find(|h| h.entry.alias == alias)
-                    .map(|h| h.entry.clone())
-            };
+            let entry = |alias: &str| host_of(hosts, alias);
             fx.extend(
                 crate::db::update(&mut m.db, &mut d.db, &mut m.db_next, &entry, dm)
                     .into_iter()
@@ -1091,12 +1102,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 fx.extend(load_keys(m, Some(vec![alias])));
             }
             let hosts = &m.hosts;
-            let entry = |alias: &str| {
-                hosts
-                    .iter()
-                    .find(|h| h.entry.alias == alias)
-                    .map(|h| h.entry.clone())
-            };
+            let entry = |alias: &str| host_of(hosts, alias);
             fx.extend(
                 crate::files::update(
                     &mut m.files,
@@ -1371,7 +1377,7 @@ fn start_pending_files(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Ve
     for alias in aliases {
         let file_key = format!("files:{}", crate::workspace::esc(&alias));
         let edit_key = format!("editor:{}", crate::workspace::esc(&alias));
-        if !m.hosts.iter().any(|h| h.entry.alias == alias) {
+        if host_of(&m.hosts, &alias).is_none() {
             m.ws.drop_pending(&file_key);
             m.ws.drop_pending(&edit_key);
             gone.push(alias);
@@ -1408,12 +1414,7 @@ fn start_pending_files(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Ve
             })
             .unwrap_or_default();
         let hosts = &m.hosts;
-        let entry = |a: &str| {
-            hosts
-                .iter()
-                .find(|h| h.entry.alias == a)
-                .map(|h| h.entry.clone())
-        };
+        let entry = |a: &str| host_of(hosts, a);
         fx.extend(
             crate::files::update(
                 &mut m.files,
@@ -1475,12 +1476,17 @@ fn start_pending_dbs(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec<
         if m.db.iter().any(|s| s.target.key() == saved.key()) {
             continue;
         }
-        let Some(h) = m.hosts.iter().find(|h| h.entry.alias == *host) else {
+        // This computer's databases (#129) are opened as saved: the window
+        // shows the connect error when the server is gone.
+        let local = host == telepad_core::config::LOCAL_ALIAS;
+        let found = m.hosts.iter().find(|h| h.entry.alias == *host);
+        let Some(h) = found.or(local.then_some(&m.local)) else {
             m.ws.drop_pending(&key);
             notes.push(saved.title());
             continue;
         };
         let target = match (&h.report, &h.error) {
+            _ if local => saved,
             (Some(r), _) => {
                 match crate::db::host_db_targets(host, r)
                     .into_iter()
@@ -1498,12 +1504,7 @@ fn start_pending_dbs(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec<
             (None, None) => continue,
         };
         let hosts = &m.hosts;
-        let entry = |a: &str| {
-            hosts
-                .iter()
-                .find(|h| h.entry.alias == a)
-                .map(|h| h.entry.clone())
-        };
+        let entry = |a: &str| host_of(hosts, a);
         fx.extend(
             crate::db::update(
                 &mut m.db,
@@ -1541,12 +1542,7 @@ fn close_finished_background(m: &mut Model, d: &mut crate::Drafts, now: Instant)
     let mut fx = Vec::new();
     for (id, alias) in done {
         let hosts = &m.hosts;
-        let entry = |a: &str| {
-            hosts
-                .iter()
-                .find(|h| h.entry.alias == a)
-                .map(|h| h.entry.clone())
-        };
+        let entry = |a: &str| host_of(hosts, a);
         fx.extend(
             crate::files::update(
                 &mut m.files,
@@ -2242,4 +2238,43 @@ fn load_keys(m: &mut Model, aliases: Option<Vec<String>>) -> Option<Effect> {
             .insert(h.alias.clone(), crate::state::AkHost::Loading);
     }
     Some(Effect::ListKeys(hosts))
+}
+
+/// The inventory entry of `alias`, or this computer (#129) for
+/// [`telepad_core::config::LOCAL_ALIAS`]: file and database windows of My
+/// Computer find their "host" the same way.
+fn host_of(hosts: &[HostState], alias: &str) -> Option<HostEntry> {
+    if alias == telepad_core::config::LOCAL_ALIAS {
+        return Some(HostEntry::local());
+    }
+    hosts
+        .iter()
+        .find(|h| h.entry.alias == alias)
+        .map(|h| h.entry.clone())
+}
+
+/// Read this computer (#129) unless a read is running.
+fn collect_local(m: &mut Model, fx: &mut Vec<Effect>) {
+    if m.local.loading {
+        return;
+    }
+    m.local.entry = HostEntry::local();
+    m.local.loading = true;
+    fx.push(Effect::CollectLocal);
+}
+
+/// My Computer is read while its page is open: once when it opens, then at
+/// the Update Strategy's live interval (not while everything is paused).
+fn local_due(m: &mut Model, now: Instant, fx: &mut Vec<Effect>) {
+    if !m.ws.is_open(crate::workspace::Win::MyComputer) || m.local.loading {
+        return;
+    }
+    let st = m.strategy;
+    let due = match elapsed(m.local.updated, now) {
+        None => true,
+        Some(e) => !st.paused && st.live.on && e >= st.live.every(),
+    };
+    if due {
+        collect_local(m, fx);
+    }
 }

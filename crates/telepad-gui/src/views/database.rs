@@ -57,20 +57,26 @@ fn login(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) 
     ui.vertical_centered(|ui| {
         ui.set_max_width(520.0);
         ui.heading(il(icons::DATABASE, &s.target.title()));
-        let place = if s.target.container.is_empty() {
-            "installed on the host".to_string()
+        let local = s.target.host == telepad_core::config::LOCAL_ALIAS;
+        let place = match (s.target.container.is_empty(), local) {
+            (true, true) => "installed on this computer".to_string(),
+            (true, false) => "installed on the host".to_string(),
+            (false, _) => format!("container {}", s.target.container),
+        };
+        let how = if local {
+            format!(
+                "{}:{} directly on this computer (no SSH)",
+                s.target.address, s.target.port
+            )
         } else {
-            format!("container {}", s.target.container)
+            format!(
+                "{}:{} through the SSH login of {} — no port is opened",
+                s.target.address, s.target.port, s.target.host
+            )
         };
         ui.label(
-            RichText::new(format!(
-                "{} · {place} · {}:{} through the SSH login of {} — no port is opened",
-                s.target.engine.title(),
-                s.target.address,
-                s.target.port,
-                s.target.host
-            ))
-            .weak(),
+            RichText::new(format!("{} · {place} · {how}", s.target.engine.title()))
+                .weak(),
         );
         ui.add_space(12.0);
         egui::Grid::new("db-login")

@@ -1033,3 +1033,248 @@ fn copy_path_and_properties() {
     );
     assert!(fs(&s).dialog.is_none());
 }
+
+#[test]
+fn row_clicks_select_like_a_file_manager() {
+    // #130: plain click, Ctrl toggles, Shift selects a range from the last
+    // clicked row; the `..` row is highlighted alone and leaves on navigation.
+    let mut d = FileDraft::default();
+    let order = ["a", "b", "c", "d"];
+    let sel = |d: &FileDraft| d.selected(Side::Local).iter().cloned().collect::<Vec<_>>();
+    d.click_row(Side::Local, "b", &order, false, false);
+    assert_eq!(sel(&d), ["b"]);
+    d.click_row(Side::Local, "d", &order, false, true);
+    assert_eq!(sel(&d), ["b", "c", "d"]);
+    d.click_row(Side::Local, "c", &order, true, false);
+    assert_eq!(sel(&d), ["b", "d"]);
+    d.click_row(Side::Local, "a", &order, true, true);
+    assert_eq!(sel(&d), ["a", "b", "c", "d"]);
+    d.click_parent(Side::Local);
+    assert!(sel(&d).is_empty());
+    assert!(d.parent_selected.contains(&Side::Local));
+    d.click_row(Side::Local, "a", &order, false, false);
+    assert!(!d.parent_selected.contains(&Side::Local));
+    // Shift without an earlier click selects just the row.
+    d.click_row(Side::Remote, "c", &order, false, true);
+    assert_eq!(d.selected(Side::Remote).len(), 1);
+
+    let (mut s, id) = opened(Mode::Sftp);
+    draft(&mut s).click_parent(Side::Local);
+    send(
+        &mut s,
+        FmMsg::Up {
+            id,
+            side: Side::Local,
+        },
+    );
+    assert!(draft(&mut s).parent_selected.is_empty());
+}
+
+#[test]
+fn transfer_settings_are_saved_and_used_by_copies() {
+    // #131: mode, new and updated only, excluded folders.
+    use telepad_core::files::transfer::{Options, TransferMode};
+    let (mut s, id) = opened(Mode::Sftp);
+    send(
+        &mut s,
+        FmMsg::OptionsLoaded {
+            id,
+            opts: Options {
+                mode: TransferMode::Binary,
+                ..Default::default()
+            },
+        },
+    );
+    send(&mut s, FmMsg::OptionsOpen(id));
+    assert!(draft(&mut s).show_opts);
+    assert_eq!(draft(&mut s).opts_form.mode, TransferMode::Binary);
+    draft(&mut s).opts_form.mode = TransferMode::Text;
+    draft(&mut s).opts_form.newer_only = true;
+    draft(&mut s).opts_exclude = "site; node_modules".into();
+    let fx = send(&mut s, FmMsg::OptionsSave(id));
+    let want = Options {
+        mode: TransferMode::Text,
+        newer_only: true,
+        exclude: vec!["site".into(), "node_modules".into()],
+    };
+    assert!(
+        matches!(&fx[..], [FmEffect::SaveOptions { alias, opts }] if alias == "web1" && *opts == want)
+    );
+    assert!(!draft(&mut s).show_opts);
+    // An excluded folder is not copied, even when picked.
+    let fx = send(
+        &mut s,
+        FmMsg::Copy {
+            id,
+            from: Side::Local,
+            names: vec!["site".into(), "notes.txt".into()],
+        },
+    );
+    match &fx[..] {
+        [FmEffect::Plan { sources, opts, .. }] => {
+            assert_eq!(sources.len(), 1, "{sources:?}");
+            assert!(sources[0].0.ends_with("notes.txt"));
+            assert_eq!(*opts, want);
+        }
+        other => panic!("{other:?}"),
+    }
+    // New and updated only: existing files are decided, no question.
+    let tid = fs(&s).transfers[0].id;
+    let fx = send(
+        &mut s,
+        FmMsg::Planned {
+            id,
+            transfer: tid,
+            result: Ok(vec![item("notes.txt", false, 5, true)]),
+        },
+    );
+    assert!(fs(&s).ask.is_none());
+    match &fx[..] {
+        [
+            FmEffect::Run {
+                decisions, opts, ..
+            },
+        ] => {
+            assert_eq!(decisions.get(&0), Some(&Decision::NewerOnly));
+            assert_eq!(opts.mode, TransferMode::Text);
+        }
+        other => panic!("{other:?}"),
+    }
+    // Everything excluded: nothing starts, the window says why.
+    let fx = send(
+        &mut s,
+        FmMsg::Copy {
+            id,
+            from: Side::Local,
+            names: vec!["site".into()],
+        },
+    );
+    assert!(fx.is_empty() && fs(&s).notice.is_some());
+}
+
+#[test]
+fn synchronize_previews_then_copies_both_ways_and_deletes() {
+    use telepad_core::files::compare::{Gone, SyncDir, SyncPlan, SyncRequest};
+    let (mut s, id) = opened(Mode::Sftp);
+    send(&mut s, FmMsg::SyncOpen(id));
+    let v = fs(&s).sync.clone().unwrap();
+    assert_eq!(
+        (v.left.as_str(), v.right.as_str()),
+        ("/home/me", "/home/ops")
+    );
+    let req = SyncRequest {
+        dir: SyncDir::LeftToRight,
+        recursive: true,
+        delete: true,
+    };
+    draft(&mut s).sync = req;
+    let fx = send(&mut s, FmMsg::SyncPreview(id));
+    assert!(
+        matches!(&fx[..], [FmEffect::SyncPlan { req: r, left, right, .. }]
+        if *r == req && left == "/home/me" && right == "/home/ops")
+    );
+    assert!(fs(&s).sync.as_ref().unwrap().busy);
+    assert!(
+        send(&mut s, FmMsg::SyncRun(id)).is_empty(),
+        "nothing runs before the preview"
+    );
+    assert!(fs(&s).sync.is_some());
+    let plan = SyncPlan {
+        upload: vec![
+            item("site/", true, 0, false),
+            item("site/a.txt", false, 3, true),
+        ],
+        download: vec![],
+        delete_left: vec![],
+        delete_right: vec![Gone {
+            dir: "/home/ops".into(),
+            entry: entry("logs", true, 0, 1),
+            label: "logs/".into(),
+        }],
+    };
+    send(
+        &mut s,
+        FmMsg::SyncPlanned {
+            id,
+            result: Ok(plan),
+        },
+    );
+    let fx = update(&mut s, Msg::Files(FmMsg::SyncRun(id)), Instant::now());
+    let files: Vec<&FmEffect> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Files(f) => Some(f),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        files
+            .iter()
+            .any(|e| matches!(e, FmEffect::Run { items, decisions, .. }
+        if items.len() == 2 && decisions.get(&1) == Some(&Decision::Overwrite)))
+    );
+    assert!(files.iter().any(
+        |e| matches!(e, FmEffect::Op { side: Side::Remote, op: FileOp::Delete { dir, items }, .. }
+        if dir == "/home/ops" && items[0].name == "logs")
+    ));
+    assert!(
+        files
+            .iter()
+            .any(|e| matches!(e, FmEffect::Log(l) if l.title.contains("Synchronize: delete"))),
+        "the delete is in the history"
+    );
+    assert!(fs(&s).sync.is_none());
+    assert_eq!(fs(&s).transfers.len(), 1);
+    assert_eq!(fs(&s).transfers[0].state, TState::Running);
+}
+
+#[test]
+fn synchronize_needs_sftp() {
+    let (mut s, id) = opened(Mode::Fallback);
+    send(&mut s, FmMsg::SyncOpen(id));
+    assert!(fs(&s).sync.is_none());
+    assert!(fs(&s).notice.as_deref().unwrap().contains("SFTP"));
+}
+
+#[test]
+fn diff_opens_both_files_side_by_side_in_the_editor() {
+    let (mut s, id) = opened(Mode::Sftp);
+    // One file selected, the same name in the other pane.
+    select(&mut s, Side::Local, &["notes.txt"]);
+    let fx = send(&mut s, FmMsg::Diff(id));
+    let loads: Vec<(Side, String)> = fx
+        .iter()
+        .filter_map(|e| match e {
+            FmEffect::Load { side, path, .. } => Some((*side, path.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        loads,
+        [
+            (Side::Local, local_join("/home/me", "notes.txt")),
+            (Side::Remote, "/home/ops/notes.txt".into())
+        ]
+    );
+    let (a, b) = fs(&s).editor.compare.unwrap();
+    assert_eq!(fs(&s).editor.active, Some(a));
+    // Closing one of them leaves the compare; the other tab stays.
+    send(
+        &mut s,
+        FmMsg::Editor {
+            id,
+            msg: crate::editor::EdMsg::Close(b),
+        },
+    );
+    assert!(fs(&s).editor.compare.is_none());
+    // A folder, or nothing to pair with: say how to use it.
+    select(&mut s, Side::Local, &["site"]);
+    send(&mut s, FmMsg::Diff(id));
+    assert!(
+        fs(&s)
+            .notice
+            .as_deref()
+            .unwrap()
+            .contains("select one file")
+    );
+}

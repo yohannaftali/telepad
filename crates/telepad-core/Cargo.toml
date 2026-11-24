@@ -40,4 +40,5 @@ zeroize = "1"
 zip.workspace = true
 
 [target."cfg(windows)".dependencies]
+sysinfo = { version = "0.40.4", default-features = false, features = ["component", "disk", "network", "system"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials"] }

@@ -256,10 +256,12 @@ pub fn container_ports(c: &Container) -> (String, String) {
     (published.join("\n"), internal.join(", "))
 }
 
+/// `host`: inventory index; `None` for My Computer (#129): no actions, only
+/// "Open database" for containers that publish a database port here.
 pub fn docker_stacks(
     ui: &mut egui::Ui,
     r: &HostReport,
-    host: usize,
+    host: Option<usize>,
     alias: &str,
     address: &str,
     out: &mut Vec<Msg>,
@@ -302,7 +304,9 @@ pub fn docker_stacks(
                     .frame(false),
                 );
                 ui.label(RichText::new(mtext).color(mcolor));
-                stack_controls(ui, r, stack, &manager, host, address, out);
+                if let Some(host) = host {
+                    stack_controls(ui, r, stack, &manager, host, address, out);
+                }
                 if resp.clicked() {
                     open = !open;
                     ui.data_mut(|d| d.insert_persisted(open_id, open));
@@ -362,11 +366,40 @@ pub fn docker_stacks(
                         let (published, internal) = container_ports(c);
                         ui.label(RichText::new(published).monospace());
                         ui.label(RichText::new(internal).monospace().weak());
-                        container_menu(ui, c, host, alias, out);
+                        match host {
+                            Some(host) => container_menu(ui, c, host, alias, out),
+                            None => local_container_db(ui, r, c, out),
+                        }
                         ui.end_row();
                     }
                 });
         });
         ui.add_space(4.0);
+    }
+}
+
+/// My Computer (#129): a database container published on this computer
+/// opens on 127.0.0.1.
+fn local_container_db(ui: &mut egui::Ui, r: &HostReport, c: &Container, out: &mut Vec<Msg>) {
+    let t = telepad_core::local::db_targets(r)
+        .into_iter()
+        .find(|t| t.container == c.name);
+    match t {
+        Some(t) => {
+            if ui
+                .button(icons::DATABASE)
+                .on_hover_text(format!(
+                    "Open {} on 127.0.0.1:{} — tables, data, queries",
+                    t.engine.title(),
+                    t.port
+                ))
+                .clicked()
+            {
+                out.push(Msg::Db(telepad_app::db::DbMsg::Open(t)));
+            }
+        }
+        None => {
+            ui.label("");
+        }
     }
 }

@@ -15,8 +15,10 @@ use telepad_app::files::{
 };
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::db::human_size;
+use telepad_core::files::compare::{self, Diff, SyncDir};
 use telepad_core::files::ops::Measure;
 use telepad_core::files::transfer::{Decision, Direction};
+use telepad_core::files::transfer::{Options as TransferOptions, TransferMode};
 use telepad_core::files::{Entry, Kind, perm_text, time_text};
 use telepad_core::history::{Entry as HistEntry, Kind as HistKind, Outcome};
 
@@ -83,6 +85,8 @@ pub fn files_page(
     window(ui, s, dr, focused, out, now);
     ask(ui, s, dr, out);
     dialog(ui, s, dr, out);
+    sync_dialog(ui, s, dr, out);
+    options_dialog(ui, s, dr, out);
 }
 
 fn window(
@@ -99,8 +103,13 @@ fn window(
             ui.label(
                 RichText::new(il(icons::FOLDER, &format!("Files — {}", s.host.alias))).strong(),
             );
-            ui.label(RichText::new(s.host.target()).monospace().weak());
+            if !s.host.is_local() {
+                ui.label(RichText::new(s.host.target()).monospace().weak());
+            }
             match (s.status, s.mode) {
+                (Status::Ready, Mode::Local) => {
+                    ui.label(RichText::new("this computer on both sides").weak());
+                }
                 // A failed connect shows its error and Retry below, not a spinner.
                 (Status::Connecting, _) if s.error.is_some() => {}
                 (Status::Connecting, _) => {
@@ -122,6 +131,40 @@ fn window(
             }
             ui.separator();
             ui.checkbox(&mut d.show_hidden, "Hidden files");
+            ui.separator();
+            let ready = s.status == Status::Ready;
+            ui.add_enabled_ui(ready, |ui| {
+                ui.toggle_value(&mut d.compare, il(icons::NOT_EQUALS, "Compare"))
+                    .on_hover_text(
+                        "Compare the two folders: mark what is only on one side, newer or of another size",
+                    );
+                if d.compare {
+                    ui.checkbox(&mut d.hide_same, "Hide identical");
+                }
+                if ui
+                    .button(il(icons::SYNC, "Synchronize…"))
+                    .on_hover_text("Make one folder match the other (or both ways); shows every change first")
+                    .clicked()
+                {
+                    send(out, FmMsg::SyncOpen(id));
+                }
+                if ui
+                    .button(il(icons::CODE, "Diff"))
+                    .on_hover_text(
+                        "Open a file of each pane side by side in the editor, differing lines marked                          (select one file in each pane, or one file whose name is in both)",
+                    )
+                    .clicked()
+                {
+                    send(out, FmMsg::Diff(id));
+                }
+                if ui
+                    .button(il(icons::FUNNEL, "Transfer settings…"))
+                    .on_hover_text(transfer_summary(&s.opts))
+                    .clicked()
+                {
+                    send(out, FmMsg::OptionsOpen(id));
+                }
+            });
             match &s.rsync {
                 Some(Ok(())) => {
                     ui.checkbox(&mut d.use_rsync, "Use rsync").on_hover_text(
@@ -224,14 +267,28 @@ fn window(
                 },
             );
         }
+        // Compare directories (#131): one map for both panes, by name.
+        let marks = d.compare.then(|| {
+            let ci = cfg!(windows) || s.host.is_local();
+            telepad_core::files::compare::compare(&s.local.entries, &s.remote.entries, ci)
+        });
         ui.columns(2, |cols| {
-            pane(&mut cols[0], s, d, Side::Local, out);
-            pane(&mut cols[1], s, d, Side::Remote, out);
+            pane(&mut cols[0], s, d, Side::Local, marks.as_ref(), out);
+            pane(&mut cols[1], s, d, Side::Remote, marks.as_ref(), out);
         });
     });
 }
 
-fn pane(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, side: Side, out: &mut Vec<Msg>) {
+type Marks = std::collections::BTreeMap<String, Diff>;
+
+fn pane(
+    ui: &mut egui::Ui,
+    s: &FileSession,
+    d: &mut FileDraft,
+    side: Side,
+    marks: Option<&Marks>,
+    out: &mut Vec<Msg>,
+) {
     // A narrow window: the table scrolls inside its own half, never over the other.
     let half = ui.max_rect().intersect(ui.clip_rect());
     ui.set_clip_rect(half);
@@ -240,6 +297,7 @@ fn pane(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, side: Side, out: 
     ui.horizontal(|ui| {
         let (icon, title) = match side {
             Side::Local => (icons::DESKTOP, "This computer".to_string()),
+            Side::Remote if s.host.is_local() => (icons::DESKTOP, "This computer".to_string()),
             Side::Remote => (icons::DISKS, s.host.alias.clone()),
         };
         ui.label(RichText::new(il(icon, &title)).strong());
@@ -314,9 +372,14 @@ fn pane(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, side: Side, out: 
         Side::Local => d.local_filter.clone(),
         Side::Remote => d.remote_filter.clone(),
     };
+    let ci = cfg!(windows) || s.host.is_local();
     let rows: Vec<Entry> = p
         .sorted(d.show_hidden, &filter)
         .into_iter()
+        .filter(|e| {
+            !(d.hide_same
+                && marks.is_some_and(|m| m.get(&compare::key(&e.name, ci)) == Some(&Diff::Same)))
+        })
         .cloned()
         .collect();
     let has_up = p.path != "/"
@@ -326,7 +389,7 @@ fn pane(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, side: Side, out: 
         .inner_margin(2.0)
         .fill(ui.visuals().extreme_bg_color);
     let (_, dropped) = ui.dnd_drop_zone::<DragFiles, ()>(frame, |ui| {
-        table(ui, s, d, side, p, &rows, has_up, out);
+        table(ui, s, d, side, p, &rows, has_up, marks, out);
     });
     if let Some(drag) = dropped
         && drag.window == id
@@ -352,10 +415,12 @@ fn table(
     p: &Pane,
     rows: &[Entry],
     has_up: bool,
+    marks: Option<&Marks>,
     out: &mut Vec<Msg>,
 ) {
     let id = s.id;
-    let remote = side == Side::Remote;
+    let ci = cfg!(windows) || s.host.is_local();
+    let remote = side == Side::Remote && !s.host.is_local();
     let n = rows.len() + usize::from(has_up);
     let height = ui.available_height().max(120.0);
     let mut tb = TableBuilder::new(ui)
@@ -364,14 +429,19 @@ fn table(
         .resizable(true)
         .auto_shrink([false, false])
         .max_scroll_height(height)
-        .sense(egui::Sense::click())
+        // The whole row selects, opens and drags (#130); cells are plain text.
+        .sense(egui::Sense::click_and_drag())
+        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(Column::initial(190.0).at_least(100.0).clip(true))
         .column(Column::initial(70.0).clip(true))
-        .column(Column::initial(108.0).clip(true))
-        .column(Column::initial(76.0).clip(true));
-    if remote {
-        tb = tb.column(Column::remainder().at_least(60.0).clip(true));
-    }
+        .column(Column::initial(108.0).clip(true));
+    // The last column fills the pane, so a click anywhere on a row hits it (#130).
+    tb = if remote {
+        tb.column(Column::initial(76.0).clip(true))
+            .column(Column::remainder().at_least(60.0).clip(true))
+    } else {
+        tb.column(Column::remainder().at_least(76.0).clip(true))
+    };
     let arrow = |col: SortCol| {
         if p.sort == col {
             if p.descending {
@@ -415,79 +485,91 @@ fn table(
         }
     })
     .body(|body| {
+        let order: Vec<&str> = rows.iter().map(|e| e.name.as_str()).collect();
         body.rows(ROW, n, |mut row| {
             let i = row.index();
             if has_up && i == 0 {
+                row.set_selected(d.parent_selected.contains(&side));
                 row.col(|ui| {
-                    ui.label(format!("{} ..", icons::FOLDER));
+                    cell(ui, format!("{} ..", icons::FOLDER));
                 });
                 for _ in 1..cols.len() {
                     row.col(|_| {});
                 }
-                if row.response().double_clicked() {
+                let r = row.response();
+                if r.double_clicked() {
                     send(out, FmMsg::Up { id, side });
+                } else if r.clicked() {
+                    d.active = Some(side);
+                    d.click_parent(side);
                 }
                 return;
             }
             let e = &rows[i - usize::from(has_up)];
             let selected = d.selected(side).contains(&e.name);
             row.set_selected(selected);
-            let mut name_resp = None;
             row.col(|ui| {
                 let icon = match (e.is_dir(), e.kind) {
                     (true, _) => icons::FOLDER,
                     (false, Kind::Link) => icons::ARROW_RIGHT,
                     _ => icons::INFO,
                 };
+                let mark = marks.and_then(|m| m.get(&compare::key(&e.name, ci)));
+                let mut t = RichText::new(format!("{icon} {}", e.name));
+                if e.hidden {
+                    t = t.weak();
+                }
+                match mark {
+                    Some(m) => {
+                        let (dot, colour) = mark_style(*m, side);
+                        cell(ui, RichText::new(dot).color(colour));
+                        let r = ui.add(
+                            egui::Label::new(t.color(colour))
+                                .truncate()
+                                .selectable(false),
+                        );
+                        r.on_hover_text(m.title());
+                    }
+                    None => cell(ui, t),
+                }
+            });
+            row.col(|ui| {
+                if !e.is_dir() {
+                    cell(ui, human_size(e.size));
+                }
+            });
+            row.col(|ui| {
+                cell(ui, RichText::new(time_text(e.mtime)).monospace().small());
+            });
+            row.col(|ui| {
+                cell(ui, RichText::new(perm_text(e.perm)).monospace().small());
+            });
+            if remote {
+                row.col(|ui| {
+                    cell(ui, e.owner.as_str());
+                });
+            }
+            // One response for the whole row: click (select), double-click
+            // (open), drag (copy), right-click (menu).
+            let name_resp = row.response();
+            if name_resp.drag_started() {
                 let names: Vec<String> = if selected {
                     d.selected(side).iter().cloned().collect()
                 } else {
                     vec![e.name.clone()]
                 };
-                let mut t = RichText::new(format!("{icon} {}", e.name));
-                if e.hidden {
-                    t = t.weak();
-                }
-                // One widget for click (select), double-click (open) and drag (copy).
-                let r = ui.add(
-                    egui::Label::new(t)
-                        .truncate()
-                        .selectable(false)
-                        .sense(egui::Sense::click_and_drag()),
+                egui::DragAndDrop::set_payload(
+                    &name_resp.ctx,
+                    DragFiles {
+                        window: id,
+                        from: side,
+                        names,
+                    },
                 );
-                if r.drag_started() {
-                    egui::DragAndDrop::set_payload(
-                        ui.ctx(),
-                        DragFiles {
-                            window: id,
-                            from: side,
-                            names,
-                        },
-                    );
-                }
-                if r.dragged() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                }
-                name_resp = Some(r);
-            });
-            row.col(|ui| {
-                if !e.is_dir() {
-                    ui.label(human_size(e.size));
-                }
-            });
-            row.col(|ui| {
-                ui.label(RichText::new(time_text(e.mtime)).monospace().small());
-            });
-            row.col(|ui| {
-                ui.label(RichText::new(perm_text(e.perm)).monospace().small());
-            });
-            if remote {
-                row.col(|ui| {
-                    ui.label(&e.owner);
-                });
             }
-            let resp = row.response();
-            let name_resp = name_resp.map(|r| r | resp.clone()).unwrap_or(resp);
+            if name_resp.dragged() {
+                name_resp.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            }
             if name_resp.secondary_clicked() && !selected {
                 // Right-click acts on the row under the mouse.
                 let sel = d.selected_mut(side);
@@ -498,9 +580,11 @@ fn table(
                 d.active = Some(side);
             }
             name_resp.context_menu(|ui| {
-                let (copy, label) = match side {
-                    Side::Local => (Side::Local, "Upload"),
-                    Side::Remote => (Side::Remote, "Download"),
+                let (copy, label) = match (side, s.host.is_local()) {
+                    (Side::Local, false) => (Side::Local, "Upload"),
+                    (Side::Remote, false) => (Side::Remote, "Download"),
+                    (Side::Local, true) => (Side::Local, "Copy to the right"),
+                    (Side::Remote, true) => (Side::Remote, "Copy to the left"),
                 };
                 if ui
                     .button(il(
@@ -551,21 +635,19 @@ fn table(
                 }
             } else if name_resp.clicked() {
                 d.active = Some(side);
-                let ctrl = name_resp
+                let (ctrl, shift) = name_resp
                     .ctx
-                    .input(|i| i.modifiers.command || i.modifiers.ctrl);
-                let sel = d.selected_mut(side);
-                if ctrl {
-                    if !sel.remove(&e.name) {
-                        sel.insert(e.name.clone());
-                    }
-                } else {
-                    sel.clear();
-                    sel.insert(e.name.clone());
-                }
+                    .input(|i| (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift));
+                d.click_row(side, &e.name, &order, ctrl, shift);
             }
         });
     });
+}
+
+/// Text in a file-list cell: not selectable and not clickable itself, so the
+/// row under it takes the click and the pointer stays an arrow (#130).
+fn cell(ui: &mut egui::Ui, t: impl Into<egui::WidgetText>) {
+    ui.add(egui::Label::new(t).truncate().selectable(false));
 }
 
 fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>, now: Instant) {
@@ -575,12 +657,28 @@ fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Ms
         let ready = s.status == Status::Ready;
         let up: Vec<String> = d.selected_local.iter().cloned().collect();
         let down: Vec<String> = d.selected_remote.iter().cloned().collect();
+        let both_local = s.host.is_local();
+        let (up_text, up_tip, down_text, down_tip) = if both_local {
+            (
+                "Copy to right",
+                "Copy the selected files of the left folder into the right one (F5, or drag them)",
+                "Copy to left",
+                "Copy the selected files of the right folder into the left one (F5, or drag them)",
+            )
+        } else {
+            (
+                "Upload",
+                "Copy the selected local files to the host folder (F5, or drag them)",
+                "Download",
+                "Copy the selected host files to the local folder (F5, or drag them)",
+            )
+        };
         if ui
             .add_enabled(
                 ready && !up.is_empty(),
-                egui::Button::new(il(icons::ARROW_RIGHT, "Upload")),
+                egui::Button::new(il(icons::ARROW_RIGHT, up_text)),
             )
-            .on_hover_text("Copy the selected local files to the host folder (F5, or drag them)")
+            .on_hover_text(up_tip)
             .clicked()
         {
             send(
@@ -595,9 +693,9 @@ fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Ms
         if ui
             .add_enabled(
                 ready && !down.is_empty(),
-                egui::Button::new(il(icons::ARROW_LEFT, "Download")),
+                egui::Button::new(il(icons::ARROW_LEFT, down_text)),
             )
-            .on_hover_text("Copy the selected host files to the local folder (F5, or drag them)")
+            .on_hover_text(down_tip)
             .clicked()
         {
             send(
@@ -644,7 +742,12 @@ fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Ms
         .auto_shrink([false, false])
         .show(ui, |ui| {
             if s.transfers.is_empty() {
-                ui.label(RichText::new("Select files and click Upload / Download, press F5, or drag them to the other side.").weak());
+                let hint = if s.host.is_local() {
+                    "Select files and click Copy to right / Copy to left, press F5, or drag them to the other side."
+                } else {
+                    "Select files and click Upload / Download, press F5, or drag them to the other side."
+                };
+                ui.label(RichText::new(hint).weak());
             }
             for t in s.transfers.iter().rev() {
                 ui.horizontal_wrapped(|ui| {
@@ -915,8 +1018,8 @@ fn toolbar_menu(ui: &mut egui::Ui, s: &FileSession, d: &FileDraft, side: Side, o
 
 fn where_text(s: &FileSession, side: Side) -> String {
     match side {
-        Side::Local => "this computer".into(),
-        Side::Remote => s.host.alias.clone(),
+        Side::Remote if !s.host.is_local() => s.host.alias.clone(),
+        _ => "this computer".into(),
     }
 }
 
@@ -1275,4 +1378,190 @@ fn history_view(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut
 
 fn first_line(s: &str) -> &str {
     s.lines().next().unwrap_or(s)
+}
+
+/// Marker and colour of a compared entry (#131), seen from `side`.
+fn mark_style(m: Diff, side: Side) -> (&'static str, Color32) {
+    use icons::{CARET_DOWN, CARET_UP, EQUALS, NOT_EQUALS, PLUS};
+    let newer_here = matches!(
+        (m, side),
+        (Diff::NewerLeft, Side::Local) | (Diff::NewerRight, Side::Remote)
+    );
+    let only_here = matches!(
+        (m, side),
+        (Diff::OnlyLeft, Side::Local) | (Diff::OnlyRight, Side::Remote)
+    );
+    match m {
+        Diff::Same => (EQUALS, Color32::GRAY),
+        _ if only_here => (PLUS, green()),
+        _ if newer_here => (CARET_UP, Color32::from_rgb(70, 140, 230)),
+        Diff::Different => (NOT_EQUALS, usage_color(80.0)),
+        _ => (CARET_DOWN, Color32::GRAY),
+    }
+}
+
+fn transfer_summary(o: &TransferOptions) -> String {
+    let mut v = vec![format!("Mode: {}", o.mode.title())];
+    if o.newer_only {
+        v.push("new and updated files only".into());
+    }
+    if !o.exclude.is_empty() {
+        v.push(format!("excluded: {}", o.exclude.join(", ")));
+    }
+    v.join(" · ")
+}
+
+/// Synchronize (#131): direction and depth, a preview of every change, then Run.
+fn sync_dialog(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>) {
+    let id = s.id;
+    let Some(v) = &s.sync else {
+        return;
+    };
+    let right_name = if s.host.is_local() {
+        "this computer".to_string()
+    } else {
+        s.host.alias.clone()
+    };
+    let modal = egui::Modal::new(egui::Id::unique(("files-sync", id))).show(ui.ctx(), |ui| {
+        ui.set_width(620.0);
+        ui.heading(il(icons::SYNC, "Synchronize"));
+        egui::Grid::new(("sync-dirs", id)).spacing([10.0, 4.0]).show(ui, |ui| {
+            ui.label("Left (this computer)");
+            ui.label(RichText::new(&v.left).monospace());
+            ui.end_row();
+            ui.label(format!("Right ({right_name})"));
+            ui.label(RichText::new(&v.right).monospace());
+            ui.end_row();
+        });
+        ui.add_space(4.0);
+        let before = d.sync;
+        ui.horizontal_wrapped(|ui| {
+            for dir in SyncDir::ALL {
+                ui.radio_value(&mut d.sync.dir, dir, dir.title());
+            }
+        });
+        ui.checkbox(&mut d.sync.recursive, "Also the folders inside (recursive)");
+        ui.add_enabled_ui(d.sync.dir != SyncDir::Both, |ui| {
+            ui.checkbox(
+                &mut d.sync.delete,
+                act_text(Act::Danger, "Delete files the source does not have"),
+            )
+            .on_hover_text("Off by default; never for both ways. Every delete is listed below first.");
+        });
+        ui.label(RichText::new(format!("Transfer settings: {}", transfer_summary(&s.opts))).weak().small());
+        if d.sync != before && v.plan.is_some() {
+            // The preview no longer matches the form: plan again.
+            send(out, FmMsg::SyncPreview(id));
+        }
+        ui.separator();
+        match (&v.plan, v.busy) {
+            (_, true) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Comparing the folders…");
+                });
+            }
+            (None, false) => {
+                ui.label(RichText::new("Preview first: nothing changes until you click Synchronize.").weak());
+            }
+            (Some(Err(e)), false) => {
+                ui.colored_label(red(), format!("{} {e}", icons::X_CIRCLE));
+            }
+            (Some(Ok(p)), false) if p.is_empty() => {
+                ui.label(format!("{} The folders are already in sync.", icons::CHECK));
+            }
+            (Some(Ok(p)), false) => {
+                let files = |v: &[telepad_core::files::transfer::Item]| v.iter().filter(|i| !i.is_dir).count();
+                ui.label(format!(
+                    "{} file(s) left → right, {} right → left, {} delete(s)",
+                    files(&p.upload),
+                    files(&p.download),
+                    p.delete_left.len() + p.delete_right.len()
+                ));
+                egui::ScrollArea::vertical()
+                    .id_salt(("sync-list", id))
+                    .max_height(260.0)
+                    .show(ui, |ui| {
+                        for it in &p.upload {
+                            let what = if it.exists.is_some() { "replace" } else { "copy" };
+                            ui.label(RichText::new(format!("→ {what}  {}", it.label)).monospace().small());
+                        }
+                        for it in &p.download {
+                            let what = if it.exists.is_some() { "replace" } else { "copy" };
+                            ui.label(RichText::new(format!("← {what}  {}", it.label)).monospace().small());
+                        }
+                        for g in &p.delete_left {
+                            ui.label(act_text(Act::Danger, &format!("{} delete on the left  {}", icons::X, g.label)).monospace().small());
+                        }
+                        for g in &p.delete_right {
+                            ui.label(act_text(Act::Danger, &format!("{} delete on the right  {}", icons::X, g.label)).monospace().small());
+                        }
+                    });
+            }
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!v.busy, egui::Button::new(il(icons::SEARCH, "Preview"))).clicked() {
+                send(out, FmMsg::SyncPreview(id));
+            }
+            let can_run = !v.busy && matches!(&v.plan, Some(Ok(p)) if !p.is_empty());
+            let deletes = matches!(&v.plan, Some(Ok(p)) if !p.delete_left.is_empty() || !p.delete_right.is_empty());
+            let kind = if deletes { Act::Danger } else { Act::Add };
+            if act_button(ui, can_run, kind, &il(icons::SYNC, "Synchronize")).clicked() {
+                send(out, FmMsg::SyncRun(id));
+            }
+            if ui.button("Cancel").clicked() {
+                send(out, FmMsg::SyncClose(id));
+            }
+        });
+    });
+    if modal.should_close() {
+        send(out, FmMsg::SyncClose(id));
+    }
+}
+
+/// Transfer settings (#131): mode, new and updated files only, excluded folders.
+fn options_dialog(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>) {
+    let id = s.id;
+    if !d.show_opts {
+        return;
+    }
+    let modal = egui::Modal::new(egui::Id::unique(("files-opts", id))).show(ui.ctx(), |ui| {
+        ui.set_width(520.0);
+        ui.heading(il(icons::FUNNEL, "Transfer settings"));
+        ui.label(RichText::new(format!("Kept for {} — used by Upload / Download, drag and drop, F5 and Synchronize", s.host.alias)).weak());
+        ui.add_space(6.0);
+        ui.strong("Mode");
+        for m in TransferMode::ALL {
+            let hint = match m {
+                TransferMode::Default => "text for known text files (.txt, .conf, .sh, .php, .json …), binary for the rest",
+                TransferMode::Text => "every file as text: line endings become the target's (CRLF on Windows, LF on hosts)",
+                TransferMode::Binary => "bytes unchanged",
+            };
+            ui.radio_value(&mut d.opts_form.mode, m, m.title()).on_hover_text(hint);
+        }
+        ui.label(RichText::new("Text needs SFTP or this computer; scp and rsync always copy bytes as they are.").weak().small());
+        ui.add_space(6.0);
+        ui.checkbox(&mut d.opts_form.newer_only, "New and updated files only")
+            .on_hover_text("An existing file is replaced only when the copied one is newer; no question");
+        ui.add_space(6.0);
+        ui.strong("Exclude folders");
+        ui.add(
+            egui::TextEdit::singleline(&mut d.opts_exclude)
+                .hint_text("node_modules; .git; dist  (* and ? allowed)")
+                .desired_width(f32::INFINITY),
+        );
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if act_button(ui, true, Act::Edit, &il(icons::SAVE, "Save")).clicked() {
+                send(out, FmMsg::OptionsSave(id));
+            }
+            if ui.button("Cancel").clicked() {
+                send(out, FmMsg::OptionsClose(id));
+            }
+        });
+    });
+    if modal.should_close() {
+        send(out, FmMsg::OptionsClose(id));
+    }
 }

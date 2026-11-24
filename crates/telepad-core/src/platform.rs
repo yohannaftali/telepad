@@ -710,6 +710,71 @@ pub fn open_terminal(program: &std::path::Path, args: &[String]) -> Result<(), S
     open_terminal_impl(program, args).map_err(|e| format!("cannot open terminal: {e}"))
 }
 
+/// An interactive shell of this computer in a new terminal window, started
+/// in the home folder (#129): Windows Terminal (else PowerShell in its own
+/// console), Terminal.app, or the first terminal emulator found on Linux.
+pub fn open_local_shell() -> std::io::Result<()> {
+    let home = crate::files::local_home();
+    open_local_shell_impl(std::path::Path::new(&home))
+}
+
+#[cfg(target_os = "windows")]
+fn open_local_shell_impl(home: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    let wt = std::env::var_os("LOCALAPPDATA")
+        .map(|d| std::path::PathBuf::from(d).join(r"Microsoft\WindowsApps\wt.exe"))
+        .filter(|p| p.exists());
+    if let Some(wt) = wt {
+        return Command::new(wt)
+            .args(["-w", "telepad", "new-tab", "--title", "This computer", "-d"])
+            .arg(home)
+            .spawn()
+            .map(|_| ());
+    }
+    let ps = std::env::var_os("SystemRoot")
+        .map(|r| {
+            std::path::PathBuf::from(r).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+        })
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| "powershell.exe".into());
+    Command::new(ps)
+        .arg("-NoLogo")
+        .current_dir(home)
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .spawn()
+        .map(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn open_local_shell_impl(home: &std::path::Path) -> std::io::Result<()> {
+    Command::new("open")
+        .args(["-a", "Terminal"])
+        .arg(home)
+        .spawn()
+        .map(|_| ())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_local_shell_impl(home: &std::path::Path) -> std::io::Result<()> {
+    let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no terminal emulator found");
+    for term in [
+        "x-terminal-emulator",
+        "gnome-terminal",
+        "konsole",
+        "xfce4-terminal",
+        "alacritty",
+        "kitty",
+        "xterm",
+    ] {
+        match Command::new(term).current_dir(home).spawn() {
+            Ok(_) => return Ok(()),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
 /// Windows: Rust always passes the parent's std handles to the child, and a
 /// GUI parent has none, so spawning ssh.exe directly (even with
 /// CREATE_NEW_CONSOLE) leaves it with no terminal. Instead, hand the command
