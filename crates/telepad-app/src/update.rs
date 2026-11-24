@@ -40,6 +40,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         drafts: d,
     } = state;
     let hosts_changed = matches!(msg, Msg::HostsLoaded { .. });
+    let raise = raise_target(&msg);
     let collected_host = matches!(msg, Msg::Collected(collector::Update::Done { .. }));
     match msg {
         Msg::Started {
@@ -1152,10 +1153,62 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
     ws.sync(m);
     ws.sync_keys(d.keys.is_some());
     m.ws = ws;
+    // Asked for a page that is already open (#136): restore and raise it.
+    if let Some(w) = raise.and_then(|r| raise_win(m, r))
+        && m.ws.is_open(w)
+    {
+        m.ws.open(w);
+    }
     if m.db_path.is_some() {
         autosave(m, d, now, &mut fx);
     }
     fx
+}
+
+/// A message that leads the user to a page (#136).
+enum Raise {
+    Files(String),
+    Editor(crate::files::FmId),
+    EditorOf(String),
+    Db(String),
+    Logins(String),
+    Host,
+    Keys,
+    HostSync,
+}
+
+fn raise_target(msg: &Msg) -> Option<Raise> {
+    use crate::editor::EdMsg;
+    use crate::files::FmMsg;
+    Some(match msg {
+        Msg::Files(FmMsg::Open(a)) => Raise::Files(a.clone()),
+        Msg::Files(FmMsg::OpenFile { alias, .. }) => Raise::EditorOf(alias.clone()),
+        Msg::Files(FmMsg::Editor {
+            id,
+            msg: EdMsg::Open { .. } | EdMsg::OpenPath { .. },
+        })
+        | Msg::Files(FmMsg::Diff(id)) => Raise::Editor(*id),
+        Msg::Db(crate::db::DbMsg::Open(t)) => Raise::Db(t.key()),
+        Msg::Logins(crate::logins::LgMsg::Open(a)) => Raise::Logins(a.clone()),
+        Msg::Select(Some(_)) | Msg::SelectAlias(_) => Raise::Host,
+        Msg::KeysOpen => Raise::Keys,
+        Msg::HostSync(crate::hostsync::HsMsg::Open) => Raise::HostSync,
+        _ => return None,
+    })
+}
+
+fn raise_win(m: &Model, r: Raise) -> Option<crate::workspace::Win> {
+    use crate::workspace::Win;
+    Some(match r {
+        Raise::Files(a) => Win::Files(m.files.iter().find(|s| s.host.alias == a)?.id),
+        Raise::Editor(id) => Win::Editor(id),
+        Raise::EditorOf(a) => Win::Editor(m.files.iter().find(|s| s.host.alias == a)?.id),
+        Raise::Db(k) => Win::Db(m.db.iter().find(|s| s.target.key() == k)?.id),
+        Raise::Logins(a) => Win::Logins(m.logins.iter().find(|s| s.alias == a)?.id),
+        Raise::Host => Win::Host,
+        Raise::Keys => Win::Keys,
+        Raise::HostSync => Win::HostSync,
+    })
 }
 
 /// Layout changes go to the current workspace (none while `<none>` is

@@ -118,6 +118,8 @@ pub struct EdDraft {
     pub replace: String,
     pub goto: String,
     pub opts: FindOpts,
+    /// Compare (#135): the two sides scroll on their own.
+    pub no_sync_scroll: bool,
 }
 
 impl EdDraft {

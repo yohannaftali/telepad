@@ -24,6 +24,10 @@ Only the latest release is supported.
   (not only SSH), which may hold sensitive text; it gives no write access and no root.
 - **Open database…** reaches a database only through `ssh -N -L` over the host's normal
   login (`BatchMode=yes`); no database port is opened and nothing on the host is changed.
+  **Import…** (#139) adds rows only after the user saw the mapping, the first rows and the
+  exact `INSERT` statements and clicked Import, in one transaction, never on Read-only
+  connections; a SQL file is limited to `INSERT INTO` the chosen table. Exports write only
+  to the file the user picked.
   The one exception is **My Computer**: its own databases are opened on `127.0.0.1` directly
   (no SSH); any other address is refused.
 - **My Computer** reads this computer read-only and without administrator rights (system

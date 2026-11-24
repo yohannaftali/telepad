@@ -98,8 +98,9 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
                                 format!("{title}{arrow}")
                             };
                             let name = if title.is_empty() { "status" } else { title };
-                            if ui
-                                .add(egui::Button::new(RichText::new(text).strong()).frame(false))
+                            crate::widgets::cell_text(ui, RichText::new(text).strong());
+                            // The whole header cell sorts (#137).
+                            if crate::widgets::cell_click(ui, ("sort", c))
                                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .on_hover_text(format!(
                                     "Click to sort by {name} (again to reverse, a third time for inventory order). Double-click a column border to fit it."

@@ -612,6 +612,138 @@ pub fn flag_chips(ui: &mut egui::Ui, flags: &[Flag]) {
     }
 }
 
+/// The click of a whole table cell (#137): put the cell's text in as a
+/// plain label (not selectable, not clickable), then this takes clicks,
+/// double-clicks and right-clicks anywhere in the cell, around the text too.
+pub fn cell_click(
+    ui: &mut egui::Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+) -> egui::Response {
+    let rect = ui.max_rect();
+    ui.interact(rect, ui.scope_id().with(salt), egui::Sense::click())
+}
+
+/// Text of a table cell that leaves the click to [`cell_click`].
+pub fn cell_text(ui: &mut egui::Ui, t: impl Into<egui::WidgetText>) -> egui::Response {
+    ui.add(egui::Label::new(t).truncate().selectable(false))
+}
+
+/// Height of a [`pager_bar`] footer.
+pub const PAGER_H: f32 = 34.0;
+
+/// The footer pager of a table (#138, #140), as in the Senar / wtbapp
+/// tables: `Record [1 - 20] of 279`, first / previous / `Page [n] of N` /
+/// next / last, Rows per page (typed; above 100 asks first). `total`:
+/// `None` while the count is not known (shown as "of many"). Returns
+/// `true` when the page or the size changed.
+pub fn pager_bar(
+    ui: &mut egui::Ui,
+    p: &mut telepad_app::pager::Pager,
+    total: Option<usize>,
+    salt: impl std::hash::Hash + std::fmt::Debug + Copy,
+) -> bool {
+    use telepad_app::pager::Go;
+    let mut changed = false;
+    let known = total.unwrap_or(usize::MAX / 2);
+    ui.horizontal(|ui| {
+        ui.set_min_height(PAGER_H - 8.0);
+        let info = match total {
+            Some(t) => p.record_info(t),
+            None => {
+                let (s, e, _) = p.range(known);
+                format!("Record [{} - {e}] of many", s + 1)
+            }
+        };
+        ui.label(RichText::new(info).weak());
+        ui.separator();
+        let pages = p.pages(known);
+        let first = p.page.min(pages - 1) == 0;
+        let last = total.is_some() && p.page + 1 >= pages;
+        let caret = |a: &str, two: bool| {
+            if two {
+                format!("{a}{a}")
+            } else {
+                a.to_string()
+            }
+        };
+        let button = |ui: &mut egui::Ui, text: String, tip: &str, on: bool, to: Go| {
+            ui.add_enabled(on, egui::Button::new(text).small())
+                .on_hover_text(tip)
+                .clicked()
+                .then_some(to)
+        };
+        let mut go = button(
+            ui,
+            caret(crate::icons::CARET_LEFT, true),
+            "First page",
+            !first,
+            Go::First,
+        );
+        go = go.or(button(
+            ui,
+            caret(crate::icons::CARET_LEFT, false),
+            "Previous page",
+            !first,
+            Go::Prev,
+        ));
+        ui.label("Page");
+        let r = ui.add(
+            egui::TextEdit::singleline(&mut p.page_text)
+                .id_salt(("pager-page", salt))
+                .desired_width(40.0),
+        );
+        if r.lost_focus() {
+            changed |= p.apply_page(known);
+        }
+        ui.label(match total {
+            Some(_) => format!("of {pages}"),
+            None => "of many".into(),
+        });
+        go = go.or(button(
+            ui,
+            caret(crate::icons::CARET_RIGHT, false),
+            "Next page",
+            !last,
+            Go::Next,
+        ));
+        go = go.or(button(
+            ui,
+            caret(crate::icons::CARET_RIGHT, true),
+            "Last page",
+            !last && total.is_some(),
+            Go::Last,
+        ));
+        if let Some(to) = go {
+            changed |= p.go(to, known);
+        }
+        ui.separator();
+        ui.label("Rows per page");
+        let r = ui
+            .add(
+                egui::TextEdit::singleline(&mut p.per_page_text)
+                    .id_salt(("pager-size", salt))
+                    .desired_width(48.0)
+                    .hint_text("100"),
+            )
+            .on_hover_text("Type a number (20, 50, 100 …) and press Enter; empty = 100");
+        if r.lost_focus() {
+            changed |= p.apply_per_page();
+        }
+        if let Some(n) = p.ask {
+            ui.colored_label(
+                usage_color(80.0),
+                format!("{n} rows per page makes the list slow. Continue?"),
+            );
+            if ui.small_button("Yes").clicked() {
+                changed |= p.answer(true);
+            }
+            if ui.small_button("No").clicked() {
+                p.answer(false);
+            }
+        }
+    });
+    changed
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1278,3 +1278,28 @@ fn diff_opens_both_files_side_by_side_in_the_editor() {
             .contains("select one file")
     );
 }
+
+#[test]
+fn a_folder_link_shows_the_folder_it_opened() {
+    // #134: the runtime lists a junction at its target; the pane shows that path.
+    let (mut s, id) = opened(Mode::Sftp);
+    let fx = send(
+        &mut s,
+        FmMsg::Enter {
+            id,
+            side: Side::Local,
+            name: "site".into(),
+        },
+    );
+    assert!(matches!(&fx[..], [FmEffect::List { .. }]));
+    send(
+        &mut s,
+        FmMsg::Listed {
+            id,
+            side: Side::Local,
+            result: Ok(("/home/me/real-site".into(), vec![])),
+        },
+    );
+    assert_eq!(fs(&s).local.path, "/home/me/real-site");
+    assert_eq!(draft(&mut s).local_path, "/home/me/real-site");
+}

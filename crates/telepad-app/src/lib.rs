@@ -16,6 +16,7 @@ pub mod hostsync;
 pub mod logins;
 mod msg;
 pub mod mykeys;
+pub mod pager;
 mod state;
 mod table;
 mod update;

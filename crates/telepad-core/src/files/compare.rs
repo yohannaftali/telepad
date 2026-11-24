@@ -353,6 +353,45 @@ pub fn line_marks(left: &str, right: &str) -> (Vec<bool>, Vec<bool>) {
     (ma, mb)
 }
 
+/// For synchronized scrolling (#135): the line of the other side that
+/// matches each line, from [`line_marks`]. A deleted / added line maps to
+/// the next line both sides share.
+pub fn line_map(left: &[bool], right: &[bool]) -> (Vec<usize>, Vec<usize>) {
+    let (mut l2r, mut r2l) = (
+        Vec::with_capacity(left.len()),
+        Vec::with_capacity(right.len()),
+    );
+    let (mut i, mut j) = (0, 0);
+    while i < left.len() || j < right.len() {
+        match (left.get(i), right.get(j)) {
+            (Some(true), _) => {
+                l2r.push(j);
+                i += 1;
+            }
+            (_, Some(true)) => {
+                r2l.push(i);
+                j += 1;
+            }
+            (Some(false), Some(false)) => {
+                l2r.push(j);
+                r2l.push(i);
+                i += 1;
+                j += 1;
+            }
+            (Some(false), None) => {
+                l2r.push(j);
+                i += 1;
+            }
+            (None, Some(false)) => {
+                r2l.push(i);
+                j += 1;
+            }
+            (None, None) => break,
+        }
+    }
+    (l2r, r2l)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,6 +438,17 @@ mod tests {
         assert_eq!(c["case.txt"], Diff::Same);
         let c = compare(&left, &right, false);
         assert_eq!(c["Case.TXT"], Diff::OnlyLeft);
+    }
+
+    #[test]
+    fn maps_matching_lines_for_synchronized_scrolling() {
+        // left: a b c d   right: a X b d e  (c deleted; X, e added)
+        let (l, r) = line_marks("a\nb\nc\nd", "a\nX\nb\nd\ne");
+        assert_eq!(l, [false, false, true, false]);
+        assert_eq!(r, [false, true, false, false, true]);
+        let (l2r, r2l) = line_map(&l, &r);
+        assert_eq!(l2r, [0, 2, 3, 3]);
+        assert_eq!(r2l, [0, 1, 1, 3, 4]);
     }
 
     #[test]

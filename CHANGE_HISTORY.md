@@ -2,6 +2,59 @@
 
 Newest first.
 
+## [2026-11-24] — Tested #134–#140 (stack ending at `139-db-export-import`)
+- Windows 11, release build; fmt, clippy `-D warnings`, `cargo test --workspace` (core 219,
+  app 181, gui 7); live database tests against throwaway MariaDB 11 / PostgreSQL 17
+  containers on 127.0.0.1 (filter boxes, `COUNT(*)`, import incl. rollback) — removed after.
+- GUI via UI Automation on a copy of the inventory: #134 legacy junctions hidden, `My
+  Documents` opens `Documents`; #136 a minimized database window comes back when its
+  button is clicked again; #137 sort from the empty part of headers (database grid, Hosts
+  table), row select from empty cell space; #138 filter box `=Springfield` → 83 of 250,
+  20 rows per page → 13 pages, last page `Record [241 - 250] of 250`, Columns chooser hides
+  a column (kept); #139 CSV export of 250 rows / 4 shown columns in grid order, import of 3
+  CSV rows with a column map (skip, NULL, `O'Brien`) → 253, re-import rolled back with
+  "Row 1 of 3: Duplicate entry"; #135 Diff `-` red / `+` green with counts, synchronized
+  scrolling to the matching line; #140 Log info footer `Record [941 - 955] of 955`, stays
+  visible while rows scroll.
+- Fixed during testing: the database window's status line said "via SSH" for this
+  computer; live MySQL test cleaned its imported rows.
+- Not verified: Excel / SQL export in the GUI (unit-tested round trip), PostgreSQL GUI
+  import, Linux / macOS GUI (CI builds them).
+
+## [2026-11-24] — #134–#140 implemented (stacked branches `134-…` → `136-…` → `137-…` → `140-…` → `138-…` → `135-…` → `139-…`)
+- #134 fix(files): Windows legacy junctions — hidden / system taken from the link itself,
+  a link opens at its target (`list_local_at`), plain "access denied" text. Files: core
+  `files/mod.rs`, gui `runtime.rs`, app `tests_files.rs`, manual.
+- #136 fix(ui): a message that leads to an open page (Edit, Open files, Open database, Log
+  info, host page, Authorized keys, Host Management) restores and raises it (`update.rs`
+  `raise_target` / `raise_win`). Files: app `update.rs`, `tests_workspace.rs`, manual.
+- #137 fix(ui): `widgets::cell_text` / `cell_click`: whole cells and header cells take
+  clicks (database grids, file panes, Log info, Hosts table); database grids centred.
+- #140 feat(keys): `telepad-app::pager::Pager` + `widgets::pager_bar` (Record [a - b] of n,
+  first / previous / Page [n] of N / next / last, typed rows per page, ask above 100); Log
+  info's pager is a sticky footer.
+- #138 feat(db): filter row under the Data grid headers (`sql::filter_condition`, quoted
+  literals, wtbapp rules) with the Custom WHERE; Columns chooser (search, per table in
+  `settings`); pager footer with `COUNT(*)` total; 100 rows by default.
+- #135 feat(editor): git-style Diff (- red deleted left, + green added right, counts) and
+  synchronized scrolling to the matching line (`compare::line_map`), Sync scroll toggle.
+- #139 feat(db): Export (CSV / SQL / .xlsx; filtered rows, whole table or page; shown or all
+  columns; query results too) and Import (CSV / Excel / SQL INSERTs; column map, preview,
+  one transaction, error names the row; never on Read-only); new deps `csv` 1.4.0,
+  `rust_xlsxwriter` 0.104.0, `calamine` 0.38.0.
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 219, app 181, gui 7).
+  Not verified yet: GUI (tester), live MySQL / PostgreSQL import (CI `db-live`).
+
+## [2026-11-24] — Issues #134–#140 created on GitHub
+- #134 fix(files): Windows legacy junctions (My Documents) — hide system folders, open the link target instead of Access denied (bug; core files, app files)
+- #135 feat(editor): git-style Diff colours (+ green added, - red deleted) and synchronized scrolling (enhancement; core compare, gui text_editor)
+- #136 fix(ui): opening an already open page restores and raises its window (minimized or behind) (bug; app workspace)
+- #137 fix(ui): table cells and headers react to clicks anywhere in the cell — database grid select / centring, sort on header click (bug; gui database, files)
+- #138 feat(db): data grid filter row, column chooser and pager footer (Senar / wtbapp style, 100 rows default) (enhancement; core db, app db, gui)
+- #139 feat(db): export and import table data (SQL, CSV, Excel) (enhancement; core db, app db, gui)
+- #140 feat(keys): Log info pager as a sticky footer with record info and first / previous / next / last (enhancement; gui logins, widgets)
+- Reference for #138 / #140: wtbapp `code2/public/js/y.panel.js` (`pager_*`, `filter_build`), `y.app.js` (`y_record_info`, `y_page_size_ask`, `y_filter_match`), `y.select.js`; Senar.
+
 ## [2026-11-24] — Telepad 0.9.7
 - **My Computer** (#129): a page above **Hosts** for the PC Telepad runs on, without SSH —
   System, Maintenance, Usage, Disks, Network, Sensors, Docker, Ports in use; **Open

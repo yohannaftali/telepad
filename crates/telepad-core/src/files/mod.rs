@@ -169,9 +169,33 @@ fn mtime_of(m: &std::fs::Metadata) -> Option<i64> {
         .map(|d| d.as_secs() as i64)
 }
 
+/// A local folder to show: a link or junction is opened at its target (a
+/// Windows legacy junction such as `My Documents` refuses listing itself,
+/// #134). Returns the folder actually listed and its entries.
+pub fn list_local_at(dir: &str) -> Result<(String, Vec<Entry>), String> {
+    let p = Path::new(dir);
+    let is_link = std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+    if is_link && let Ok(t) = std::fs::read_link(p) {
+        let target = if t.is_absolute() {
+            t
+        } else {
+            p.parent().map_or(t.clone(), |d| d.join(&t))
+        };
+        let shown = target.display().to_string();
+        let shown = shown.strip_prefix(r"\\?\").unwrap_or(&shown).to_string();
+        return list_local(&shown).map(|v| (shown, v));
+    }
+    list_local(dir).map(|v| (dir.to_string(), v))
+}
+
 /// The entries of a local folder.
 pub fn list_local(dir: &str) -> Result<Vec<Entry>, String> {
-    let rd = std::fs::read_dir(dir).map_err(|e| format!("Cannot open {dir}: {e}"))?;
+    let rd = std::fs::read_dir(dir).map_err(|e| match e.kind() {
+        std::io::ErrorKind::PermissionDenied => {
+            format!("Cannot open {dir}: access denied — this account may not list this folder")
+        }
+        _ => format!("Cannot open {dir}: {e}"),
+    })?;
     let mut out = Vec::new();
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
@@ -194,7 +218,10 @@ pub fn list_local(dir: &str) -> Result<Vec<Entry>, String> {
             Kind::Other
         };
         out.push(Entry {
-            hidden: name.starts_with('.') || hidden_attr(m),
+            // The link's own attributes count: Windows marks its legacy
+            // junctions (My Documents, Application Data …) hidden + system,
+            // while their target folder is not (#134).
+            hidden: name.starts_with('.') || hidden_attr(&lm) || hidden_attr(m),
             name,
             kind,
             link_dir: link && m.is_dir(),
@@ -207,10 +234,13 @@ pub fn list_local(dir: &str) -> Result<Vec<Entry>, String> {
     Ok(out)
 }
 
+/// Hidden or system (Explorer hides both).
 #[cfg(windows)]
 fn hidden_attr(m: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
-    m.file_attributes() & 0x2 != 0
+    const HIDDEN: u32 = 0x2;
+    const SYSTEM: u32 = 0x4;
+    m.file_attributes() & (HIDDEN | SYSTEM) != 0
 }
 
 #[cfg(not(windows))]
@@ -290,3 +320,39 @@ mod tests {
 
 #[cfg(test)]
 mod live_tests;
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    #[test]
+    fn a_folder_link_opens_at_its_target() {
+        // #134: `My Documents` is a junction that refuses listing; its target opens.
+        let root = std::env::temp_dir().join(format!("telepad-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Documents")).unwrap();
+        std::fs::write(root.join("Documents").join("a.txt"), "a").unwrap();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(root.join("Documents"), root.join("My Docs"))
+            .is_ok()
+            || std::process::Command::new("cmd")
+                .args(["/c", "mklink", "/J"])
+                .arg(root.join("My Docs"))
+                .arg(root.join("Documents"))
+                .output()
+                .is_ok_and(|o| o.status.success());
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(root.join("Documents"), root.join("My Docs")).is_ok();
+        if !made {
+            eprintln!("cannot create a link here: skipped");
+            return;
+        }
+        let (shown, v) = list_local_at(&root.join("My Docs").display().to_string()).unwrap();
+        assert!(shown.ends_with("Documents"), "{shown}");
+        assert_eq!(v.len(), 1);
+        let listed = list_local(&root.display().to_string()).unwrap();
+        let link = listed.iter().find(|e| e.name == "My Docs").unwrap();
+        assert!(link.is_dir() && link.kind == Kind::Link);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

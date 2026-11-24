@@ -73,7 +73,10 @@ back to the front if it is already open. Each window has a title bar:
 - **Move**: drag the title bar. **Resize**: drag the right edge, the bottom edge or the
   bottom-right corner. Windows stay inside the workspace.
 - **− (Minimize)** puts it in the strip at the bottom; click it there (or pick it in the
-  window picker) to bring it back. **Maximize** (the corners-out icon) fills the workspace;
+  window picker) to bring it back. Anything that leads to a window that is already open —
+  **Edit** / F4 / double-click on a file (editor), **Open files…**, **Open database…**,
+  **Log info**, a host in the list, a sidebar page — brings it back from the strip and to
+  the front (a maximized window stays maximized). **Maximize** (the corners-out icon) fills the workspace;
   **Restore size** (corners in) or a double-click on the title bar gets the old size back. **×** closes it (a file window
   with unsaved editor tabs asks first).
 - **⧉ (Tabs)**: **Show as a tab in** → another window puts this page in that window as a
@@ -400,7 +403,10 @@ The table (made-up example):
 - One **filter** box under each header: text = contains (any case), `=x` equal, `!x` not
   equal, `>x` / `<x` (numbers by value, times as text, e.g. `>2026-11-20`), `NULL` empty,
   `!NULL` not empty. **Clear filters** empties them all.
-- **Pages**: ◀ / ▶ and **Rows per page** (type a number and press Enter; 20 by default).
+- **Pager** (footer under the table, it stays visible while the rows scroll): *Record [21 - 40]
+  of 279*, then first / previous, **Page [n] of N** (type a page number and press Enter),
+  next / last, and **Rows per page** (type a number and press Enter; 20 by default, empty
+  = 100; more than 100 asks first because a long page is slow).
 - **Show this PC's logins** (off by default): logins from this PC's address with a key
   Telepad logs in with. Telepad does not reuse connections, so every refresh round is one
   login (about 1 440 a day per host at the default 60 s, see [Update Strategy](#update-strategy));
@@ -791,12 +797,16 @@ windows can be open at once, one per host.
 - **Panes**: each has **Up**, **Home** and **Refresh**, the folder path (type a path and
   press Enter to go there; on this computer `~` is your home folder) and a filter box that narrows the list
   by name. The columns are Name, Size, Modified (UTC) and Permissions, plus Owner on the
-  host side; click a header to sort, click it again to reverse. Folders are listed first.
+  host side; click a header (anywhere in it) to sort, click it again to reverse. Folders are listed first.
   - Click anywhere on a row (icon, name, size, date, permissions) to select it; Ctrl+click
     adds or removes rows, Shift+click selects every row from the one clicked last. The pane
     title shows how many are selected. The **..** row can be highlighted too, but it is
     never copied, deleted or changed.
-  - Double-click a folder (or **..**) to open it; drag any part of a row to copy it.
+  - Double-click a folder (or **..**) to open it; drag any part of a row to copy it. A link
+    or junction opens at the folder it points to (the path bar shows that folder): Windows' old
+    `My Documents`, `Application Data` … junctions open `Documents`, `AppData\Roaming` ….
+  - On this computer, files and folders Windows marks hidden or system are shown only with
+    **Hidden files**, as in Explorer.
   - Both folders are remembered per host for the next time the window opens.
 - **Copy** the selected files and folders (folders with everything in them):
   - **Upload** (local → host folder) or **Download** (host → local folder), or
@@ -882,8 +892,12 @@ The top bar of a file window has four tools that work between the two panes:
   *New and updated files only*, a file that differs is copied even when the target is
   newer. Links are never followed or copied; folders in **Exclude folders** stay out.
   Needs SFTP on the host.
-- **Diff** opens a file of each pane side by side in the [editor](#editor), the lines that
-  differ marked in orange. Select one file in each pane, or one file whose name is also in
+- **Diff** opens a file of each pane side by side in the [editor](#editor), like a git diff:
+  lines only in the left file are red with a **-** in the gutter (deleted), lines only in the
+  right file green with a **+** (added), equal lines in the normal colours; a changed line
+  shows as **-** on the left and **+** on the right. The bar counts *n added, m deleted*.
+  **Sync scroll** (on by default) keeps the two sides at the matching lines while you
+  scroll either one. Select one file in each pane, or one file whose name is also in
   the other pane. Both sides can be edited and each has its own **Save** (with the usual
   changed-on-disk check); **Close compare** goes back to normal tabs. Binary files and
   files over the editor's size limit say so instead.
@@ -1243,10 +1257,21 @@ cannot reach the database address, the dialog says so.
 
 **Data tab**
 
-- 1000 rows per page (100 / 500 / 5000 in the page box), **◀ ▶** for the previous /
-  next page, **↻** to reload. Click a column header to sort: ascending, descending, off.
-- The filter box takes a `WHERE` condition in SQL, e.g. `city = 'Springfield'`; Enter or
-  **Filter** applies it, **Clear** removes it.
+- **Filter boxes** under every column header (as in the Senar / wtbapp tables): text =
+  contains (any case), `=x` equal, `!x` not equal, `>x` / `<x` greater / less (numbers by
+  value), `NULL` empty, `!NULL` has a value; Enter applies. Values are sent as quoted
+  literals, never as SQL.
+- **Custom WHERE**: the box in the toolbar takes your own SQL condition, e.g.
+  `city = 'Springfield'`; it is applied together with the filter boxes. **Filter** (or Enter)
+  applies, **Clear filters** removes both.
+- **Columns ▾**: search the columns and tick the ones to show; **Show all** / **Hide all**.
+  Kept for this table of this connection.
+- **Pager** (footer under the grid, it stays visible while the rows scroll): *Record [1 -
+  100] of 2 345* (*of many* when the count is not available), first / previous,
+  **Page [n] of N** (type a page and press Enter), next / last, **Rows per page** (100 by
+  default; type a number and press Enter, empty = 100, more than 100 asks first).
+  **↻** reloads. Click a column title (anywhere in it) to sort: ascending, descending, off;
+  a new sort or filter goes back to page 1. Click anywhere in a cell to select its row.
 - NULL is shown as a grey *NULL*. Long values and binary data are cut (the full length is
   shown); right-click a cell for **Copy value** and **View value…**.
 - Editing (only for tables with a primary key or a NOT NULL unique key, and not in
@@ -1291,6 +1316,25 @@ cannot reach the database address, the dialog says so.
   also ask you to type the table name.
 
 Closing the window, **Reconnect**, or quitting Telepad stops the SSH tunnel.
+
+### Export and import
+
+- **Export…** (Data tab toolbar): **CSV** (header row, `,` or `;`; cells a spreadsheet would
+  read as a formula get a leading `'`, numbers stay as they are), **SQL (INSERT)** (one
+  `INSERT` per row with quoted names and values, optionally the `CREATE TABLE` first) or
+  **Excel (.xlsx)** (numbers as numbers). Rows: **Filtered rows (all pages)**, **Whole
+  table** or **This page**; the shown columns (tick **Also the hidden columns** for all).
+  A save dialog asks for the file; the export runs in the background page by page
+  (*exporting… n rows*, **Cancel**), writes `<file>.telepad-part` and renames it when done.
+  Values longer than 64 KiB are cut as in the grid; the result says how many.
+- **Export result** (Query tab) writes the shown result the same way.
+- **Import…** (not on Read-only connections): pick a CSV / TSV, Excel (`.xlsx`, `.xls`,
+  `.ods`; first sheet, first row = column names) or SQL file. The dialog maps each file
+  column to a table column by name (change it, or *(skip)*), shows the first rows and the
+  first `INSERT` statements with the values. A SQL file is taken only for its `INSERT
+  INTO <this table>` statements; anything else is listed and left out. **Import** runs all
+  rows in one transaction: the first error undoes everything and names the row.
+- Exports and imports are written to the SQL log.
 
 ### SQL log
 

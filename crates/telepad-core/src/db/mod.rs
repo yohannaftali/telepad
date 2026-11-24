@@ -9,6 +9,7 @@
 pub mod client;
 pub mod ddl;
 pub mod detect;
+pub mod io;
 pub mod secret;
 pub mod sql;
 pub mod tunnel;

@@ -72,9 +72,8 @@ pub enum Dir {
     Desc,
 }
 
-/// Rows per page when nothing (or no number) is typed.
+/// Rows per page of a new page (the wtbapp default; #140).
 pub const PAGE_SIZE: usize = 20;
-pub const PAGE_SIZE_MAX: usize = 5000;
 
 /// What the view binds to: sort, filters, page, toggles.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,11 +82,8 @@ pub struct LoginDraft {
     pub sort: Option<(Col, Dir)>,
     /// One filter box per column ([`Col::ALL`] order).
     pub filters: [String; 8],
-    /// 0-based.
-    pub page: usize,
-    pub per_page: usize,
-    /// The Rows per page box as typed.
-    pub per_page_text: String,
+    /// Page, rows per page (the footer, #140).
+    pub pager: crate::pager::Pager,
     /// Show the logins of this PC with Telepad's key (hidden by default:
     /// Telepad logs in on every refresh).
     pub show_own: bool,
@@ -98,9 +94,7 @@ impl Default for LoginDraft {
         Self {
             sort: None,
             filters: Default::default(),
-            page: 0,
-            per_page: PAGE_SIZE,
-            per_page_text: PAGE_SIZE.to_string(),
+            pager: crate::pager::Pager::new(PAGE_SIZE),
             show_own: false,
         }
     }
@@ -114,22 +108,7 @@ impl LoginDraft {
             Some((s, Dir::Desc)) if s == c => None,
             _ => Some((c, Dir::Asc)),
         };
-        self.page = 0;
-    }
-
-    /// Rows per page from the typed text: empty / not a number = 20.
-    pub fn apply_per_page(&mut self) {
-        let digits: String = self
-            .per_page_text
-            .chars()
-            .filter(char::is_ascii_digit)
-            .collect();
-        self.per_page = match digits.parse::<usize>() {
-            Ok(n) if n > 0 => n.min(PAGE_SIZE_MAX),
-            _ => PAGE_SIZE,
-        };
-        self.per_page_text = self.per_page.to_string();
-        self.page = 0;
+        self.pager.reset();
     }
 
     pub fn filter(&self, c: Col) -> &str {
@@ -309,11 +288,7 @@ pub fn rows<'a>(log: &'a LoginLog, mine: &[(String, String)], d: &LoginDraft) ->
 /// The page shown: (first index, end index, page count), with `d.page`
 /// clamped to the last page.
 pub fn page_range(total: usize, d: &LoginDraft) -> (usize, usize, usize) {
-    let per = d.per_page.max(1);
-    let pages = total.div_ceil(per).max(1);
-    let page = d.page.min(pages - 1);
-    let start = page * per;
-    (start.min(total), (start + per).min(total), pages)
+    d.pager.range(total)
 }
 
 /// One filter box against one cell, as in the wtbapp tables: contains (any

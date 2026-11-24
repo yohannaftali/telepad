@@ -167,7 +167,7 @@ fn open_items(s: &mut State, with_key: bool) -> DbId {
         &jobs(&fx)[1],
         DbJob::Page {
             offset: 0,
-            limit: 1000,
+            limit: 100,
             ..
         }
     ));
@@ -187,6 +187,7 @@ fn open_items(s: &mut State, with_key: bool) -> DbId {
             table: items(),
             offset: 0,
             result: Ok(grid()),
+            total: Some(2),
         },
     );
     id
@@ -402,7 +403,7 @@ fn data_paging_sorting_and_filter_reload_the_page() {
     };
     assert!(
         send(&mut s, DbMsg::DataPage { id, forward: true }).is_empty(),
-        "2 rows < 1000: no next page"
+        "2 rows < 100: no next page"
     );
     let fx = send(
         &mut s,
@@ -440,6 +441,7 @@ fn data_paging_sorting_and_filter_reload_the_page() {
             table: items(),
             offset: 0,
             result: Ok(grid()),
+            total: Some(2),
         },
     );
     let fx = send(&mut s, DbMsg::DataPage { id, forward: true });
@@ -452,6 +454,7 @@ fn data_paging_sorting_and_filter_reload_the_page() {
             table: items(),
             offset: 0,
             result: Err("late".into()),
+            total: Some(2),
         },
     );
     assert!(session(&s).data.error.is_none());
@@ -956,4 +959,290 @@ fn databases_of_a_host_come_from_containers_and_listeners() {
     assert_eq!(t.len(), 2);
     assert_eq!(t[0].container, "shop-db");
     assert_eq!((t[1].engine, t[1].port), (Engine::Postgres, 5432));
+}
+
+#[test]
+fn filter_boxes_pager_and_hidden_columns() {
+    // #138: filter row + custom WHERE, pager footer (100 by default), column chooser.
+    let mut s = state();
+    let id = open_items(&mut s, true);
+    assert_eq!(session(&s).data.total, Some(2));
+    assert_eq!(draft(&mut s).pager.per_page, 100);
+    let page = |fx: &[DbEffect]| match jobs(fx).into_iter().next() {
+        Some(DbJob::Page {
+            filter,
+            cols,
+            offset,
+            limit,
+            ..
+        }) => (filter, cols, offset, limit),
+        other => panic!("{other:?}"),
+    };
+    draft(&mut s).data_filter = "price > 1".into();
+    draft(&mut s)
+        .col_filters
+        .insert("name".into(), " alp ".into());
+    draft(&mut s).col_filters.insert("id".into(), "  ".into());
+    let fx = send(&mut s, DbMsg::DataApplyFilter(id));
+    let (filter, cols, offset, _) = page(&fx);
+    assert_eq!(filter, "price > 1");
+    assert_eq!(
+        cols,
+        vec![("name".to_string(), "alp".to_string())],
+        "empty boxes are left out"
+    );
+    assert_eq!(offset, 0);
+    // Pager footer: next page and rows per page come from the draft.
+    send(
+        &mut s,
+        DbMsg::PageLoaded {
+            id,
+            table: items(),
+            offset: 0,
+            result: Ok(grid()),
+            total: Some(250),
+        },
+    );
+    draft(&mut s).pager.go(crate::pager::Go::Next, 250);
+    let (_, _, offset, limit) = page(&send(&mut s, DbMsg::DataGo(id)));
+    assert_eq!((offset, limit), (100, 100));
+    send(
+        &mut s,
+        DbMsg::PageLoaded {
+            id,
+            table: items(),
+            offset: 100,
+            result: Ok(grid()),
+            total: None,
+        },
+    );
+    assert_eq!(
+        session(&s).data.total,
+        None,
+        "a failed count shows 'of many'"
+    );
+    draft(&mut s).pager.per_page_text = "20".into();
+    draft(&mut s).pager.apply_per_page();
+    let (_, _, offset, limit) = page(&send(&mut s, DbMsg::DataGo(id)));
+    assert_eq!((offset, limit), (0, 20));
+    // A new sort goes back to page 1.
+    draft(&mut s).pager.go(crate::pager::Go::Next, 250);
+    send(&mut s, DbMsg::DataGo(id));
+    let fx = send(
+        &mut s,
+        DbMsg::DataSort {
+            id,
+            column: "name".into(),
+        },
+    );
+    assert_eq!(page(&fx).2, 0);
+    assert_eq!(draft(&mut s).pager.page, 0);
+    // Column chooser: saved per connection and table, loaded when it opens.
+    let hidden: std::collections::BTreeSet<String> = ["name".to_string()].into();
+    let fx = send(
+        &mut s,
+        DbMsg::SetHidden {
+            id,
+            hidden: hidden.clone(),
+        },
+    );
+    assert!(matches!(&fx[..], [DbEffect::SaveHidden { key, hidden: h }]
+        if key.ends_with(":shop..items") && *h == hidden));
+    assert_eq!(session(&s).data.hidden, hidden);
+    // With unsaved edits the pager does not move.
+    send(
+        &mut s,
+        DbMsg::SetCell {
+            id,
+            row: RowRef::Existing(0),
+            col: 1,
+            value: Some("beta".into()),
+        },
+    );
+    draft(&mut s).pager.go(crate::pager::Go::Next, 250);
+    assert!(jobs(&send(&mut s, DbMsg::DataGo(id))).is_empty());
+    assert_eq!(draft(&mut s).pager.page, 0, "back to the shown page");
+}
+
+#[test]
+fn opening_a_table_loads_its_hidden_columns() {
+    let mut s = state();
+    let id = connected(&mut s, Engine::MySql, &["shop"]);
+    let fx = send(&mut s, DbMsg::SelectTable { id, table: items() });
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, DbEffect::LoadHidden { table, .. } if *table == items()))
+    );
+    let hidden: std::collections::BTreeSet<String> = ["id".to_string()].into();
+    send(
+        &mut s,
+        DbMsg::HiddenLoaded {
+            id,
+            table: items(),
+            hidden: hidden.clone(),
+        },
+    );
+    assert_eq!(session(&s).data.hidden, hidden);
+}
+
+#[test]
+fn export_takes_the_shown_columns_and_the_chosen_rows() {
+    // #139
+    use telepad_core::db::io::{Format, Scope};
+    let mut s = state();
+    let id = open_items(&mut s, true);
+    send(
+        &mut s,
+        DbMsg::SetHidden {
+            id,
+            hidden: ["name".to_string()].into(),
+        },
+    );
+    send(&mut s, DbMsg::ExportOpen(id));
+    {
+        let f = draft(&mut s).export.as_mut().unwrap();
+        f.format = Format::Csv;
+        f.scope = Scope::Page;
+    }
+    let fx = send(&mut s, DbMsg::ExportRun(id));
+    match &fx[..] {
+        [
+            DbEffect::Export {
+                name,
+                job: DbJob::Export { spec, page, .. },
+                ..
+            },
+        ] => {
+            assert_eq!(name, "items.csv");
+            assert_eq!(spec.columns, ["id"], "hidden columns are left out");
+            assert_eq!(*page, Some((0, 100)));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(session(&s).exporting, Some(0));
+    assert!(draft(&mut s).export.is_none());
+    send(&mut s, DbMsg::ExportProgress { id, rows: 1000 });
+    assert_eq!(session(&s).exporting, Some(1000));
+    // Cancelled save dialog: nothing logged, nothing running.
+    let fx = send(
+        &mut s,
+        DbMsg::Exported {
+            id,
+            result: Err("cancelled-dialog".into()),
+        },
+    );
+    assert!(fx.is_empty() && session(&s).exporting.is_none());
+    // A finished export is logged and said.
+    send(&mut s, DbMsg::ExportOpen(id));
+    send(&mut s, DbMsg::ExportRun(id));
+    let fx = update(
+        &mut s,
+        Msg::Db(DbMsg::Exported {
+            id,
+            result: Ok((2, 0, "items.csv".into())),
+        }),
+        Instant::now(),
+    );
+    assert!(
+        fx.iter().any(
+            |e| matches!(e, Effect::Db(DbEffect::Log(l)) if l.title.contains("Export 2 row(s)"))
+        )
+    );
+    assert!(session(&s).notice.as_deref().unwrap().contains("items.csv"));
+}
+
+#[test]
+fn import_maps_columns_previews_and_runs_in_one_job() {
+    use telepad_core::db::io::{Format, ImportFile};
+    let mut s = state();
+    let id = open_items(&mut s, true);
+    let fx = send(&mut s, DbMsg::ImportOpen(id));
+    assert!(matches!(&fx[..], [DbEffect::PickImport { .. }]));
+    let file = ImportFile {
+        format: Format::Csv,
+        headers: vec!["ID".into(), "Name".into(), "colour".into()],
+        rows: vec![
+            vec![Some("7".into()), Some("seven".into()), Some("red".into())],
+            vec![Some("8".into()), None, None],
+        ],
+        ..Default::default()
+    };
+    send(
+        &mut s,
+        DbMsg::ImportLoaded {
+            id,
+            result: Ok(("items.csv".into(), file)),
+        },
+    );
+    assert_eq!(
+        draft(&mut s).import_map,
+        [Some("id".to_string()), Some("name".to_string()), None],
+        "mapped by name, unknown columns skipped"
+    );
+    let fx = send(&mut s, DbMsg::ImportRun(id));
+    match jobs(&fx).as_slice() {
+        [DbJob::Import { statements, .. }] => {
+            assert_eq!(statements.len(), 2);
+            assert!(
+                statements[0]
+                    .sql
+                    .starts_with("INSERT INTO `shop`.`items` (`id`, `name`)")
+            );
+            assert_eq!(statements[1].params, [Some("8".into()), None]);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(session(&s).import.as_ref().unwrap().running);
+    // Rolled back: the dialog stays with the error; the log says so.
+    let fx = update(
+        &mut s,
+        Msg::Db(DbMsg::Imported {
+            id,
+            result: Err("Row 2 of 2: duplicate key — nothing was imported".into()),
+        }),
+        Instant::now(),
+    );
+    assert!(fx.iter().any(|e| matches!(e, Effect::Db(DbEffect::Log(l))
+        if l.outcome == telepad_core::history::Outcome::RolledBack)));
+    assert!(session(&s).import.is_some());
+    assert!(session(&s).error.as_deref().unwrap().contains("Row 2"));
+    // Done: the dialog closes and the page reloads.
+    send(&mut s, DbMsg::ImportRun(id));
+    let fx = send(&mut s, DbMsg::Imported { id, result: Ok(2) });
+    assert!(session(&s).import.is_none());
+    assert!(jobs(&fx).iter().any(|j| matches!(j, DbJob::Page { .. })));
+}
+
+#[test]
+fn import_is_refused_on_read_only_connections_and_without_a_map() {
+    use telepad_core::db::io::{Format, ImportFile};
+    let mut s = state();
+    let id = open_items(&mut s, true);
+    s.model.db[0].read_only = true;
+    assert!(send(&mut s, DbMsg::ImportOpen(id)).is_empty());
+    assert!(session(&s).error.as_deref().unwrap().contains("Read-only"));
+    s.model.db[0].read_only = false;
+    send(
+        &mut s,
+        DbMsg::ImportLoaded {
+            id,
+            result: Ok((
+                "x.csv".into(),
+                ImportFile {
+                    format: Format::Csv,
+                    headers: vec!["zzz".into()],
+                    rows: vec![vec![Some("1".into())]],
+                    ..Default::default()
+                },
+            )),
+        },
+    );
+    assert!(jobs(&send(&mut s, DbMsg::ImportRun(id))).is_empty());
+    assert!(
+        session(&s)
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("map at least one column")
+    );
 }

@@ -1095,7 +1095,7 @@ impl Runtime {
                             Side::Local => {
                                 let p =
                                     telepad_core::expand_home(path.trim()).display().to_string();
-                                cf::list_local(&p).map(|v| (p, v))
+                                cf::list_local_at(&p)
                             }
                             Side::Remote => match sftp.as_mut() {
                                 Some(c) => c
@@ -1632,8 +1632,85 @@ impl Runtime {
                     }));
                     let mut session = session.with_cancel_slot(slot);
                     for job in inbox {
-                        send(Msg::Db(db_job(&mut session, id, job)));
+                        // An export reports its progress while it pages (#139).
+                        let msg = match job {
+                            DbJob::Export { .. } => export_job(&mut session, id, job, &send),
+                            job => db_job(&mut session, id, job),
+                        };
+                        send(Msg::Db(msg));
                     }
+                });
+                None
+            }
+            DbEffect::Export { id, name, mut job } => {
+                let picked = rfd::FileDialog::new().set_file_name(&name).save_file();
+                let Some(p) = picked else {
+                    return Some(Msg::Db(DbMsg::Exported {
+                        id,
+                        result: Err("cancelled-dialog".into()),
+                    }));
+                };
+                if let DbJob::Export { path, .. } = &mut job {
+                    *path = p;
+                }
+                self.run_db(DbEffect::Job { id, job })
+            }
+            DbEffect::ExportRows {
+                id,
+                name,
+                engine,
+                grid,
+                spec,
+            } => {
+                let Some(path) = rfd::FileDialog::new().set_file_name(&name).save_file() else {
+                    return Some(Msg::Db(DbMsg::Exported {
+                        id,
+                        result: Err("cancelled-dialog".into()),
+                    }));
+                };
+                self.background(move || {
+                    use telepad_core::db::{TableRef, io::Exporter};
+                    let t = TableRef {
+                        table: "query".into(),
+                        ..Default::default()
+                    };
+                    let file = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let result = Exporter::create(&path, engine, &t, &grid.columns, spec).and_then(
+                        |mut x| match x.rows(&grid.rows, &grid.columns) {
+                            Ok(()) => x.finish(),
+                            Err(e) => {
+                                x.abort();
+                                Err(e)
+                            }
+                        },
+                    );
+                    Msg::Db(DbMsg::Exported {
+                        id,
+                        result: result.map(|(r, c)| (r, c, file)),
+                    })
+                });
+                None
+            }
+            DbEffect::PickImport { id, engine, table } => {
+                let picked = rfd::FileDialog::new()
+                    .add_filter(
+                        "Table data",
+                        &["csv", "tsv", "txt", "sql", "xlsx", "xlsm", "xls", "ods"],
+                    )
+                    .pick_file()?;
+                self.background(move || {
+                    let name = picked
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    Msg::Db(DbMsg::ImportLoaded {
+                        id,
+                        result: telepad_core::db::io::read_import(&picked, engine, &table)
+                            .map(|f| (name, f)),
+                    })
                 });
                 None
             }
@@ -1644,6 +1721,27 @@ impl Runtime {
                 },
                 None => Some(Msg::Db(db_failed(id, job))),
             },
+            DbEffect::LoadHidden { id, key, table } => {
+                let hidden = self
+                    .ws
+                    .as_ref()
+                    .and_then(|ws| ws.store.db_hidden(&key).ok().flatten())
+                    .map(|v| {
+                        v.split('\n')
+                            .map(str::trim)
+                            .filter(|c| !c.is_empty())
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Some(Msg::Db(DbMsg::HiddenLoaded { id, table, hidden }))
+            }
+            DbEffect::SaveHidden { key, hidden } => {
+                let v = hidden.into_iter().collect::<Vec<_>>().join("\n");
+                self.with_store(|s| s.set_db_hidden(&key, &v))
+                    .err()
+                    .map(Msg::Notice)
+            }
             DbEffect::Cancel(id) => {
                 if let Some(w) = self.db.get(&id) {
                     let slot = w.cancel.clone();
@@ -1788,15 +1886,25 @@ fn db_job(s: &mut Session, id: DbId, job: DbJob) -> DbMsg {
         DbJob::Page {
             table,
             filter,
+            cols,
             sort,
             offset,
             limit,
-        } => DbMsg::PageLoaded {
-            id,
-            result: s.page(&table, &filter, &sort, offset, limit),
-            table,
-            offset,
-        },
+        } => {
+            let result = s.page(&table, &filter, &cols, &sort, offset, limit);
+            // "of N" for the pager (#138); a failed count shows "of many".
+            let total = result
+                .as_ref()
+                .ok()
+                .and_then(|_| s.count(&table, &filter, &cols).ok());
+            DbMsg::PageLoaded {
+                id,
+                result,
+                table,
+                offset,
+                total,
+            }
+        }
         DbJob::Run {
             tab,
             database,
@@ -1813,6 +1921,17 @@ fn db_job(s: &mut Session, id: DbId, job: DbJob) -> DbMsg {
         } => DbMsg::Posted {
             id,
             result: s.apply(&database, &statements),
+        },
+        DbJob::Import {
+            database,
+            statements,
+        } => DbMsg::Imported {
+            id,
+            result: s.import(&database, &statements),
+        },
+        DbJob::Export { .. } => DbMsg::Exported {
+            id,
+            result: Err("export runs on its own path".into()),
         },
         DbJob::Ddl {
             database,
@@ -1860,6 +1979,7 @@ fn db_failed(id: DbId, job: DbJob) -> DbMsg {
             table,
             offset,
             result: Err(GONE.into()),
+            total: None,
         },
         DbJob::Run { tab, .. } => DbMsg::QueryDone {
             id,
@@ -1873,6 +1993,14 @@ fn db_failed(id: DbId, job: DbJob) -> DbMsg {
             id,
             result: Err(GONE.into()),
         },
+        DbJob::Import { .. } => DbMsg::Imported {
+            id,
+            result: Err(GONE.into()),
+        },
+        DbJob::Export { .. } => DbMsg::Exported {
+            id,
+            result: Err(GONE.into()),
+        },
         DbJob::Ddl { after, .. } => DbMsg::DdlDone {
             id,
             result: Err(GONE.into()),
@@ -1883,6 +2011,84 @@ fn db_failed(id: DbId, job: DbJob) -> DbMsg {
             on,
             result: Err(GONE.into()),
         },
+    }
+}
+
+/// Export a table page by page into its file (#139), reporting the rows
+/// written; a cancelled query (Cancel) stops it and removes the part file.
+fn export_job(s: &mut Session, id: DbId, job: DbJob, send: &dyn Fn(Msg)) -> DbMsg {
+    use telepad_core::db::io::Exporter;
+    let DbJob::Export {
+        table,
+        filter,
+        cols,
+        sort,
+        page,
+        spec,
+        path,
+    } = job
+    else {
+        return DbMsg::Exported {
+            id,
+            result: Err("not an export".into()),
+        };
+    };
+    const BATCH: u64 = 1000;
+    let engine = s.engine();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let result = (|| {
+        let (mut offset, end) = match page {
+            Some((o, l)) => (o, Some(o + l)),
+            None => (0, None),
+        };
+        let mut ex: Option<Exporter> = None;
+        loop {
+            let limit = end.map_or(BATCH, |e| BATCH.min(e.saturating_sub(offset)));
+            if limit == 0 {
+                break;
+            }
+            let g = match s.page(&table, &filter, &cols, &sort, offset, limit) {
+                Ok(g) => g,
+                Err(e) => {
+                    if let Some(x) = ex.take() {
+                        x.abort();
+                    }
+                    return Err(e);
+                }
+            };
+            if ex.is_none() {
+                ex = Some(Exporter::create(
+                    &path,
+                    engine,
+                    &table,
+                    &g.columns,
+                    spec.clone(),
+                )?);
+            }
+            let Some(x) = ex.as_mut() else { break };
+            if let Err(e) = x.rows(&g.rows, &g.columns) {
+                if let Some(x) = ex.take() {
+                    x.abort();
+                }
+                return Err(e);
+            }
+            send(Msg::Db(DbMsg::ExportProgress { id, rows: x.rows }));
+            if (g.rows.len() as u64) < limit {
+                break;
+            }
+            offset += limit;
+        }
+        match ex {
+            Some(x) => x.finish(),
+            None => Ok((0, 0)),
+        }
+    })();
+    DbMsg::Exported {
+        id,
+        result: result.map(|(rows, cut)| (rows, cut, name)),
     }
 }
 
