@@ -342,7 +342,9 @@ from which address, how (public key, password, keyboard-interactive) and with wh
 Telepad reads it from the host's systemd journal with one SSH call when the page opens and
 on **Refresh**, never in the background rounds: `journalctl` **without sudo**, the sshd lines
 of the last 30 days (newest 5 000 at most) and the login user's `~/.ssh/authorized_keys` to
-name the keys. Nothing on the host changes.
+name the keys. Nothing on the host changes. On a host with a very large journal (a public
+SSH server collects close to a million attack lines a month) the read can take a minute or
+two; it runs in the background (up to 3 minutes) and the rest of Telepad keeps working.
 
 Above the table: the login user, how it reads the journal (`systemd-journal`, `adm`, `wheel`
 or root), since when the journal holds entries (on hosts that keep the journal only since
@@ -353,10 +355,10 @@ Telepad** on the [Authorized keys](#authorized-keys-list-add-revoke) page.
 
 The table (made-up example):
 
-| Time (host) | User | From | Method | Key type | Fingerprint | Key name | Telepad |
+| Time (host) | User | From | Method | Key type | Key name | Telepad | Fingerprint |
 |---|---|---|---|---|---|---|---|
-| 2026-11-24 08:37:42 | alice | 192.0.2.10 | publickey | ED25519 | SHA256:Qm3x… | id_ed25519 — alice@pc (this PC) | this read |
-| 2026-11-23 17:00:27 | bob | 198.51.100.7 | publickey | ED25519 | SHA256:7hZp… | [developer] bob@example.com | |
+| 2026-11-24 08:37:42 | alice | 192.0.2.10 | publickey | ED25519 | id_ed25519 — alice@pc (this PC) | this read | SHA256:Qm3x… |
+| 2026-11-23 17:00:27 | bob | 198.51.100.7 | publickey | ED25519 | [developer] bob@example.com | | SHA256:7hZp… |
 | 2026-11-23 09:12:03 | carol | 198.51.100.8 | password | | | | |
 
 - **Time** is the host's own clock and time zone. **Key name** is the comment (with its

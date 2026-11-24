@@ -36,15 +36,16 @@ pub enum Col {
 }
 
 impl Col {
+    /// Table order: the long fingerprint last, so the names stay in view.
     pub const ALL: [Col; 8] = [
         Col::Time,
         Col::User,
         Col::From,
         Col::Method,
         Col::KeyType,
-        Col::Fingerprint,
         Col::KeyName,
         Col::Who,
+        Col::Fingerprint,
     ];
 
     pub fn title(self) -> &'static str {

@@ -15,6 +15,10 @@ use crate::config::{Access, HostEntry};
 pub const DAYS: u32 = 30;
 /// At most this many (newest) login lines are read.
 pub const LIMIT: usize = 5000;
+/// A read may take this long: a public host's journal can hold close to a
+/// million sshd lines a month (password attacks), which journalctl needs
+/// a minute or two to go through. It runs in the background, on request.
+pub const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// Whether the login user can read the system journal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -146,12 +150,14 @@ pub fn read(settings: &SshSettings, host: &HostEntry) -> Result<LoginLog, String
     if host.access == Access::Rdp {
         return Err("RDP-only host, no SSH".into());
     }
-    let (out, err, code) = run_script(settings, host, &script())?;
+    let mut settings = settings.clone();
+    settings.total_timeout = settings.total_timeout.max(READ_TIMEOUT);
+    let (out, err, code) = run_script(&settings, host, &script())?;
     if !out.contains("TELEPAD-LOG") {
         return Err(explain_ssh_error(&err, code));
     }
     let mut log = parse(&out);
-    log.own = authorized_keys::login_keys(settings, host)
+    log.own = authorized_keys::login_keys(&settings, host)
         .iter()
         .map(|(path, k)| {
             let file = std::path::Path::new(path)
@@ -395,9 +401,9 @@ TELEPAD-LOG pids 2001 2000 1500
 TELEPAD-LOG probe -- No entries --
 TELEPAD-LOG first 2026-10-01T08:00:00+0700 web1 kernel: Linux version 6.12
 TELEPAD-LOG begin
-2026-11-23T17:00:14+0700 web1 sshd-session[918413]: Accepted publickey for alice from 192.0.2.10 port 11441 ssh2: ED25519 SHA256:l/EaOon5OSTOExLIHuz4caHuYyLKvhfvOxDyDg6DMPA
-2026-11-23T17:00:27+07:00 web1 sshd-session[918816]: Accepted publickey for bob from 198.51.100.7 port 61728 ssh2: ED25519 SHA256:Af+XaCj3rQRP7Mqw7P4jMUEB54Ip2rNNe9cG9QVxUiQ
-2026-11-24T07:49:22+0700 web1 sshd[2000]: Accepted publickey for alice from 192.0.2.10 port 50634 ssh2: ED25519 SHA256:l/EaOon5OSTOExLIHuz4caHuYyLKvhfvOxDyDg6DMPA
+2026-11-23T17:00:14+0700 web1 sshd-session[918413]: Accepted publickey for alice from 192.0.2.10 port 11441 ssh2: ED25519 SHA256:Qm3xTestKeyAliceAAAAAAAAAAAAAAAAAAAAAAAAAAA
+2026-11-23T17:00:27+07:00 web1 sshd-session[918816]: Accepted publickey for bob from 198.51.100.7 port 61728 ssh2: ED25519 SHA256:7hZpTestKeyBobBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+2026-11-24T07:49:22+0700 web1 sshd[2000]: Accepted publickey for alice from 192.0.2.10 port 50634 ssh2: ED25519 SHA256:Qm3xTestKeyAliceAAAAAAAAAAAAAAAAAAAAAAAAAAA
 TELEPAD-LOG end
 TELEPAD-AK begin
 # Admins
@@ -424,7 +430,7 @@ TELEPAD-AK end
         assert_eq!(b.key_type, "ED25519");
         assert_eq!(
             b.fingerprint,
-            "SHA256:Af+XaCj3rQRP7Mqw7P4jMUEB54Ip2rNNe9cG9QVxUiQ"
+            "SHA256:7hZpTestKeyBobBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
         );
         assert_eq!(b.pid, 918816);
         assert!(!log.truncated);
@@ -454,7 +460,7 @@ TELEPAD-AK end
     fn reads_rhel_and_other_methods() {
         // RHEL / CentOS (sshd), password, keyboard-interactive, certificate, IPv6.
         let lines = [
-            "2026-11-20T09:15:02+0000 db1 sshd[4321]: Accepted publickey for root from 192.0.2.5 port 40022 ssh2: RSA SHA256:J1Yq0fBiKsCaPaFcbqcafVsfqWZFzd5YLT5LAac+LM8",
+            "2026-11-20T09:15:02+0000 db1 sshd[4321]: Accepted publickey for root from 192.0.2.5 port 40022 ssh2: RSA SHA256:RsaTestKeyRootCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
             "2026-11-20T09:16:00+0000 db1 sshd[4400]: Accepted password for carol from 2001:db8::5 port 50000 ssh2",
             "2026-11-20T09:17:00+0000 db1 sshd[4401]: Accepted keyboard-interactive/pam for dave from 192.0.2.6 port 50001 ssh2",
             "2026-11-20T09:18:00+0000 db1 sshd[4402]: Accepted publickey for erin from 192.0.2.7 port 50002 ssh2: ED25519-CERT SHA256:abc ID erin@corp (serial 7) CA ED25519 SHA256:def",

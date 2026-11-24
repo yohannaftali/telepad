@@ -2,6 +2,22 @@
 
 Newest first.
 
+## [2026-11-24] — Tested #126 (branch `126-login-log`)
+- Windows 11, release build; fmt, clippy `-D warnings`, `cargo test --workspace` (core 205,
+  app 160, gui 7). Headless `telepad-check --logins` on all 49 reachable hosts: 33 readable
+  (this read's key found on every one, counts match direct `journalctl` within new logins),
+  14 denied (Register shown), RDP-only refused, no crash.
+- GUI on a copy of the inventory via UI Automation: Log info button, page per host, restored
+  with the workspace after restart, newest first, header sort, filters (`10.212`,
+  `!<address>`, `>2026-11-24`), pages, typed rows per page (50 + Enter), this PC's logins
+  toggle, key names, **last used by Telepad** on Authorized keys. Register on a denied host
+  opened the terminal with the exact script; closed before Enter, host unchanged (`id -nG`).
+- Fixed during testing: 30-day read took 80–145 s on a public host (≈ 870 000 sshd lines a
+  month) and hit the 40 s timeout → own 3 min read timeout; Key name / Telepad columns were
+  off-screen → fingerprint last + horizontal scroll; real fingerprints in test data replaced.
+- Not verified: Fedora / RHEL host (none in the inventory), Unregister run to the end
+  (would change a host), macOS / Linux GUI (CI builds them).
+
 ## [2026-11-24] — feat(keys): Log info page — SSH logins from the journal (#126)
 - Issue #126 addressed on GitHub (branch `126-login-log`).
 - **Log info** button in the host header (SSH hosts, after the database buttons) opens a

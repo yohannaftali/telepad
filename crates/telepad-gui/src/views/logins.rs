@@ -254,13 +254,24 @@ fn width(c: Col) -> Column {
         Col::From => Column::initial(130.0).at_least(80.0).clip(true),
         Col::Method => Column::initial(95.0).at_least(60.0).clip(true),
         Col::KeyType => Column::initial(80.0).at_least(50.0).clip(true),
-        Col::Fingerprint => Column::initial(330.0).at_least(120.0).clip(true),
         Col::KeyName => Column::initial(200.0).at_least(80.0).clip(true),
-        Col::Who => Column::remainder().at_least(70.0).clip(true),
+        Col::Who => Column::initial(75.0).at_least(60.0).clip(true),
+        Col::Fingerprint => Column::remainder().at_least(120.0).clip(true),
     }
 }
 
+/// The table in a horizontal scroll area, so every column stays reachable
+/// in a narrow window.
 fn table(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::logins::Row]) {
+    egui::ScrollArea::horizontal()
+        .id_salt("login-log-hscroll")
+        .show(ui, |ui| {
+            ui.set_min_width(1250.0);
+            table_inner(ui, d, page);
+        });
+}
+
+fn table_inner(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::logins::Row]) {
     let mut b = TableBuilder::new(ui)
         .id_salt("login-log-table")
         .striped(true)
