@@ -522,3 +522,121 @@ fn arrange_tile_stack_minimize_and_restore_all() {
     assert!(s.model.ws.focused.is_some());
     assert!(s.model.wss.own.contains("kube"), "arranging is autosaved");
 }
+
+/// Minimized, or behind another window that was opened after it.
+fn hidden(s: &State, w: Win) -> bool {
+    let g = &s.model.ws.groups[s.model.ws.group_of(w).unwrap()];
+    let top = s.model.ws.groups.iter().map(|g| g.raise).max().unwrap();
+    g.minimized || g.raise < top || s.model.ws.focused != Some(w)
+}
+
+#[test]
+fn asking_for_an_open_page_restores_and_raises_it() {
+    // #136: Edit / Open files / Open database / Log info / host page.
+    use crate::editor::EdMsg;
+    use crate::files::{FmMsg, Mode, Side};
+    use telepad_core::files::{Entry, Kind};
+    let (mut s, _) = started("");
+    let now = Instant::now();
+    update(&mut s, Msg::Files(FmMsg::Open("web1".into())), now);
+    let id = s.model.files[0].id;
+    update(
+        &mut s,
+        Msg::Files(FmMsg::Connected {
+            id,
+            result: Ok((Mode::Sftp, "/home/ops".into(), None)),
+            local_home: "/home/me".into(),
+        }),
+        now,
+    );
+    let files = vec![
+        Entry {
+            name: "a.conf".into(),
+            kind: Kind::File,
+            ..Default::default()
+        },
+        Entry {
+            name: "b.conf".into(),
+            kind: Kind::File,
+            ..Default::default()
+        },
+    ];
+    update(
+        &mut s,
+        Msg::Files(FmMsg::Listed {
+            id,
+            side: Side::Remote,
+            result: Ok(("/home/ops".into(), files)),
+        }),
+        now,
+    );
+    let edit = |s: &mut State, name: &str| {
+        update(
+            s,
+            Msg::Files(FmMsg::Editor {
+                id,
+                msg: EdMsg::Open {
+                    side: Side::Remote,
+                    name: name.into(),
+                },
+            }),
+            Instant::now(),
+        )
+    };
+    edit(&mut s, "a.conf");
+    // Editor minimized, then another page in front.
+    ws(&mut s, WsMsg::Minimize(Win::Editor(id)));
+    ws(&mut s, WsMsg::Open(Win::Overview));
+    assert!(hidden(&s, Win::Editor(id)));
+    edit(&mut s, "b.conf");
+    assert!(!hidden(&s, Win::Editor(id)), "Edit brings the editor back");
+    // File window behind other pages: Open files raises it.
+    ws(&mut s, WsMsg::Open(Win::Docker));
+    assert!(hidden(&s, Win::Files(id)));
+    update(&mut s, Msg::Files(FmMsg::Open("web1".into())), now);
+    assert!(!hidden(&s, Win::Files(id)));
+    // Host page minimized: selecting the host again restores it.
+    update(&mut s, Msg::Select(Some(0)), now);
+    ws(&mut s, WsMsg::Minimize(Win::Host));
+    update(&mut s, Msg::Select(Some(0)), now);
+    assert!(!hidden(&s, Win::Host));
+    // A maximized window stays maximized when raised.
+    ws(&mut s, WsMsg::ToggleMaximize(Win::Files(id)));
+    ws(&mut s, WsMsg::Open(Win::Overview));
+    update(&mut s, Msg::Files(FmMsg::Open("web1".into())), now);
+    let g = &s.model.ws.groups[s.model.ws.group_of(Win::Files(id)).unwrap()];
+    assert!(g.maximized && !g.minimized);
+}
+
+#[test]
+fn opening_an_open_database_or_log_info_raises_it() {
+    use telepad_core::db::{DbTarget, Engine};
+    let (mut s, _) = started("");
+    let now = Instant::now();
+    let t = DbTarget {
+        engine: Engine::MySql,
+        host: "web1".into(),
+        address: "127.0.0.1".into(),
+        port: 3306,
+        ..Default::default()
+    };
+    update(&mut s, Msg::Db(crate::db::DbMsg::Open(t.clone())), now);
+    let db = Win::Db(s.model.db[0].id);
+    ws(&mut s, WsMsg::Minimize(db));
+    update(&mut s, Msg::Db(crate::db::DbMsg::Open(t)), now);
+    assert!(!hidden(&s, db));
+    update(
+        &mut s,
+        Msg::Logins(crate::logins::LgMsg::Open("web1".into())),
+        now,
+    );
+    let lg = Win::Logins(s.model.logins[0].id);
+    ws(&mut s, WsMsg::Open(Win::Overview));
+    assert!(hidden(&s, lg));
+    update(
+        &mut s,
+        Msg::Logins(crate::logins::LgMsg::Open("web1".into())),
+        now,
+    );
+    assert!(!hidden(&s, lg));
+}

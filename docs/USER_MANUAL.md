@@ -73,7 +73,10 @@ back to the front if it is already open. Each window has a title bar:
 - **Move**: drag the title bar. **Resize**: drag the right edge, the bottom edge or the
   bottom-right corner. Windows stay inside the workspace.
 - **− (Minimize)** puts it in the strip at the bottom; click it there (or pick it in the
-  window picker) to bring it back. **Maximize** (the corners-out icon) fills the workspace;
+  window picker) to bring it back. Anything that leads to a window that is already open —
+  **Edit** / F4 / double-click on a file (editor), **Open files…**, **Open database…**,
+  **Log info**, a host in the list, a sidebar page — brings it back from the strip and to
+  the front (a maximized window stays maximized). **Maximize** (the corners-out icon) fills the workspace;
   **Restore size** (corners in) or a double-click on the title bar gets the old size back. **×** closes it (a file window
   with unsaved editor tabs asks first).
 - **⧉ (Tabs)**: **Show as a tab in** → another window puts this page in that window as a
