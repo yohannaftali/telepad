@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-24] — Tested and merged: #125 (PR #146)
+- Windows 11, release build; fmt, clippy, tests green; CI green on Windows, macOS, Linux, `db-live`, `files-live`.
+- `telepad-check` on a copy of the 56-host inventory: 8 failures. GUI on the same copy for ~5 min: 49 up / 7 down, all
+  among the 8 (the 8th a one-off timeout on a host that answers ping); the ICMP-blocked host with SSH up stays up.
+  Issue closed with the test summary.
+
 ## [2026-11-24] — fix(collector): hosts that drop ICMP ping are tried over SSH again next round (#125)
 - Issue #125 addressed on GitHub (branch `125-ping-blocked-hosts`).
 - `collector::reach`: ping, else a TCP connect to the SSH port (`Reach::Ping` / `Port` /
