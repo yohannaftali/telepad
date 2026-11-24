@@ -1644,6 +1644,27 @@ impl Runtime {
                 },
                 None => Some(Msg::Db(db_failed(id, job))),
             },
+            DbEffect::LoadHidden { id, key, table } => {
+                let hidden = self
+                    .ws
+                    .as_ref()
+                    .and_then(|ws| ws.store.db_hidden(&key).ok().flatten())
+                    .map(|v| {
+                        v.split('\n')
+                            .map(str::trim)
+                            .filter(|c| !c.is_empty())
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Some(Msg::Db(DbMsg::HiddenLoaded { id, table, hidden }))
+            }
+            DbEffect::SaveHidden { key, hidden } => {
+                let v = hidden.into_iter().collect::<Vec<_>>().join("\n");
+                self.with_store(|s| s.set_db_hidden(&key, &v))
+                    .err()
+                    .map(Msg::Notice)
+            }
             DbEffect::Cancel(id) => {
                 if let Some(w) = self.db.get(&id) {
                     let slot = w.cancel.clone();
@@ -1788,15 +1809,25 @@ fn db_job(s: &mut Session, id: DbId, job: DbJob) -> DbMsg {
         DbJob::Page {
             table,
             filter,
+            cols,
             sort,
             offset,
             limit,
-        } => DbMsg::PageLoaded {
-            id,
-            result: s.page(&table, &filter, &sort, offset, limit),
-            table,
-            offset,
-        },
+        } => {
+            let result = s.page(&table, &filter, &cols, &sort, offset, limit);
+            // "of N" for the pager (#138); a failed count shows "of many".
+            let total = result
+                .as_ref()
+                .ok()
+                .and_then(|_| s.count(&table, &filter, &cols).ok());
+            DbMsg::PageLoaded {
+                id,
+                result,
+                table,
+                offset,
+                total,
+            }
+        }
         DbJob::Run {
             tab,
             database,
@@ -1860,6 +1891,7 @@ fn db_failed(id: DbId, job: DbJob) -> DbMsg {
             table,
             offset,
             result: Err(GONE.into()),
+            total: None,
         },
         DbJob::Run { tab, .. } => DbMsg::QueryDone {
             id,

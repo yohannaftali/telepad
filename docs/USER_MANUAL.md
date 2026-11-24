@@ -1253,11 +1253,21 @@ cannot reach the database address, the dialog says so.
 
 **Data tab**
 
-- 1000 rows per page (100 / 500 / 5000 in the page box), **◀ ▶** for the previous /
-  next page, **↻** to reload. Click a column header (anywhere in it) to sort: ascending,
-  descending, off. Click anywhere in a cell to select its row.
-- The filter box takes a `WHERE` condition in SQL, e.g. `city = 'Springfield'`; Enter or
-  **Filter** applies it, **Clear** removes it.
+- **Filter boxes** under every column header (as in the Senar / wtbapp tables): text =
+  contains (any case), `=x` equal, `!x` not equal, `>x` / `<x` greater / less (numbers by
+  value), `NULL` empty, `!NULL` has a value; Enter applies. Values are sent as quoted
+  literals, never as SQL.
+- **Custom WHERE**: the box in the toolbar takes your own SQL condition, e.g.
+  `city = 'Springfield'`; it is applied together with the filter boxes. **Filter** (or Enter)
+  applies, **Clear filters** removes both.
+- **Columns ▾**: search the columns and tick the ones to show; **Show all** / **Hide all**.
+  Kept for this table of this connection.
+- **Pager** (footer under the grid, it stays visible while the rows scroll): *Record [1 -
+  100] of 2 345* (*of many* when the count is not available), first / previous,
+  **Page [n] of N** (type a page and press Enter), next / last, **Rows per page** (100 by
+  default; type a number and press Enter, empty = 100, more than 100 asks first).
+  **↻** reloads. Click a column title (anywhere in it) to sort: ascending, descending, off;
+  a new sort or filter goes back to page 1. Click anywhere in a cell to select its row.
 - NULL is shown as a grey *NULL*. Long values and binary data are cut (the full length is
   shown); right-click a cell for **Copy value** and **View value…**.
 - Editing (only for tables with a primary key or a NOT NULL unique key, and not in

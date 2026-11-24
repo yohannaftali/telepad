@@ -146,6 +146,12 @@ impl Pager {
     }
 }
 
+impl Default for Pager {
+    fn default() -> Self {
+        Self::new(EMPTY_SIZE)
+    }
+}
+
 fn digits(s: &str) -> Option<usize> {
     let d: String = s.chars().filter(char::is_ascii_digit).collect();
     d.parse().ok()

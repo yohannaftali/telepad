@@ -225,21 +225,104 @@ pub fn is_read_only(engine: Engine, sql: &str) -> bool {
 /// Sort for the Data tab: column and descending.
 pub type Sort = Option<(String, bool)>;
 
-/// `SELECT * FROM t [WHERE …] [ORDER BY …] LIMIT n OFFSET m`. The filter is the
-/// user's own SQL condition, as in HeidiSQL.
+/// One filter box under a Data grid header (#138): (column, what was typed).
+pub type ColFilter = (String, String);
+
+/// The column as text, for contains / equal / text comparisons.
+fn as_text(engine: Engine, col: &str) -> String {
+    let q = quote_ident(engine, col);
+    match engine {
+        Engine::MySql => format!("CAST({q} AS CHAR)"),
+        Engine::Postgres => format!("CAST({q} AS TEXT)"),
+    }
+}
+
+/// The condition of one filter box, with the Senar / wtbapp rules
+/// (`y_filter_match`, `L_database::filter_parse`): text = contains (any
+/// case), `=x` equal, `>x` / `<x` greater / less (numbers by value, else as
+/// text), `!x` not equal, `NULL` empty, `!NULL` has a value. Values are
+/// quoted string literals (LIKE wildcards escaped) or checked numbers,
+/// never pasted as SQL. `None` for an empty box.
+pub fn filter_condition(engine: Engine, col: &str, crit: &str) -> Option<String> {
+    let crit = crit.trim();
+    if crit.is_empty() {
+        return None;
+    }
+    let q = quote_ident(engine, col);
+    let txt = as_text(engine, col);
+    let lit = |v: &str| quote_str(engine, v);
+    let lower = crit.to_lowercase();
+    if lower == "null" {
+        return Some(format!("({q} IS NULL OR {txt} = '')"));
+    }
+    if lower == "!null" {
+        return Some(format!("({q} IS NOT NULL AND {txt} <> '')"));
+    }
+    let (op, v) = crit.split_at(crit.chars().next().map_or(0, char::len_utf8));
+    let v = v.trim();
+    Some(match op {
+        "=" => format!("{txt} = {}", lit(v)),
+        "!" => format!("({q} IS NULL OR {txt} <> {})", lit(v)),
+        ">" | "<" => match v.parse::<f64>() {
+            Ok(n) if n.is_finite() => format!("{q} {op} {n}"),
+            _ => format!("{txt} {op} {}", lit(v)),
+        },
+        _ => {
+            let pat = format!(
+                "%{}%",
+                crit.replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            );
+            match engine {
+                Engine::MySql => format!("LOWER({txt}) LIKE LOWER({})", lit(&pat)),
+                Engine::Postgres => format!("{txt} ILIKE {}", lit(&pat)),
+            }
+        }
+    })
+}
+
+/// The WHERE of the Data grid: the custom SQL condition (as typed, as in
+/// HeidiSQL) AND every filter box. Empty when there is nothing.
+pub fn data_where(engine: Engine, filter: &str, cols: &[ColFilter]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let f = filter.trim().trim_end_matches(';').trim();
+    if !f.is_empty() {
+        parts.push(format!("({f})"));
+    }
+    parts.extend(
+        cols.iter()
+            .filter_map(|(c, v)| filter_condition(engine, c, v)),
+    );
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", parts.join(" AND "))
+    }
+}
+
+/// `SELECT COUNT(*)` with the Data grid's filters (#138: "of N").
+pub fn count_rows(engine: Engine, t: &TableRef, filter: &str, cols: &[ColFilter]) -> String {
+    format!(
+        "SELECT COUNT(*) FROM {}{}",
+        table_path(engine, t),
+        data_where(engine, filter, cols)
+    )
+}
+
+/// `SELECT * FROM t [WHERE …] [ORDER BY …] LIMIT n OFFSET m`. `filter` is the
+/// user's own SQL condition, as in HeidiSQL; `cols` the filter boxes.
 pub fn select_page(
     engine: Engine,
     t: &TableRef,
     filter: &str,
+    cols: &[ColFilter],
     sort: &Sort,
     offset: u64,
     limit: u64,
 ) -> String {
     let mut s = format!("SELECT * FROM {}", table_path(engine, t));
-    let f = filter.trim().trim_end_matches(';').trim();
-    if !f.is_empty() {
-        s.push_str(&format!(" WHERE {f}"));
-    }
+    s.push_str(&data_where(engine, filter, cols));
     if let Some((col, desc)) = sort {
         s.push_str(&format!(
             " ORDER BY {} {}",
@@ -488,15 +571,70 @@ SELECT `a;b`"
                 MY,
                 &t("shop", "", "orders"),
                 " id > 5 ; ",
+                &[],
                 &Some(("na`me".into(), true)),
                 2000,
                 1000
             ),
-            "SELECT * FROM `shop`.`orders` WHERE id > 5 ORDER BY `na``me` DESC LIMIT 1000 OFFSET 2000"
+            "SELECT * FROM `shop`.`orders` WHERE (id > 5) ORDER BY `na``me` DESC LIMIT 1000 OFFSET 2000"
         );
         assert_eq!(
-            select_page(PG, &t("shop", "public", "orders"), "", &None, 0, 1000),
+            select_page(PG, &t("shop", "public", "orders"), "", &[], &None, 0, 1000),
             "SELECT * FROM \"public\".\"orders\" LIMIT 1000 OFFSET 0"
+        );
+    }
+
+    #[test]
+    fn filter_boxes_follow_the_wtbapp_rules_and_are_quoted() {
+        // #138: one box per column, values as literals, never as SQL.
+        let f = |e, c: &str, v: &str| filter_condition(e, c, v).unwrap_or_default();
+        assert_eq!(f(MY, "city", ""), "");
+        assert_eq!(
+            f(MY, "city", "spring"),
+            "LOWER(CAST(`city` AS CHAR)) LIKE LOWER('%spring%')"
+        );
+        assert_eq!(
+            f(PG, "city", "50%_off"),
+            "CAST(\"city\" AS TEXT) ILIKE E'%50\\\\%\\\\_off%'"
+        );
+        assert_eq!(f(MY, "id", "=7"), "CAST(`id` AS CHAR) = '7'");
+        assert_eq!(f(MY, "id", ">10"), "`id` > 10");
+        assert_eq!(
+            f(PG, "day", "<2026-11-20"),
+            "CAST(\"day\" AS TEXT) < '2026-11-20'"
+        );
+        assert_eq!(
+            f(MY, "name", "!O'Brien"),
+            "(`name` IS NULL OR CAST(`name` AS CHAR) <> 'O''Brien')"
+        );
+        assert_eq!(
+            f(MY, "note", "null"),
+            "(`note` IS NULL OR CAST(`note` AS CHAR) = '')"
+        );
+        assert_eq!(
+            f(PG, "note", "!NULL"),
+            "(\"note\" IS NOT NULL AND CAST(\"note\" AS TEXT) <> '')"
+        );
+        // An injection attempt stays inside a string literal.
+        assert_eq!(
+            f(MY, "city", "x') OR 1=1 --"),
+            "LOWER(CAST(`city` AS CHAR)) LIKE LOWER('%x'') OR 1=1 --%')"
+        );
+        let both = data_where(
+            MY,
+            "price > 1",
+            &[
+                ("city".into(), "=Springfield".into()),
+                ("note".into(), " ".into()),
+            ],
+        );
+        assert_eq!(
+            both,
+            " WHERE (price > 1) AND CAST(`city` AS CHAR) = 'Springfield'"
+        );
+        assert_eq!(
+            count_rows(MY, &t("shop", "", "orders"), "", &[]),
+            "SELECT COUNT(*) FROM `shop`.`orders`"
         );
     }
 

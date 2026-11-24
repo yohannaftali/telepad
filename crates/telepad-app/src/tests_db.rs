@@ -167,7 +167,7 @@ fn open_items(s: &mut State, with_key: bool) -> DbId {
         &jobs(&fx)[1],
         DbJob::Page {
             offset: 0,
-            limit: 1000,
+            limit: 100,
             ..
         }
     ));
@@ -187,6 +187,7 @@ fn open_items(s: &mut State, with_key: bool) -> DbId {
             table: items(),
             offset: 0,
             result: Ok(grid()),
+            total: Some(2),
         },
     );
     id
@@ -402,7 +403,7 @@ fn data_paging_sorting_and_filter_reload_the_page() {
     };
     assert!(
         send(&mut s, DbMsg::DataPage { id, forward: true }).is_empty(),
-        "2 rows < 1000: no next page"
+        "2 rows < 100: no next page"
     );
     let fx = send(
         &mut s,
@@ -440,6 +441,7 @@ fn data_paging_sorting_and_filter_reload_the_page() {
             table: items(),
             offset: 0,
             result: Ok(grid()),
+            total: Some(2),
         },
     );
     let fx = send(&mut s, DbMsg::DataPage { id, forward: true });
@@ -452,6 +454,7 @@ fn data_paging_sorting_and_filter_reload_the_page() {
             table: items(),
             offset: 0,
             result: Err("late".into()),
+            total: Some(2),
         },
     );
     assert!(session(&s).data.error.is_none());
@@ -956,4 +959,128 @@ fn databases_of_a_host_come_from_containers_and_listeners() {
     assert_eq!(t.len(), 2);
     assert_eq!(t[0].container, "shop-db");
     assert_eq!((t[1].engine, t[1].port), (Engine::Postgres, 5432));
+}
+
+#[test]
+fn filter_boxes_pager_and_hidden_columns() {
+    // #138: filter row + custom WHERE, pager footer (100 by default), column chooser.
+    let mut s = state();
+    let id = open_items(&mut s, true);
+    assert_eq!(session(&s).data.total, Some(2));
+    assert_eq!(draft(&mut s).pager.per_page, 100);
+    let page = |fx: &[DbEffect]| match jobs(fx).into_iter().next() {
+        Some(DbJob::Page {
+            filter,
+            cols,
+            offset,
+            limit,
+            ..
+        }) => (filter, cols, offset, limit),
+        other => panic!("{other:?}"),
+    };
+    draft(&mut s).data_filter = "price > 1".into();
+    draft(&mut s)
+        .col_filters
+        .insert("name".into(), " alp ".into());
+    draft(&mut s).col_filters.insert("id".into(), "  ".into());
+    let fx = send(&mut s, DbMsg::DataApplyFilter(id));
+    let (filter, cols, offset, _) = page(&fx);
+    assert_eq!(filter, "price > 1");
+    assert_eq!(
+        cols,
+        vec![("name".to_string(), "alp".to_string())],
+        "empty boxes are left out"
+    );
+    assert_eq!(offset, 0);
+    // Pager footer: next page and rows per page come from the draft.
+    send(
+        &mut s,
+        DbMsg::PageLoaded {
+            id,
+            table: items(),
+            offset: 0,
+            result: Ok(grid()),
+            total: Some(250),
+        },
+    );
+    draft(&mut s).pager.go(crate::pager::Go::Next, 250);
+    let (_, _, offset, limit) = page(&send(&mut s, DbMsg::DataGo(id)));
+    assert_eq!((offset, limit), (100, 100));
+    send(
+        &mut s,
+        DbMsg::PageLoaded {
+            id,
+            table: items(),
+            offset: 100,
+            result: Ok(grid()),
+            total: None,
+        },
+    );
+    assert_eq!(
+        session(&s).data.total,
+        None,
+        "a failed count shows 'of many'"
+    );
+    draft(&mut s).pager.per_page_text = "20".into();
+    draft(&mut s).pager.apply_per_page();
+    let (_, _, offset, limit) = page(&send(&mut s, DbMsg::DataGo(id)));
+    assert_eq!((offset, limit), (0, 20));
+    // A new sort goes back to page 1.
+    draft(&mut s).pager.go(crate::pager::Go::Next, 250);
+    send(&mut s, DbMsg::DataGo(id));
+    let fx = send(
+        &mut s,
+        DbMsg::DataSort {
+            id,
+            column: "name".into(),
+        },
+    );
+    assert_eq!(page(&fx).2, 0);
+    assert_eq!(draft(&mut s).pager.page, 0);
+    // Column chooser: saved per connection and table, loaded when it opens.
+    let hidden: std::collections::BTreeSet<String> = ["name".to_string()].into();
+    let fx = send(
+        &mut s,
+        DbMsg::SetHidden {
+            id,
+            hidden: hidden.clone(),
+        },
+    );
+    assert!(matches!(&fx[..], [DbEffect::SaveHidden { key, hidden: h }]
+        if key.ends_with(":shop..items") && *h == hidden));
+    assert_eq!(session(&s).data.hidden, hidden);
+    // With unsaved edits the pager does not move.
+    send(
+        &mut s,
+        DbMsg::SetCell {
+            id,
+            row: RowRef::Existing(0),
+            col: 1,
+            value: Some("beta".into()),
+        },
+    );
+    draft(&mut s).pager.go(crate::pager::Go::Next, 250);
+    assert!(jobs(&send(&mut s, DbMsg::DataGo(id))).is_empty());
+    assert_eq!(draft(&mut s).pager.page, 0, "back to the shown page");
+}
+
+#[test]
+fn opening_a_table_loads_its_hidden_columns() {
+    let mut s = state();
+    let id = connected(&mut s, Engine::MySql, &["shop"]);
+    let fx = send(&mut s, DbMsg::SelectTable { id, table: items() });
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, DbEffect::LoadHidden { table, .. } if *table == items()))
+    );
+    let hidden: std::collections::BTreeSet<String> = ["id".to_string()].into();
+    send(
+        &mut s,
+        DbMsg::HiddenLoaded {
+            id,
+            table: items(),
+            hidden: hidden.clone(),
+        },
+    );
+    assert_eq!(session(&s).data.hidden, hidden);
 }

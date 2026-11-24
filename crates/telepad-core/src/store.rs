@@ -582,6 +582,21 @@ PRAGMA user_version = {SCHEMA_VERSION};"
         Ok(())
     }
 
+    /// Hidden Data grid columns of one table (#138), one per line; the
+    /// key comes from `telepad_app::db::hidden_key`.
+    pub fn db_hidden(&self, key: &str) -> Result<Option<String>, StoreError> {
+        self.setting(key)
+    }
+
+    pub fn set_db_hidden(&self, key: &str, value: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
     /// Transfer settings of a host's file window (#131), as
     /// `files::transfer::Options::to_setting` writes them.
     pub fn files_options(&self, alias: &str) -> Result<Option<String>, StoreError> {

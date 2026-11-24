@@ -919,15 +919,39 @@ impl Session {
     }
 
     /// One page of the Data tab.
+    #[allow(clippy::too_many_arguments)]
     pub fn page(
         &mut self,
         t: &TableRef,
         filter: &str,
+        cols: &[sql::ColFilter],
         sort: &sql::Sort,
         offset: u64,
         limit: u64,
     ) -> Result<Grid, String> {
-        let q = sql::select_page(self.engine(), t, filter, sort, offset, limit);
+        let q = sql::select_page(self.engine(), t, filter, cols, sort, offset, limit);
+        self.grid_of(t, &q)
+    }
+
+    /// Rows matching the Data grid's filters (#138, "of N").
+    pub fn count(
+        &mut self,
+        t: &TableRef,
+        filter: &str,
+        cols: &[sql::ColFilter],
+    ) -> Result<u64, String> {
+        let q = sql::count_rows(self.engine(), t, filter, cols);
+        let g = self.grid_of(t, &q)?;
+        g.rows
+            .first()
+            .and_then(|r| r.first())
+            .and_then(|c| c.as_value())
+            .and_then(|v| v.trim().parse().ok())
+            .ok_or_else(|| "no count".to_string())
+    }
+
+    fn grid_of(&mut self, t: &TableRef, q: &str) -> Result<Grid, String> {
+        let q = q.to_string();
         let r = match self.engine() {
             Engine::MySql => {
                 self.arm_mysql();
@@ -1308,7 +1332,7 @@ mod live {
         assert_eq!(parts.foreign_keys[0].on_delete, "CASCADE");
 
         let page = s
-            .page(&t, "price > 1", &Some(("name".into(), true)), 0, 1000)
+            .page(&t, "price > 1", &[], &Some(("name".into(), true)), 0, 1000)
             .unwrap();
         assert_eq!(page.columns[1], "name");
         assert_eq!(page.rows.len(), 2);
@@ -1527,7 +1551,7 @@ mod live {
         assert_eq!(parts.foreign_keys[0].on_delete, "CASCADE");
 
         let page = s
-            .page(&t, "price > 1", &Some(("name".into(), true)), 0, 1000)
+            .page(&t, "price > 1", &[], &Some(("name".into(), true)), 0, 1000)
             .unwrap();
         assert_eq!(page.rows.len(), 2);
         assert_eq!(text(&page.rows[0][1]), "it's");

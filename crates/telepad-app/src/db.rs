@@ -108,12 +108,21 @@ pub struct DataView {
     pub offset: u64,
     pub limit: u64,
     pub sort: sql::Sort,
-    /// The applied WHERE filter (the text box is a draft).
+    /// The applied custom WHERE filter (the text box is a draft).
     pub filter: String,
+    /// The applied filter boxes under the headers (#138).
+    pub cols: Vec<sql::ColFilter>,
+    /// Rows matching the filters, when the count worked (#138).
+    pub total: Option<u64>,
+    /// Columns hidden with the column chooser (#138), kept per table.
+    pub hidden: BTreeSet<String>,
     pub loading: bool,
     pub error: Option<String>,
     pub edits: Edits,
 }
+
+/// Rows per Data page of a new table (#138, as in the wtbapp tables).
+pub const DATA_PAGE: u64 = 100;
 
 impl Default for DataView {
     fn default() -> Self {
@@ -121,9 +130,12 @@ impl Default for DataView {
             table: None,
             grid: None,
             offset: 0,
-            limit: 1000,
+            limit: DATA_PAGE,
             sort: None,
             filter: String::new(),
+            cols: Vec::new(),
+            total: None,
+            hidden: BTreeSet::new(),
             loading: false,
             error: None,
             edits: Edits::default(),
@@ -348,6 +360,11 @@ pub struct DbDraft {
     pub log_filter: String,
     pub log_select: bool,
     pub log_clear: bool,
+    /// Data grid (#138): the filter box of each column (by name), the pager
+    /// footer, and the column chooser's search text.
+    pub col_filters: BTreeMap<String, String>,
+    pub pager: crate::pager::Pager,
+    pub column_search: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -384,6 +401,7 @@ pub enum DbJob {
     Page {
         table: TableRef,
         filter: String,
+        cols: Vec<sql::ColFilter>,
         sort: sql::Sort,
         offset: u64,
         limit: u64,
@@ -429,6 +447,17 @@ pub enum DbEffect {
     Job {
         id: DbId,
         job: DbJob,
+    },
+    /// Hidden columns saved for this table (#138) → [`DbMsg::HiddenLoaded`].
+    LoadHidden {
+        id: DbId,
+        key: String,
+        table: TableRef,
+    },
+    /// Keep the hidden columns of a table (`settings`, per connection).
+    SaveHidden {
+        key: String,
+        hidden: BTreeSet<String>,
     },
     /// Stop the running statement.
     Cancel(DbId),
@@ -547,6 +576,21 @@ pub enum DbMsg {
         table: TableRef,
         offset: u64,
         result: Result<Grid, String>,
+        /// Rows matching the filters (`None`: the count failed).
+        total: Option<u64>,
+    },
+    /// The pager footer changed (page or rows per page, from the draft; #138).
+    DataGo(DbId),
+    /// The column chooser (#138): these columns are hidden.
+    SetHidden {
+        id: DbId,
+        hidden: BTreeSet<String>,
+    },
+    /// The hidden columns saved for a table.
+    HiddenLoaded {
+        id: DbId,
+        table: TableRef,
+        hidden: BTreeSet<String>,
     },
     /// Cell edited (`None` = NULL).
     SetCell {
@@ -646,10 +690,31 @@ fn job(fx: &mut Vec<DbEffect>, id: DbId, job: DbJob) {
     fx.push(DbEffect::Job { id, job });
 }
 
+/// The pager of the shown page (back to the model after a refused change).
+fn pager_of(v: &DataView) -> crate::pager::Pager {
+    let per = v.limit.max(1);
+    let mut p = crate::pager::Pager::new(per as usize);
+    p.page = (v.offset / per) as usize;
+    p.page_text = (p.page + 1).to_string();
+    p
+}
+
+/// Settings key of a table's hidden columns, per saved connection (#138).
+pub fn hidden_key(target: &DbTarget, t: &TableRef) -> String {
+    format!(
+        "db_hidden:{}:{}.{}.{}",
+        target.key(),
+        t.database,
+        t.schema,
+        t.table
+    )
+}
+
 fn page_job(s: &DbSession) -> Option<DbJob> {
     Some(DbJob::Page {
         table: s.data.table.clone()?,
         filter: s.data.filter.clone(),
+        cols: s.data.cols.clone(),
         sort: s.data.sort.clone(),
         offset: s.data.offset,
         limit: s.data.limit,
@@ -1142,6 +1207,13 @@ pub fn update(
             };
             s.info = None;
             d.data_filter.clear();
+            d.col_filters.clear();
+            d.pager = pager_of(&s.data);
+            fx.push(DbEffect::LoadHidden {
+                id,
+                key: hidden_key(&s.target, &table),
+                table: table.clone(),
+            });
             d.cell = None;
             d.selected_row = None;
             d.structure = None;
@@ -1174,7 +1246,14 @@ pub fn update(
                 return fx;
             }
             s.data.filter = d.data_filter.trim().to_string();
+            s.data.cols = d
+                .col_filters
+                .iter()
+                .filter(|(_, v)| !v.trim().is_empty())
+                .map(|(c, v)| (c.clone(), v.trim().to_string()))
+                .collect();
             s.data.offset = 0;
+            d.pager.reset();
             reload_page(s, &mut fx);
         }
         DbMsg::DataSort { column, .. } => {
@@ -1188,6 +1267,7 @@ pub fn update(
                 _ => Some((column, false)),
             };
             s.data.offset = 0;
+            d.pager.reset();
             reload_page(s, &mut fx);
         }
         DbMsg::DataPage { forward, .. } => {
@@ -1213,17 +1293,50 @@ pub fn update(
             if s.data.edits.is_empty() && limit > 0 {
                 s.data.limit = limit;
                 s.data.offset = 0;
+                d.pager = crate::pager::Pager::new(limit as usize);
                 reload_page(s, &mut fx);
+            }
+        }
+        DbMsg::DataGo(_) => {
+            if !s.data.edits.is_empty() {
+                s.error = Some("Post or discard the changes first".into());
+                d.pager = pager_of(&s.data);
+                return fx;
+            }
+            let per = d.pager.per_page.max(1) as u64;
+            let offset = d.pager.page as u64 * per;
+            if per != s.data.limit || offset != s.data.offset {
+                s.data.limit = per;
+                s.data.offset = offset;
+                reload_page(s, &mut fx);
+            }
+        }
+        DbMsg::SetHidden { hidden, .. } => {
+            if let Some(t) = &s.data.table
+                && hidden != s.data.hidden
+            {
+                s.data.hidden = hidden.clone();
+                fx.push(DbEffect::SaveHidden {
+                    key: hidden_key(&s.target, t),
+                    hidden,
+                });
+            }
+        }
+        DbMsg::HiddenLoaded { table, hidden, .. } => {
+            if s.data.table.as_ref() == Some(&table) {
+                s.data.hidden = hidden;
             }
         }
         DbMsg::PageLoaded {
             table,
             offset,
             result,
+            total,
             ..
         } => {
             if s.data.table.as_ref() == Some(&table) && s.data.offset == offset {
                 s.data.loading = false;
+                s.data.total = total;
                 match result {
                     Ok(g) => {
                         s.data.grid = Some(g);
@@ -1801,6 +1914,8 @@ fn msg_id(msg: &DbMsg) -> DbId {
         | DataPage { id, .. }
         | DataLimit { id, .. }
         | PageLoaded { id, .. }
+        | SetHidden { id, .. }
+        | HiddenLoaded { id, .. }
         | SetCell { id, .. }
         | DeleteRow { id, .. }
         | Posted { id, .. }
@@ -1822,6 +1937,7 @@ fn msg_id(msg: &DbMsg) -> DbId {
         | Refresh(id)
         | Tab(id, _)
         | DataReload(id)
+        | DataGo(id)
         | DataApplyFilter(id)
         | InsertRow(id)
         | Discard(id)

@@ -5,9 +5,7 @@
 
 use eframe::egui::{self, Color32, RichText};
 use egui_extras::{Column as TCol, TableBuilder};
-use telepad_app::db::{
-    DbConfirm, DbDraft, DbId, DbMsg, DbSession, DbStatus, DbTab, PAGE_SIZES, RowRef,
-};
+use telepad_app::db::{DbConfirm, DbDraft, DbId, DbMsg, DbSession, DbStatus, DbTab, RowRef};
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::db::ddl::{FkEdit, IndexEdit, TableEdit};
 use telepad_core::db::{
@@ -15,7 +13,9 @@ use telepad_core::db::{
 };
 
 use crate::icons::{self, label as il};
-use crate::widgets::{Act, act_button, act_small, act_text, cell_click, cell_text, usage_color};
+use crate::widgets::{
+    Act, PAGER_H, act_button, act_small, act_text, cell_click, cell_text, pager_bar, usage_color,
+};
 
 const ROW: f32 = 20.0;
 /// Characters of a value shown in a grid cell.
@@ -1233,54 +1233,31 @@ fn data_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg
     let pending = !s.data.edits.is_empty();
     let blocked = s.edit_blocked();
     ui.horizontal_wrapped(|ui| {
-        let f = ui.add(
-            egui::TextEdit::singleline(&mut d.data_filter)
-                .hint_text(format!("{} WHERE …  e.g. id > 100", icons::FUNNEL))
-                .desired_width(280.0),
-        );
+        let f = ui
+            .add(
+                egui::TextEdit::singleline(&mut d.data_filter)
+                    .hint_text(format!("{} Custom WHERE …  e.g. id > 100", icons::FUNNEL))
+                    .desired_width(280.0),
+            )
+            .on_hover_text(
+                "Your own SQL condition, applied together with the filter boxes under the headers",
+            );
         if f.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             send(out, DbMsg::DataApplyFilter(id));
         }
         if ui.button("Filter").clicked() {
             send(out, DbMsg::DataApplyFilter(id));
         }
-        if !s.data.filter.is_empty() && ui.button("Clear").clicked() {
+        let filtered = !s.data.filter.is_empty() || !s.data.cols.is_empty();
+        if filtered && ui.button("Clear filters").clicked() {
             d.data_filter.clear();
+            d.col_filters.clear();
             send(out, DbMsg::DataApplyFilter(id));
         }
         ui.separator();
-        let rows = s.data.grid.as_ref().map_or(0, |g| g.rows.len()) as u64;
-        if ui
-            .add_enabled(s.data.offset > 0, egui::Button::new(icons::CARET_LEFT))
-            .on_hover_text("Previous page")
-            .clicked()
-        {
-            send(out, DbMsg::DataPage { id, forward: false });
+        if let Some(g) = &s.data.grid {
+            column_chooser(ui, s, d, g, out);
         }
-        ui.label(if rows == 0 {
-            "no rows".to_string()
-        } else {
-            format!("rows {}–{}", s.data.offset + 1, s.data.offset + rows)
-        });
-        if ui
-            .add_enabled(rows >= s.data.limit, egui::Button::new(icons::CARET_RIGHT))
-            .on_hover_text("Next page")
-            .clicked()
-        {
-            send(out, DbMsg::DataPage { id, forward: true });
-        }
-        egui::ComboBox::from_id_salt(("db-limit", id))
-            .selected_text(format!("{} / page", s.data.limit))
-            .show_ui(ui, |ui| {
-                for n in PAGE_SIZES {
-                    if ui
-                        .selectable_label(s.data.limit == n, format!("{n}"))
-                        .clicked()
-                    {
-                        send(out, DbMsg::DataLimit { id, limit: n });
-                    }
-                }
-            });
         if ui.button(icons::REFRESH).on_hover_text("Reload").clicked() {
             send(out, DbMsg::DataReload(id));
         }
@@ -1342,7 +1319,87 @@ fn data_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg
         }
         return;
     };
-    data_grid(ui, s, d, grid, blocked.is_none(), out);
+    // The grid scrolls above the pager footer, which stays at the bottom (#138).
+    let h = (ui.available_height() - PAGER_H - 6.0).max(120.0);
+    ui.allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
+        ui.set_min_height(h);
+        data_grid(ui, s, d, grid, blocked.is_none(), h, out);
+    });
+    ui.separator();
+    if pager_bar(
+        ui,
+        &mut d.pager,
+        s.data.total.map(|t| t as usize),
+        ("db", id),
+    ) {
+        send(out, DbMsg::DataGo(id));
+    }
+}
+
+/// Columns ▾ (#138): a searchable list with a checkbox per column, as the
+/// `y.select.js` dropdowns of Senar / wtbapp; Show all / Hide all.
+fn column_chooser(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, g: &Grid, out: &mut Vec<Msg>) {
+    let id = s.id;
+    let hidden = &s.data.hidden;
+    let n = g.columns.iter().filter(|c| hidden.contains(*c)).count();
+    let title = if n == 0 {
+        il(icons::TABLE, "Columns")
+    } else {
+        il(icons::TABLE, &format!("Columns ({n} hidden)"))
+    };
+    ui.menu_button(title, |ui| {
+        ui.set_min_width(240.0);
+        ui.add(
+            egui::TextEdit::singleline(&mut d.column_search)
+                .hint_text(format!("{} search", icons::SEARCH))
+                .desired_width(f32::INFINITY),
+        );
+        ui.horizontal(|ui| {
+            if ui.small_button("Show all").clicked() {
+                send(
+                    out,
+                    DbMsg::SetHidden {
+                        id,
+                        hidden: Default::default(),
+                    },
+                );
+            }
+            if ui.small_button("Hide all").clicked() {
+                send(
+                    out,
+                    DbMsg::SetHidden {
+                        id,
+                        hidden: g.columns.iter().cloned().collect(),
+                    },
+                );
+            }
+        });
+        ui.separator();
+        let q = d.column_search.trim().to_lowercase();
+        egui::ScrollArea::vertical()
+            .id_salt(("db-columns", id))
+            .max_height(320.0)
+            .show(ui, |ui| {
+                for c in g
+                    .columns
+                    .iter()
+                    .filter(|c| q.is_empty() || c.to_lowercase().contains(&q))
+                {
+                    let mut shown = !hidden.contains(c);
+                    if ui.checkbox(&mut shown, c).changed() {
+                        let mut h = hidden.clone();
+                        if shown {
+                            h.remove(c);
+                        } else {
+                            h.insert(c.clone());
+                        }
+                        send(out, DbMsg::SetHidden { id, hidden: h });
+                    }
+                }
+            });
+    })
+    .response
+    .on_hover_text("Show or hide columns of the grid; kept for this table");
 }
 
 fn data_grid(
@@ -1351,6 +1408,7 @@ fn data_grid(
     d: &mut DbDraft,
     grid: &Grid,
     editable: bool,
+    h: f32,
     out: &mut Vec<Msg>,
 ) {
     let id = s.id;
@@ -1358,7 +1416,12 @@ fn data_grid(
     let total = existing + s.data.edits.inserted.len();
     let changed_fill = ui.visuals().selection.bg_fill.gamma_multiply(0.45);
     let deleted_color = red();
-    let ncols = grid.columns.len();
+    // Hidden columns (#138) are left out; cells keep their real index.
+    let vis: Vec<usize> = (0..grid.columns.len())
+        .filter(|&c| !s.data.hidden.contains(&grid.columns[c]))
+        .collect();
+    let ncols = vis.len();
+    let mut apply = false;
     egui::ScrollArea::horizontal()
         .id_salt(("db-grid-h", id))
         .show(ui, |ui| {
@@ -1372,21 +1435,42 @@ fn data_grid(
                 .resizable(true)
                 .auto_shrink([false, false])
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .max_scroll_height((h - 2.0 * ROW - 16.0).max(60.0))
                 .column(TCol::exact(52.0))
                 .columns(TCol::initial(140.0).at_least(40.0).clip(true), ncols)
-                .header(ROW + 2.0, |mut h| {
-                    h.col(|ui| {
+                .header(2.0 * ROW + 8.0, |mut hd| {
+                    hd.col(|ui| {
                         ui.label(RichText::new("#").weak());
                     });
-                    for c in &grid.columns {
-                        h.col(|ui| {
+                    for &ci in &vis {
+                        let c = &grid.columns[ci];
+                        hd.col(|ui| {
+                            ui.vertical(|ui| {
                             let arrow = match &s.data.sort {
                                 Some((n, false)) if n == c => format!(" {}", icons::CARET_UP),
                                 Some((n, true)) if n == c => format!(" {}", icons::CARET_DOWN),
                                 _ => String::new(),
                             };
-                            cell_text(ui, RichText::new(format!("{c}{arrow}")).strong());
-                            let resp = cell_click(ui, ("sort", c))
+                            let line = ui
+                                .horizontal(|ui| {
+                                    cell_text(ui, RichText::new(format!("{c}{arrow}")).strong());
+                                    ui.add_space(ui.available_width());
+                                })
+                                .response;
+                            // The filter box of this column (#138): Enter applies.
+                            let fb = ui.add(
+                                egui::TextEdit::singleline(d.col_filters.entry(c.clone()).or_default())
+                                    .hint_text(icons::FUNNEL)
+                                    .desired_width(f32::INFINITY),
+                            );
+                            if fb.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                apply = true;
+                            }
+                            fb.on_hover_text(
+                                "Filter: text = contains · =x equal · !x not equal · >x / <x · NULL empty · !NULL has a value (Enter)",
+                            );
+                            let resp = ui
+                                .interact(line.rect, ui.scope_id().with(("sort", c)), egui::Sense::click())
                                 .on_hover_text("Sort: ascending → descending → off");
                             if resp.clicked() {
                                 send(
@@ -1397,6 +1481,7 @@ fn data_grid(
                                     },
                                 );
                             }
+                            });
                         });
                     }
                 })
@@ -1426,7 +1511,7 @@ fn data_grid(
                                 d.selected_row = Some(r);
                             }
                         });
-                        for c in 0..ncols {
+                        for &c in &vis {
                             row.col(|ui| {
                                 cell(ui, s, d, r, c, deleted, editable, changed_fill, out);
                             });
@@ -1434,6 +1519,9 @@ fn data_grid(
                     });
                 });
         });
+    if apply {
+        send(out, DbMsg::DataApplyFilter(id));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
