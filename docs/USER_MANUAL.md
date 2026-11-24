@@ -1317,6 +1317,25 @@ cannot reach the database address, the dialog says so.
 
 Closing the window, **Reconnect**, or quitting Telepad stops the SSH tunnel.
 
+### Export and import
+
+- **Export…** (Data tab toolbar): **CSV** (header row, `,` or `;`; cells a spreadsheet would
+  read as a formula get a leading `'`, numbers stay as they are), **SQL (INSERT)** (one
+  `INSERT` per row with quoted names and values, optionally the `CREATE TABLE` first) or
+  **Excel (.xlsx)** (numbers as numbers). Rows: **Filtered rows (all pages)**, **Whole
+  table** or **This page**; the shown columns (tick **Also the hidden columns** for all).
+  A save dialog asks for the file; the export runs in the background page by page
+  (*exporting… n rows*, **Cancel**), writes `<file>.telepad-part` and renames it when done.
+  Values longer than 64 KiB are cut as in the grid; the result says how many.
+- **Export result** (Query tab) writes the shown result the same way.
+- **Import…** (not on Read-only connections): pick a CSV / TSV, Excel (`.xlsx`, `.xls`,
+  `.ods`; first sheet, first row = column names) or SQL file. The dialog maps each file
+  column to a table column by name (change it, or *(skip)*), shows the first rows and the
+  first `INSERT` statements with the values. A SQL file is taken only for its `INSERT
+  INTO <this table>` statements; anything else is listed and left out. **Import** runs all
+  rows in one transaction: the first error undoes everything and names the row.
+- Exports and imports are written to the SQL log.
+
 ### SQL log
 
 ![SQL log of a database window](images/sql-log.png)

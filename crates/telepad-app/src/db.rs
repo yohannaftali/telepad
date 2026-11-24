@@ -219,6 +219,30 @@ pub struct DbSession {
     pub log: Vec<telepad_core::history::Entry>,
     /// Statements sent and not answered yet, logged when they are.
     pub running_log: Option<RunningLog>,
+    /// An export running (#139): rows written so far.
+    pub exporting: Option<u64>,
+    /// The Import dialog (#139): the file read, waiting for Import.
+    pub import: Option<ImportView>,
+}
+
+/// The Export dialog (#139).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExportForm {
+    pub format: telepad_core::db::io::Format,
+    pub scope: telepad_core::db::io::Scope,
+    pub semicolon: bool,
+    /// SQL: CREATE TABLE first.
+    pub create: bool,
+    /// Also the hidden columns.
+    pub all_columns: bool,
+}
+
+/// A file read for import (#139).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportView {
+    pub name: String,
+    pub file: telepad_core::db::io::ImportFile,
+    pub running: bool,
 }
 
 /// What a running Post / structure change sent, for the SQL log (#100).
@@ -365,6 +389,10 @@ pub struct DbDraft {
     pub col_filters: BTreeMap<String, String>,
     pub pager: crate::pager::Pager,
     pub column_search: String,
+    /// Export / import (#139): the open Export form, the import column map
+    /// (file column → table column, `None` = not imported).
+    pub export: Option<ExportForm>,
+    pub import_map: Vec<Option<String>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -412,6 +440,22 @@ pub enum DbJob {
         schema: String,
         statements: Vec<String>,
     },
+    /// Write rows to a file page by page (#139) → [`DbMsg::ExportProgress`]
+    /// …, [`DbMsg::Exported`]. `page`: only this (offset, limit).
+    Export {
+        table: TableRef,
+        filter: String,
+        cols: Vec<sql::ColFilter>,
+        sort: sql::Sort,
+        page: Option<(u64, u64)>,
+        spec: telepad_core::db::io::ExportSpec,
+        path: std::path::PathBuf,
+    },
+    /// Rows of a file in one transaction (#139) → [`DbMsg::Imported`].
+    Import {
+        database: String,
+        statements: Vec<Statement>,
+    },
     Apply {
         database: String,
         statements: Vec<Statement>,
@@ -447,6 +491,28 @@ pub enum DbEffect {
     Job {
         id: DbId,
         job: DbJob,
+    },
+    /// Save dialog, then [`DbJob::Export`] on the worker (#139); nothing
+    /// when the dialog is cancelled.
+    Export {
+        id: DbId,
+        name: String,
+        job: DbJob,
+    },
+    /// Save dialog, then write rows already loaded (a query result, #139)
+    /// → [`DbMsg::Exported`].
+    ExportRows {
+        id: DbId,
+        name: String,
+        engine: Engine,
+        grid: Grid,
+        spec: telepad_core::db::io::ExportSpec,
+    },
+    /// Open dialog and read the file (#139) → [`DbMsg::ImportLoaded`].
+    PickImport {
+        id: DbId,
+        engine: Engine,
+        table: TableRef,
     },
     /// Hidden columns saved for this table (#138) → [`DbMsg::HiddenLoaded`].
     LoadHidden {
@@ -592,6 +658,38 @@ pub enum DbMsg {
         table: TableRef,
         hidden: BTreeSet<String>,
     },
+    /// Export / import of table data (#139).
+    ExportOpen(DbId),
+    ExportClose(DbId),
+    /// Run the Export form (a save dialog comes first).
+    ExportRun(DbId),
+    ExportProgress {
+        id: DbId,
+        rows: u64,
+    },
+    /// Ok((rows, values cut to the cell size, file)).
+    Exported {
+        id: DbId,
+        result: Result<(u64, u64, String), String>,
+    },
+    /// Export the shown result of the Query tab (#139).
+    ExportResult {
+        id: DbId,
+        format: telepad_core::db::io::Format,
+    },
+    /// Pick a file to import (open dialog), then read it.
+    ImportOpen(DbId),
+    ImportLoaded {
+        id: DbId,
+        result: Result<(String, telepad_core::db::io::ImportFile), String>,
+    },
+    ImportClose(DbId),
+    /// Import the file with the map (one transaction).
+    ImportRun(DbId),
+    Imported {
+        id: DbId,
+        result: Result<u64, String>,
+    },
     /// Cell edited (`None` = NULL).
     SetCell {
         id: DbId,
@@ -688,6 +786,33 @@ pub fn host_db_targets(alias: &str, report: &HostReport) -> Vec<DbTarget> {
 
 fn job(fx: &mut Vec<DbEffect>, id: DbId, job: DbJob) {
     fx.push(DbEffect::Job { id, job });
+}
+
+/// The statements an import runs (#139): a SQL file's INSERTs as they are,
+/// else one bound INSERT per row with the mapped columns.
+pub fn import_statements(
+    engine: Engine,
+    t: &TableRef,
+    info: &TableInfo,
+    v: &ImportView,
+    map: &[Option<String>],
+) -> Vec<Statement> {
+    use telepad_core::db::io::Format;
+    if v.file.format == Format::Sql {
+        return v
+            .file
+            .statements
+            .iter()
+            .map(|s| Statement {
+                sql: s.clone(),
+                params: vec![],
+            })
+            .collect();
+    }
+    if map.iter().all(Option::is_none) {
+        return Vec::new();
+    }
+    telepad_core::db::io::import_statements(engine, t, &info.columns, map, &v.file.rows)
 }
 
 /// The pager of the shown page (back to the model after a refused change).
@@ -1295,6 +1420,216 @@ pub fn update(
                 s.data.offset = 0;
                 d.pager = crate::pager::Pager::new(limit as usize);
                 reload_page(s, &mut fx);
+            }
+        }
+        DbMsg::ExportOpen(_) => d.export = Some(ExportForm::default()),
+        DbMsg::ExportClose(_) => d.export = None,
+        DbMsg::ExportRun(_) => {
+            let (Some(form), Some(t), Some(g)) = (d.export.take(), &s.data.table, &s.data.grid)
+            else {
+                return fx;
+            };
+            if s.exporting.is_some() {
+                return fx;
+            }
+            use telepad_core::db::io::{ExportSpec, Format, Scope};
+            let columns: Vec<String> = g
+                .columns
+                .iter()
+                .filter(|c| form.all_columns || !s.data.hidden.contains(*c))
+                .cloned()
+                .collect();
+            let create = (form.format == Format::Sql && form.create)
+                .then(|| s.info.as_ref().map(|i| i.create_sql.clone()))
+                .flatten();
+            let (filter, cols) = match form.scope {
+                Scope::Table => (String::new(), Vec::new()),
+                _ => (s.data.filter.clone(), s.data.cols.clone()),
+            };
+            let page = (form.scope == Scope::Page).then_some((s.data.offset, s.data.limit));
+            let spec = ExportSpec {
+                format: form.format,
+                scope: form.scope,
+                semicolon: form.semicolon,
+                create,
+                columns,
+            };
+            s.exporting = Some(0);
+            fx.push(DbEffect::Export {
+                id,
+                name: format!("{}.{}", t.table, form.format.ext()),
+                job: DbJob::Export {
+                    table: t.clone(),
+                    filter,
+                    cols,
+                    sort: s.data.sort.clone(),
+                    page,
+                    spec,
+                    path: Default::default(),
+                },
+            });
+        }
+        DbMsg::ExportResult { format, .. } => {
+            let grid = s
+                .queries
+                .get(s.query_tab)
+                .and_then(|q| q.results.get(q.shown))
+                .and_then(|r| r.grid.clone());
+            let Some(grid) = grid else {
+                return fx;
+            };
+            if s.exporting.is_some() {
+                return fx;
+            }
+            s.exporting = Some(0);
+            fx.push(DbEffect::ExportRows {
+                id,
+                name: format!("query.{}", format.ext()),
+                engine: s.target.engine,
+                spec: telepad_core::db::io::ExportSpec {
+                    format,
+                    columns: grid.columns.clone(),
+                    ..Default::default()
+                },
+                grid,
+            });
+        }
+        DbMsg::ExportProgress { rows, .. } => {
+            if s.exporting.is_some() {
+                s.exporting = Some(rows);
+            }
+        }
+        DbMsg::Exported { result, .. } => {
+            s.exporting = None;
+            let run = RunningLog {
+                title: "Export".into(),
+                statements: vec![],
+                database: s
+                    .data
+                    .table
+                    .as_ref()
+                    .map(|t| t.database.clone())
+                    .unwrap_or_default(),
+            };
+            match result {
+                Ok((rows, cut, file)) => {
+                    let note = if cut > 0 {
+                        format!(" ({cut} long value(s) are cut to 64 KiB, as in the grid)")
+                    } else {
+                        String::new()
+                    };
+                    s.notice = Some(format!("Exported {rows} row(s) to {file}{note}"));
+                    let run = RunningLog {
+                        title: format!("Export {rows} row(s) to {file}"),
+                        ..run
+                    };
+                    log_sql(
+                        s,
+                        d,
+                        &mut fx,
+                        &run,
+                        Outcome::Done,
+                        Some(rows),
+                        String::new(),
+                        None,
+                    );
+                }
+                Err(e) if e == "cancelled-dialog" => {}
+                Err(e) => {
+                    s.error = Some(format!("Export failed: {e}"));
+                    log_sql(s, d, &mut fx, &run, Outcome::Failed, None, e, None);
+                }
+            }
+        }
+        DbMsg::ImportOpen(_) => {
+            let Some(t) = &s.data.table else {
+                return fx;
+            };
+            if s.read_only {
+                s.error = Some("Read-only connection: import is not allowed".into());
+                return fx;
+            }
+            fx.push(DbEffect::PickImport {
+                id,
+                engine: s.target.engine,
+                table: t.clone(),
+            });
+        }
+        DbMsg::ImportLoaded { result, .. } => match result {
+            Ok((name, file)) => {
+                let cols = s
+                    .info
+                    .as_ref()
+                    .map(|i| i.columns.clone())
+                    .unwrap_or_default();
+                d.import_map = telepad_core::db::io::auto_map(&file.headers, &cols);
+                s.import = Some(ImportView {
+                    name,
+                    file,
+                    running: false,
+                });
+            }
+            Err(e) => s.error = Some(format!("Cannot read the file: {e}")),
+        },
+        DbMsg::ImportClose(_) => {
+            if !s.import.as_ref().is_some_and(|v| v.running) {
+                s.import = None;
+            }
+        }
+        DbMsg::ImportRun(_) => {
+            if s.read_only {
+                s.error = Some("Read-only connection: import is not allowed".into());
+                return fx;
+            }
+            let (Some(v), Some(t), Some(info)) = (s.import.as_mut(), &s.data.table, &s.info) else {
+                return fx;
+            };
+            if v.running {
+                return fx;
+            }
+            let statements = import_statements(s.target.engine, t, info, v, &d.import_map);
+            if statements.is_empty() {
+                s.error = Some("Nothing to import: map at least one column".into());
+                return fx;
+            }
+            v.running = true;
+            s.running_log = Some(RunningLog {
+                title: format!("Import {} row(s) from {}", statements.len(), v.name),
+                statements: statements
+                    .iter()
+                    .take(20)
+                    .map(|st| st.display(s.target.engine))
+                    .collect(),
+                database: t.database.clone(),
+            });
+            let database = t.database.clone();
+            job(
+                &mut fx,
+                id,
+                DbJob::Import {
+                    database,
+                    statements,
+                },
+            );
+        }
+        DbMsg::Imported { result, .. } => {
+            if let Some(v) = s.import.as_mut() {
+                v.running = false;
+            }
+            if let Some(run) = s.running_log.take() {
+                let (outcome, rows, error) = match &result {
+                    Ok(n) => (Outcome::Done, Some(*n), String::new()),
+                    Err(e) => (Outcome::RolledBack, None, e.clone()),
+                };
+                log_sql(s, d, &mut fx, &run, outcome, rows, error, None);
+            }
+            match result {
+                Ok(n) => {
+                    s.import = None;
+                    s.notice = Some(format!("Imported {n} row(s)"));
+                    reload_page(s, &mut fx);
+                }
+                Err(e) => s.error = Some(e),
             }
         }
         DbMsg::DataGo(_) => {
@@ -1916,6 +2251,11 @@ fn msg_id(msg: &DbMsg) -> DbId {
         | PageLoaded { id, .. }
         | SetHidden { id, .. }
         | HiddenLoaded { id, .. }
+        | ExportProgress { id, .. }
+        | ExportResult { id, .. }
+        | Exported { id, .. }
+        | ImportLoaded { id, .. }
+        | Imported { id, .. }
         | SetCell { id, .. }
         | DeleteRow { id, .. }
         | Posted { id, .. }
@@ -1938,6 +2278,12 @@ fn msg_id(msg: &DbMsg) -> DbId {
         | Tab(id, _)
         | DataReload(id)
         | DataGo(id)
+        | ExportOpen(id)
+        | ExportClose(id)
+        | ExportRun(id)
+        | ImportOpen(id)
+        | ImportClose(id)
+        | ImportRun(id)
         | DataApplyFilter(id)
         | InsertRow(id)
         | Discard(id)

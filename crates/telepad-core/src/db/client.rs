@@ -1064,15 +1064,41 @@ impl Session {
     /// Grid changes in one transaction; each statement must touch exactly one
     /// row, else everything is rolled back. Returns the rows changed.
     pub fn apply(&mut self, database: &str, statements: &[Statement]) -> Result<u64, String> {
+        self.in_transaction(database, statements, true)
+    }
+
+    /// Import (#139): every statement in one transaction, any row count; the
+    /// first error rolls everything back and names the row.
+    pub fn import(&mut self, database: &str, statements: &[Statement]) -> Result<u64, String> {
+        self.in_transaction(database, statements, false)
+    }
+
+    fn in_transaction(
+        &mut self,
+        database: &str,
+        statements: &[Statement],
+        exactly_one: bool,
+    ) -> Result<u64, String> {
         let engine = self.engine();
         let one = |n: u64, st: &Statement| {
-            if n == 1 {
+            if !exactly_one || n == 1 {
                 Ok(())
             } else {
                 Err(format!(
                     "{n} rows matched instead of 1 — nothing was saved:\n{}",
                     st.display(engine)
                 ))
+            }
+        };
+        let at = |i: usize, e: String| {
+            if exactly_one {
+                e
+            } else {
+                format!(
+                    "Row {} of {}: {e} — nothing was imported",
+                    i + 1,
+                    statements.len()
+                )
             }
         };
         let r = match engine {
@@ -1083,13 +1109,14 @@ impl Session {
                         .start_transaction(TxOpts::default())
                         .map_err(|e| my_err(&e))?;
                     let mut total = 0;
-                    for st in statements {
+                    for (i, st) in statements.iter().enumerate() {
                         let params: Vec<Value> = st
                             .params
                             .iter()
                             .map(|p| p.as_ref().map_or(Value::NULL, |v| Value::from(v.as_str())))
                             .collect();
-                        tx.exec_drop(&st.sql, params).map_err(|e| my_err(&e))?;
+                        tx.exec_drop(&st.sql, params)
+                            .map_err(|e| at(i, my_err(&e)))?;
                         let n = tx.affected_rows();
                         one(n, st)?;
                         total += n;
@@ -1101,12 +1128,12 @@ impl Session {
             Engine::Postgres => self.pg(database).and_then(|c| {
                 let mut tx = c.transaction().map_err(|e| pg_err(&e, None))?;
                 let mut total = 0;
-                for st in statements {
+                for (i, st) in statements.iter().enumerate() {
                     let params: Vec<&(dyn ToSql + Sync)> =
                         st.params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
                     let n = tx
                         .execute(st.sql.as_str(), &params)
-                        .map_err(|e| pg_err(&e, Some(&st.sql)))?;
+                        .map_err(|e| at(i, pg_err(&e, Some(&st.sql))))?;
                     one(n, st)?;
                     total += n;
                 }
@@ -1334,6 +1361,18 @@ mod live {
         let page = s
             .page(&t, "price > 1", &[], &Some(("name".into(), true)), 0, 1000)
             .unwrap();
+        // Filter boxes and the count (#138).
+        let boxes = vec![("name".to_string(), "IT'S".to_string())];
+        assert_eq!(s.count(&t, "", &boxes).unwrap(), 1);
+        assert_eq!(
+            s.count(&t, "", &[("note".into(), "NULL".into())]).unwrap(),
+            1
+        );
+        assert_eq!(
+            s.count(&t, "price > 0", &[("price".into(), ">1.9".into())])
+                .unwrap(),
+            1
+        );
         assert_eq!(page.columns[1], "name");
         assert_eq!(page.rows.len(), 2);
         assert_eq!(text(&page.rows[0][1]), "it's");
@@ -1355,6 +1394,33 @@ mod live {
             &[("name".into(), Some("gamma".into()))],
         );
         assert_eq!(s.apply("telepad_test", &[up.clone(), ins]).unwrap(), 2);
+        // Import (#139): many rows in one transaction; a bad row undoes all.
+        let rows = |names: &[&str]| -> Vec<Statement> {
+            names
+                .iter()
+                .map(|n| {
+                    insert_row(
+                        Engine::MySql,
+                        &t,
+                        &info.columns,
+                        &[("name".into(), Some(n.to_string()))],
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            s.import("telepad_test", &rows(&["imp1", "imp2"])).unwrap(),
+            2
+        );
+        let e = s
+            .import("telepad_test", &rows(&["imp3", "imp1"]))
+            .unwrap_err();
+        assert!(e.starts_with("Row 2 of 2"), "{e}");
+        assert_eq!(
+            s.count(&t, "", &[("name".into(), "imp".into())]).unwrap(),
+            2,
+            "rolled back"
+        );
         // Unchanged value still counts as one matched row.
         assert_eq!(s.apply("telepad_test", &[up]).unwrap(), 1);
         let missing = update_row(

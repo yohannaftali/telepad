@@ -48,6 +48,228 @@ pub fn db_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, id: DbId, out: &mut
     }
     confirm(ui, s, dr, out);
     viewer(ui, dr);
+    export_dialog(ui, s, dr, out);
+    import_dialog(ui, s, dr, out);
+}
+
+/// Export… (#139): format, which rows, columns.
+fn export_dialog(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) {
+    use telepad_core::db::io::{Format, Scope};
+    let id = s.id;
+    let Some(f) = d.export.as_mut() else {
+        return;
+    };
+    let mut run = false;
+    let mut close = false;
+    let modal = egui::Modal::new(egui::Id::unique(("db-export", id))).show(ui.ctx(), |ui| {
+        ui.set_width(460.0);
+        let table = s
+            .data
+            .table
+            .as_ref()
+            .map(|t| t.table.clone())
+            .unwrap_or_default();
+        ui.heading(il(icons::EXPORT, &format!("Export {table}")));
+        ui.add_space(4.0);
+        ui.strong("Format");
+        for x in Format::ALL {
+            ui.radio_value(&mut f.format, x, x.title());
+        }
+        ui.add_space(4.0);
+        ui.strong("Rows");
+        for x in Scope::ALL {
+            ui.radio_value(&mut f.scope, x, x.title());
+        }
+        ui.add_space(4.0);
+        match f.format {
+            Format::Csv => {
+                ui.checkbox(
+                    &mut f.semicolon,
+                    "Separate with ; (for Excel in some languages)",
+                );
+            }
+            Format::Sql => {
+                ui.checkbox(&mut f.create, "Start with CREATE TABLE (MySQL / MariaDB)");
+            }
+            Format::Xlsx => {}
+        }
+        if !s.data.hidden.is_empty() {
+            ui.checkbox(&mut f.all_columns, "Also the hidden columns");
+        }
+        ui.label(
+            RichText::new(
+                "Values longer than 64 KiB are cut, as in the grid; the result says how many.",
+            )
+            .weak()
+            .small(),
+        );
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if act_button(ui, true, Act::Add, &il(icons::EXPORT, "Export…")).clicked() {
+                run = true;
+            }
+            if ui.button("Cancel").clicked() {
+                close = true;
+            }
+        });
+    });
+    if run {
+        send(out, DbMsg::ExportRun(id));
+    } else if close || modal.should_close() {
+        send(out, DbMsg::ExportClose(id));
+    }
+}
+
+/// Import… (#139): the file read, its columns mapped to the table's, a
+/// preview of the rows and of the SQL; runs only on Import.
+fn import_dialog(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) {
+    use telepad_core::db::io::Format;
+    let id = s.id;
+    let (Some(v), Some(info), Some(t)) = (&s.import, &s.info, &s.data.table) else {
+        return;
+    };
+    let engine = s.engine();
+    let modal = egui::Modal::new(egui::Id::unique(("db-import", id))).show(ui.ctx(), |ui| {
+        ui.set_width(760.0);
+        ui.heading(il(icons::IMPORT, &format!("Import into {}", t.table)));
+        ui.label(RichText::new(&v.name).monospace().weak());
+        ui.add_space(4.0);
+        let statements = telepad_app::db::import_statements(engine, t, info, v, &d.import_map);
+        if v.file.format == Format::Sql {
+            ui.label(format!(
+                "{} INSERT statement(s) into {}",
+                v.file.statements.len(),
+                t.table
+            ));
+            if !v.file.refused.is_empty() {
+                ui.colored_label(
+                    red(),
+                    format!(
+                        "{} {} statement(s) are not INSERTs into this table and are left out:",
+                        icons::WARNING,
+                        v.file.refused.len()
+                    ),
+                );
+                egui::ScrollArea::vertical()
+                    .id_salt(("db-import-refused", id))
+                    .max_height(90.0)
+                    .show(ui, |ui| {
+                        for r in &v.file.refused {
+                            ui.label(RichText::new(r).monospace().small());
+                        }
+                    });
+            }
+        } else {
+            ui.label(format!(
+                "{} row(s), {} column(s) — map each file column to a table column (or skip it)",
+                v.file.rows.len(),
+                v.file.headers.len()
+            ));
+            egui::ScrollArea::vertical()
+                .id_salt(("db-import-map", id))
+                .max_height(180.0)
+                .show(ui, |ui| {
+                    egui::Grid::new(("db-import-grid", id))
+                        .num_columns(3)
+                        .spacing([12.0, 4.0])
+                        .show(ui, |ui| {
+                            for (i, h) in v.file.headers.iter().enumerate() {
+                                if d.import_map.len() <= i {
+                                    d.import_map.resize(i + 1, None);
+                                }
+                                ui.label(RichText::new(h).monospace());
+                                ui.label(icons::ARROW_RIGHT);
+                                let cur = d.import_map[i].clone();
+                                egui::ComboBox::from_id_salt(("db-import-col", id, i))
+                                    .selected_text(cur.clone().unwrap_or_else(|| "(skip)".into()))
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut d.import_map[i], None, "(skip)");
+                                        for c in &info.columns {
+                                            ui.selectable_value(
+                                                &mut d.import_map[i],
+                                                Some(c.name.clone()),
+                                                &c.name,
+                                            );
+                                        }
+                                    });
+                                ui.end_row();
+                            }
+                        });
+                });
+            ui.add_space(4.0);
+            ui.strong("First rows");
+            egui::ScrollArea::both()
+                .id_salt(("db-import-preview", id))
+                .max_height(140.0)
+                .show(ui, |ui| {
+                    egui::Grid::new(("db-import-rows", id))
+                        .striped(true)
+                        .spacing([12.0, 2.0])
+                        .show(ui, |ui| {
+                            for h in &v.file.headers {
+                                ui.strong(h);
+                            }
+                            ui.end_row();
+                            for r in v.file.rows.iter().take(10) {
+                                for c in r {
+                                    match c {
+                                        Some(x) => ui.label(RichText::new(cut(x)).monospace()),
+                                        None => ui.label(RichText::new("NULL").weak().italics()),
+                                    };
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+        }
+        ui.add_space(4.0);
+        ui.strong("SQL (first statements)");
+        egui::ScrollArea::vertical()
+            .id_salt(("db-import-sql", id))
+            .max_height(110.0)
+            .show(ui, |ui| {
+                for st in statements.iter().take(5) {
+                    ui.label(RichText::new(st.display(engine)).monospace().small());
+                }
+                if statements.len() > 5 {
+                    ui.label(RichText::new(format!("… {} more", statements.len() - 5)).weak());
+                }
+            });
+        ui.label(
+            RichText::new("Runs in one transaction: the first error undoes everything.")
+                .weak()
+                .small(),
+        );
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let can = !statements.is_empty() && !v.running && !s.read_only;
+            if act_button(
+                ui,
+                can,
+                Act::Add,
+                &il(
+                    icons::IMPORT,
+                    &format!("Import {} row(s)", statements.len()),
+                ),
+            )
+            .clicked()
+            {
+                send(out, DbMsg::ImportRun(id));
+            }
+            if v.running {
+                ui.spinner();
+            }
+            if ui
+                .add_enabled(!v.running, egui::Button::new("Cancel"))
+                .clicked()
+            {
+                send(out, DbMsg::ImportClose(id));
+            }
+        });
+    });
+    if modal.should_close() && !v.running {
+        send(out, DbMsg::ImportClose(id));
+    }
 }
 
 fn login(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) {
@@ -1258,6 +1480,44 @@ fn data_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg
         if let Some(g) = &s.data.grid {
             column_chooser(ui, s, d, g, out);
         }
+        // Export / import (#139).
+        match s.exporting {
+            Some(n) => {
+                ui.spinner();
+                ui.label(format!("exporting… {n} row(s)"));
+                if ui.button(il(icons::STOP, "Cancel")).clicked() {
+                    send(out, DbMsg::Cancel(id));
+                }
+            }
+            None => {
+                if ui
+                    .add_enabled(
+                        s.data.grid.is_some(),
+                        egui::Button::new(il(icons::EXPORT, "Export…")),
+                    )
+                    .on_hover_text(
+                        "SQL, CSV or Excel: the filtered rows, the whole table or this page",
+                    )
+                    .clicked()
+                {
+                    send(out, DbMsg::ExportOpen(id));
+                }
+            }
+        }
+        if ui
+            .add_enabled(
+                !s.read_only && s.info.is_some(),
+                egui::Button::new(il(icons::IMPORT, "Import…")),
+            )
+            .on_hover_text(if s.read_only {
+                "Read-only connection"
+            } else {
+                "Rows from a CSV, Excel or SQL file, after a preview"
+            })
+            .clicked()
+        {
+            send(out, DbMsg::ImportOpen(id));
+        }
         if ui.button(icons::REFRESH).on_hover_text("Reload").clicked() {
             send(out, DbMsg::DataReload(id));
         }
@@ -1872,6 +2132,16 @@ fn query_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Ms
         _ => format!("{} ms", r.millis),
     });
     if let Some(g) = &r.grid {
+        ui.horizontal(|ui| {
+            ui.menu_button(il(icons::EXPORT, "Export result"), |ui| {
+                for f in telepad_core::db::io::Format::ALL {
+                    if ui.button(f.title()).clicked() {
+                        send(out, DbMsg::ExportResult { id, format: f });
+                        ui.close();
+                    }
+                }
+            });
+        });
         result_grid(ui, ("db-result", id, tab, q.shown), g, d);
     }
 }

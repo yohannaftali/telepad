@@ -51,7 +51,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/bmc_setup.sh` | Interactive, user-started BMC (`ipmitool`) setup — see Conventions |
 | `src/parse.rs` | Pure parsers for each section, unit-tested against `tests/fixtures/` |
 | `src/authorized_keys.rs` | Authorized keys page backend: read-only `list` / `list_all` of `~/.ssh/authorized_keys` → `HostKeys` (`AuthKey`: line, options, key, supported, group from the `#` line above; login fingerprints), `parse_authorized_keys`, validate a pasted key (type, base64, embedded type), SHA256 fingerprint, add/revoke script for `~/.ssh/authorized_keys` (Add into a group: `INSERT_AWK`, `check_group`), lockout guard (`login_keys`, public key from the private key when no `.pub` exists, #126), parallel `apply_all` |
-| `src/db/` | Database browser (#52–#54): `detect` (DB containers / host listeners → `DbTarget`, user from container env), `tunnel` (`ssh -N -L`, closed on drop and by `close_all` on exit), `client` (`Session`: MySQL `mysql` / PostgreSQL `postgres` drivers, metadata, pages, queries, transactional row edits, DDL, cancel; live tests via `TELEPAD_TEST_MYSQL` / `TELEPAD_TEST_PG`), `sql` (quoting, statement split, danger / read-only checks, row SQL), `ddl` (structure editor SQL), `secret` (OS password store) |
+| `src/db/` | Database browser (#52–#54): `detect` (DB containers / host listeners → `DbTarget`, user from container env), `tunnel` (`ssh -N -L`, closed on drop and by `close_all` on exit), `client` (`Session`: MySQL `mysql` / PostgreSQL `postgres` drivers, metadata, pages, queries, transactional row edits, DDL, cancel; live tests via `TELEPAD_TEST_MYSQL` / `TELEPAD_TEST_PG`), `sql` (quoting, statement split, danger / read-only checks, row SQL), `ddl` (structure editor SQL), `secret` (OS password store), `io` (#139: `Exporter` CSV / SQL / `.xlsx` via `.telepad-part`, `read_import` CSV / Excel (`calamine`) / SQL INSERTs only, `auto_map`, `import_statements`); `sql::filter_condition` / `data_where` / `count_rows` (#138 filter row, wtbapp rules); `Session::count`, `Session::import` (one transaction, error names the row) |
 | `src/files/` | File window (#62; `transfer::Remote` trait: `Sftp` or `ThisComputer` for My Computer #129; `transfer::Options` = Transfer settings #131: `TransferMode` Default / Text / Binary, `convert_eol`, `newer_only`, `exclude` globs; `compare` #131: `compare` (Diff per name), `sync_plan` (`SyncRequest` → `SyncPlan`), `line_marks`): `sftp` (own SFTP v3 client over `ssh -s <alias> sftp`: list, stat, pipelined download / upload, mkdir, rename, remove, setstat), `fallback` (hosts without SFTP: `sh` listing + `scp -O`), `rsync` (availability check, `-e ssh` args with `--protect-args`, dry run), `transfer` (`plan`: recursive walk + existing files, `run`: copy via `.telepad-part`, keep mtime), `ops` (#63: `Fs` trait for `LocalFs` / `Sftp`, `check_name`, new folder / file, rename, recursive delete / chmod / measure, `dir_mode` / `file_mode`), `edit` (#64: read / save with `Stamp` check, `.telepad-part`, links followed), `text` (#64: decode / encode keeping CRLF / BOM, find / replace incl. regex, go to line, indent), `syntax` (#64: language by name / `#!`, line lexer → `Tok` spans), local listing helpers; live tests via `TELEPAD_TEST_SSH` (`tests/sshd/` lab image) |
 | `src/docker_actions.rs` | Docker/compose action commands + terminal script (show, confirm, run), read-only "How it runs" (`docker inspect` → `docker run`, compose files, secrets masked) |
 | `src/cluster.rs` | Docker Swarm (managers) and Kubernetes (kubectl / k3s / microk8s) model + parsers for `===SWARM===` / `===KUBE===`; cluster key so several managers show one cluster |
@@ -92,6 +92,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_keys.rs` | Behaviour tests for the Authorized keys page |
 | `src/mykeys.rs` | My keys tab (#101): `MyKeys` (model), `MyKeysDraft` (selection, `GenForm`, `ConvertForm`; passphrases as `Secret`), `MkMsg` / `MkEffect`, `update`, `used_by` / `authorized_on` |
 | `src/tests_mykeys.rs` | Behaviour tests for the My keys tab |
+| `src/pager.rs` | Table pager (#138, #140, Senar / wtbapp style): `Pager` (page, typed rows per page — empty = 100, above 100 asks — `go(Go)`, `apply_page`, `record_info` "Record [a - b] of n"); drawn by `widgets::pager_bar` |
 | `src/logins.rs` | Log info pages (#126): `LoginSession` (model), `LoginDraft` (sort asc / desc / newest first, per-column filters, page, typed rows per page, show this PC's logins), `rows` (key names from `authorized_keys` / own keys / My keys, `Who`), `filter_match` (wtbapp rules), `page_range`, `LgMsg` / `LgEffect` (handled in `update.rs` `logins`, restored as `logins:<alias>`) |
 | `src/tests_logins.rs` | Behaviour tests for #126 |
 | `src/tests_strategy.rs` | Behaviour tests for #122 (pause, Update Strategy page, ping rounds, last known facts) |
@@ -167,7 +168,8 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
   reaches databases only through `ssh -N -L` (never a direct database port; owner decision on #129:
   the databases of **My Computer** connect straight to `127.0.0.1:<port>`, no SSH, no other address,
   `db::client::Session::connect_local`), changes nothing on the host, and stores passwords only in the OS password store (`keyring`), never in `telepad.db`.
-  New connections are editable; Read-only is a per-connection switch.
+  New connections are editable; Read-only is a per-connection switch. Import (#139) adds rows only
+  after the mapping / row / SQL preview and Import, in one transaction, never on Read-only.
   Fifth exception, in-app (owner decision on #62): the **file window** (`files/`) copies files
   to or from the host only on a user action (Upload / Download, F5, drag and drop), over the
   login's SFTP subsystem (fallback `scp -O`; rsync with a dry run first, no `--delete`); never
@@ -222,6 +224,7 @@ remote`, last folders per host) |
 | Transfer settings (#131) | `settings` table `files_opts:<alias>` (`mode|newer|exclude;exclude`, `Options::to_setting`) |
 | Host Management file | `settings` table `hostsync_config_path` (default `~/.ssh/config`); writes keep a `config.telepad-*.bak` next to it |
 | Remote Desktop settings (#102) | `rdp_settings` table (alias → JSON, `ON UPDATE / DELETE CASCADE` with `hosts`), schema 4; in JSON export / import as `rdp`; Open RDP: `platform::open_rdp_with` (temporary owner-only `.rdp` → mstsc / `open`; Linux `xfreerdp` args); never a password |
+| Data grid hidden columns (#138) | `settings` table `db_hidden:<DbTarget::key>:<db>.<schema>.<table>` (one column name per line) |
 | Database connections | `db_connections` table (user, database, save-password and read-only flags per `DbTarget::key`); passwords in the OS password store (service "Telepad database") |
 | Update source | `settings` table `update_enabled` / `update_repo` / `update_auto_install` (☰ ▸ Software update…); check via the github.com `releases/latest` redirect (API only as fallback: 60 req/h per IP); default `yohannaftali/telepad` |
 
@@ -309,10 +312,10 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #129 | feat(local): My Computer page — monitor this PC like a host, terminal, files and local databases | closed | 2026-11-24 |
 | #130 | fix(files): whole file row (.. row, icon, Modified, Size cells) selects on click; centre text vertically | closed | 2026-11-24 |
 | #131 | feat(files): compare directories, synchronize, diff between panes and transfer settings | closed | 2026-11-24 |
-| #134 | fix(files): Windows legacy junctions (My Documents) — hide system folders, open the link target instead of Access denied | open | 2026-11-24 |
-| #135 | feat(editor): git-style Diff colours (+ green added, - red deleted) and synchronized scrolling | open | 2026-11-24 |
-| #136 | fix(ui): opening an already open page restores and raises its window (minimized or behind) | open | 2026-11-24 |
-| #137 | fix(ui): table cells and headers react to clicks anywhere in the cell — database grid select / centring, sort on header click | open | 2026-11-24 |
-| #138 | feat(db): data grid filter row, column chooser and pager footer (Senar / wtbapp style, 100 rows default) | open | 2026-11-24 |
-| #139 | feat(db): export and import table data (SQL, CSV, Excel) | open | 2026-11-24 |
-| #140 | feat(keys): Log info pager as a sticky footer with record info and first / previous / next / last | open | 2026-11-24 |
+| #134 | fix(files): Windows legacy junctions (My Documents) — hide system folders, open the link target instead of Access denied | ready-for-review | 2026-11-24 |
+| #135 | feat(editor): git-style Diff colours (+ green added, - red deleted) and synchronized scrolling | ready-for-review | 2026-11-24 |
+| #136 | fix(ui): opening an already open page restores and raises its window (minimized or behind) | ready-for-review | 2026-11-24 |
+| #137 | fix(ui): table cells and headers react to clicks anywhere in the cell — database grid select / centring, sort on header click | ready-for-review | 2026-11-24 |
+| #138 | feat(db): data grid filter row, column chooser and pager footer (Senar / wtbapp style, 100 rows default) | ready-for-review | 2026-11-24 |
+| #139 | feat(db): export and import table data (SQL, CSV, Excel) | ready-for-review | 2026-11-24 |
+| #140 | feat(keys): Log info pager as a sticky footer with record info and first / previous / next / last | ready-for-review | 2026-11-24 |
