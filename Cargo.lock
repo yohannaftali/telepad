@@ -5624,14 +5624,14 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "telepad-app"
-version = "0.9.8"
+version = "0.9.9"
 dependencies = [
  "telepad-core",
 ]
 
 [[package]]
 name = "telepad-check"
-version = "0.9.8"
+version = "0.9.9"
 dependencies = [
  "serde_json",
  "telepad-core",
@@ -5639,7 +5639,7 @@ dependencies = [
 
 [[package]]
 name = "telepad-core"
-version = "0.9.8"
+version = "0.9.9"
 dependencies = [
  "aes 0.8.4",
  "argon2",
@@ -5681,7 +5681,7 @@ dependencies = [
 
 [[package]]
 name = "telepad-gui"
-version = "0.9.8"
+version = "0.9.9"
 dependencies = [
  "arboard",
  "eframe",

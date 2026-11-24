@@ -321,6 +321,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #138 | feat(db): data grid filter row, column chooser and pager footer (Senar / wtbapp style, 100 rows default) | closed | 2026-11-24 |
 | #139 | feat(db): export and import table data (SQL, CSV, Excel) | closed | 2026-11-24 |
 | #140 | feat(keys): Log info pager as a sticky footer with record info and first / previous / next / last | closed | 2026-11-24 |
-| #143 | fix(ui): Hosts table fills the page width, auto-resizes columns, Flags not clipped and readable | ready-for-review | 2026-11-24 |
-| #144 | feat(hosts): optional host groups — Groups page, Ungrouped, Hosts - [Group] page, group on cards | ready-for-review | 2026-11-24 |
-| #145 | feat(hosts): user-defined clusters separate from groups — Clusters page, Hosts - [Cluster] page, cluster on cards | ready-for-review | 2026-11-24 |
+| #143 | fix(ui): Hosts table fills the page width, auto-resizes columns, Flags not clipped and readable | closed | 2026-11-24 |
+| #144 | feat(hosts): optional host groups — Groups page, Ungrouped, Hosts - [Group] page, group on cards | closed | 2026-11-24 |
+| #145 | feat(hosts): user-defined clusters separate from groups — Clusters page, Hosts - [Cluster] page, cluster on cards | closed | 2026-11-24 |

@@ -2,6 +2,22 @@
 
 Newest first.
 
+## [2026-11-24] — Telepad 0.9.9
+- **Groups and Clusters** (#144, #145): optional, independent labels for hosts. New Groups /
+  Clusters pages (sidebar under My Computer) with a fixed Ungrouped / No cluster entry; add,
+  rename, describe, reorder, delete; each opens a "Hosts - [name]" page (table / cards, Add hosts…).
+  Set from the host menu, the editor or Host Management; cards show them; the Hosts page can list
+  by group and show Group / Cluster columns. Kept in JSON / OpenSSH export (schema 5).
+- **Hosts table** (#143): columns fit the page and follow every resize; Flags gets its room and
+  the normal text size; dragged widths stay until double-click / Auto-fit.
+- **Hosts that drop ping** (#125): a TCP check of the SSH port tells up from down, so they are no
+  longer held down for 10 minutes after one failed SSH attempt.
+
+## [2026-11-24] — Tested and merged: #143, #144, #145 (PR #148)
+- Windows 11, release build, copy of the inventory; CI green on Windows, macOS, Linux, `db-live`,
+  `files-live`. Issues closed with test comments. Fixed while testing: set dialogs were drawn
+  twice with Groups and Clusters both open (doubled typing).
+
 ## [2026-11-24] — feat(hosts): host groups and clusters (#144, #145)
 - Issues #144 and #145 addressed on GitHub (branch `144-host-groups-clusters`, one model for both).
 - Core: `HostEntry::group` / `cluster`, `SetKind` / `HostSet` / `check_set_name`; OpenSSH tags
