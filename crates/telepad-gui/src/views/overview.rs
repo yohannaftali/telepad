@@ -153,6 +153,11 @@ pub fn fit_widths(
             .iter()
             .map(|t| t.iter().copied().filter(|&i| i < n).collect())
             .collect();
+        // Group / Cluster columns (between Docker and Updated) are long
+        // text too: they give way before Host, Flags and Updated.
+        if n > COLUMNS.len() {
+            tiers[0].extend(COLUMNS.len() - 1..n - 1);
+        }
         let listed: Vec<usize> = tiers.concat();
         tiers.push((0..n).filter(|i| !listed.contains(i)).collect());
         for tier in tiers {
@@ -519,9 +524,16 @@ fn report_cells(row: &mut TableRow<'_, '_>, h: &HostState, r: &HostReport) {
     });
     row.col(|ui| {
         let flags = host_flags(r);
-        flag_chips(ui, &flags);
-        // Chips past the cell edge are cut: list them all on hover (#143).
-        if ui.min_rect().width() > ui.max_rect().width() + 1.0 {
+        let gap = ui.spacing().item_spacing.x;
+        let full: f32 = flags.iter().map(|f| text_w(ui, chip_text(f)) + gap).sum();
+        if full <= ui.available_width() + 1.0 {
+            flag_chips(ui, &flags);
+        } else {
+            // Not enough room for the labels: the coloured icons only, so no
+            // flag is cut off; all details on hover.
+            for f in &flags {
+                ui.label(RichText::new(flag_icon(f.kind)).color(severity_color(f.severity)));
+            }
             let all = flags
                 .iter()
                 .map(|f| f.detail.as_str())
@@ -644,6 +656,22 @@ mod tests {
             fit_widths(&want, &min, &[2], &[None; 4], 10.0),
             min.to_vec()
         );
+    }
+
+    #[test]
+    fn group_and_cluster_columns_give_way_before_host_and_flags() {
+        // 12 fixed columns + Group + Cluster before Updated.
+        let mut want = vec![40.0; 14];
+        want[5] = 300.0; // Flags
+        want[11] = 200.0; // Group
+        want[12] = 200.0; // Cluster
+        let min = vec![30.0; 14];
+        let total: f32 = want.iter().sum();
+        // 300 too little: Description … Temp go to their minimums (10 each),
+        // the rest comes from Group / Cluster, Flags keeps its width.
+        let w = fit_widths(&want, &min, &[2, 4, 5, 10], &[None; 14], total - 300.0);
+        assert_eq!(w[5], 300.0, "{w:?}");
+        assert!(w[11] < 200.0 && w[12] < 200.0, "{w:?}");
     }
 
     #[test]

@@ -306,10 +306,11 @@ then **Open host window**, **Edit**, **Clone** and **Delete…**.
 Hosts window (or collapse the page sidebar) and the columns fit again at once. Each column
 gets what its values need; spare width goes to **Description**, **OS**, **Flags** and
 **Docker**, so **Updated** stays as narrow as its text. When the page is too narrow, the long
-text columns (Description, Docker, OS, Address) give way first, then the bars (CPU, Memory,
-Fullest disk, Temp), and Host, Flags and Updated last; at the minimum widths the table
-scrolls sideways. Flags use the normal text size; when a row's flags do not fit, hover the
-cell to read them all.
+text columns (Description, Docker, OS, Address, and Group / Cluster when shown) give way
+first, then the bars (CPU, Memory, Fullest disk, Temp), and Host, Flags and Updated last; at
+the minimum widths the table scrolls sideways. Flags use the normal text size; when a row's
+flags do not fit, they show as their coloured icons only (never cut off) and hovering the cell
+lists them all.
 
 In inventory order (no column sorted, no search) each row has a **⋮⋮** handle in the first
 column: drag it to reorder hosts. While a column is sorted or the

@@ -9,7 +9,8 @@ Newest first.
   Set from the host menu, the editor or Host Management; cards show them; the Hosts page can list
   by group and show Group / Cluster columns. Kept in JSON / OpenSSH export (schema 5).
 - **Hosts table** (#143): columns fit the page and follow every resize; Flags gets its room and
-  the normal text size; dragged widths stay until double-click / Auto-fit.
+  the normal text size (icons only, never cut off, when a row's labels do not fit); dragged widths
+  stay until double-click / Auto-fit (#150).
 - **Hosts that drop ping** (#125): a TCP check of the SSH port tells up from down, so they are no
   longer held down for 10 minutes after one failed SSH attempt.
 
@@ -17,6 +18,13 @@ Newest first.
 - Windows 11, release build, copy of the inventory; CI green on Windows, macOS, Linux, `db-live`,
   `files-live`. Issues closed with test comments. Fixed while testing: set dialogs were drawn
   twice with Groups and Clusters both open (doubled typing).
+
+## [2026-11-24] — fix(ui): flags are never cut off in the Hosts table (follow-up to #143)
+- With Group / Cluster columns shown and the sidebar open, the Flags cell was cut (`EOL …`).
+  Group / Cluster columns now give way with the long text columns (first), and a row whose flag
+  labels still do not fit shows the coloured flag icons only, details on hover.
+- Files: `gui/src/views/overview.rs` (+1 `fit_widths` test), `docs/USER_MANUAL.md`.
+- Verified: fmt, clippy, tests; GUI on an inventory copy with Group + Cluster columns, sidebar open.
 
 ## [2026-11-24] — feat(hosts): host groups and clusters (#144, #145)
 - Issues #144 and #145 addressed on GitHub (branch `144-host-groups-clusters`, one model for both).
