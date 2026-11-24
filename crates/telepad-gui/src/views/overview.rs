@@ -9,6 +9,7 @@ use telepad_app::{
     HostState, Model, Msg, Sort, SortKey, can_reorder, fullest_disk, host_flags, hottest,
     overview_rows,
 };
+use telepad_core::config::SetKind;
 use telepad_core::model::{HostReport, PortainerRole, human_kb};
 
 use crate::icons;
@@ -39,6 +40,59 @@ const STRETCH: [usize; 4] = [2, 4, 5, 10];
 const SHRINK_ORDER: [&[usize]; 2] = [&[2, 10, 4, 3], &[6, 7, 8, 9]];
 /// Room around a cell's content.
 const CELL_PAD: f32 = 12.0;
+
+type Col = (&'static str, Option<SortKey>, f32, f32);
+
+/// What a hosts table shows (#144, #145): every host (the Hosts page) or
+/// the hosts of one group / cluster, extra Group / Cluster columns, and on
+/// the Hosts page optionally grouped by group.
+#[derive(Clone, Copy, Default)]
+pub struct TableView<'a> {
+    /// Only the hosts of this group / cluster ("" = the fixed entry).
+    pub only: Option<(SetKind, &'a str)>,
+    /// Group / Cluster columns, before Updated.
+    pub extra: &'a [SetKind],
+    /// Hosts in group order (ungrouped last), the current sort inside.
+    pub by_group: bool,
+    /// Keeps each page's column layout apart.
+    pub salt: u64,
+}
+
+/// The columns of a view: the fixed ones with the extra Group / Cluster
+/// columns before Updated.
+fn columns(extra: &[SetKind]) -> Vec<Col> {
+    let mut c: Vec<Col> = COLUMNS[..COLUMNS.len() - 1].to_vec();
+    for k in extra {
+        c.push((k.title(), None, 120.0, 60.0));
+    }
+    c.push(COLUMNS[COLUMNS.len() - 1]);
+    c
+}
+
+/// Hosts of a view in display order: search and sort as on the Hosts page,
+/// then only the hosts of the group / cluster; with `by_group` the groups
+/// in their order, ungrouped hosts last.
+pub fn view_rows(m: &Model, filter: &str, sort: Sort, view: &TableView) -> Vec<usize> {
+    let mut rows = overview_rows(m, filter, sort);
+    if let Some((kind, name)) = view.only {
+        rows.retain(|&i| m.hosts[i].entry.set(kind).eq_ignore_ascii_case(name));
+    }
+    if view.by_group {
+        let order = telepad_app::sets::list(m, SetKind::Group);
+        let rank = |i: usize| {
+            let g = &m.hosts[i].entry.group;
+            if g.is_empty() {
+                return usize::MAX;
+            }
+            order
+                .iter()
+                .position(|s| s.name.eq_ignore_ascii_case(g))
+                .unwrap_or(usize::MAX - 1)
+        };
+        rows.sort_by_key(|&i| rank(i));
+    }
+    rows
+}
 
 /// Column layout of the Hosts table (#143), kept between frames.
 #[derive(Clone, Default)]
@@ -145,12 +199,20 @@ fn header_text(title: &str, key: Option<SortKey>, sort: Sort) -> String {
 
 /// What each column's content needs, over every listed host (not only the
 /// rows on screen, so scrolling does not move the columns).
-fn wanted(ui: &egui::Ui, m: &Model, rows: &[usize], sort: Sort) -> Vec<f32> {
-    let mut want: Vec<f32> = COLUMNS
+fn wanted(
+    ui: &egui::Ui,
+    m: &Model,
+    rows: &[usize],
+    sort: Sort,
+    cols: &[Col],
+    extra: &[SetKind],
+) -> Vec<f32> {
+    let mut want: Vec<f32> = cols
         .iter()
         .map(|(t, k, _, _)| text_w(ui, RichText::new(header_text(t, *k, sort)).strong()))
         .collect();
     let gap = ui.spacing().item_spacing.x;
+    let last = cols.len() - 1;
     let mut take = |c: usize, w: f32| want[c] = want[c].max(w);
     take(0, COLUMNS[0].2);
     for &i in rows {
@@ -161,8 +223,11 @@ fn wanted(ui: &egui::Ui, m: &Model, rows: &[usize], sort: Sort) -> Vec<f32> {
             text_w(ui, RichText::new(&h.entry.note).italics()).min(260.0),
         );
         take(3, text_w(ui, RichText::new(&h.entry.hostname)));
+        for (k, kind) in extra.iter().enumerate() {
+            take(11 + k, text_w(ui, h.entry.set(*kind)).min(180.0));
+        }
         take(
-            11,
+            last,
             text_w(ui, ago(h.updated)) + if m.host_paused(h) { 20.0 } else { 0.0 },
         );
         let Some(r) = &h.report else {
@@ -196,13 +261,23 @@ fn wanted(ui: &egui::Ui, m: &Model, rows: &[usize], sort: Sort) -> Vec<f32> {
     want.iter().map(|w| w + CELL_PAD).collect()
 }
 
-pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mut Vec<Msg>) {
-    let rows = overview_rows(m, filter, sort);
-    let reorder = can_reorder(filter, false, sort);
+/// A hosts table: the Hosts page, or a group / cluster page (#144, #145).
+pub fn table(
+    ui: &mut egui::Ui,
+    m: &Model,
+    filter: &str,
+    sort: Sort,
+    view: &TableView,
+    out: &mut Vec<Msg>,
+) {
+    let rows = view_rows(m, filter, sort, view);
+    // Dragging rows changes the inventory order: only on the full list.
+    let reorder = view.only.is_none() && !view.by_group && can_reorder(filter, false, sort);
     let accent = ui.visuals().selection.bg_fill;
-    let layout_id = egui::Id::unique("overview-layout");
+    let cols = columns(view.extra);
+    let layout_id = egui::Id::unique("overview-layout").with((view.salt, cols.len()));
     let mut lay: Layout = ui.data(|d| d.get_temp(layout_id)).unwrap_or_default();
-    let n = COLUMNS.len();
+    let n = cols.len();
     lay.manual.resize(n, None);
     let gap = ui.spacing().item_spacing.x;
     let in_header = |p: egui::Pos2| lay.header.is_some_and(|h| h.expand(6.0).contains(p));
@@ -246,10 +321,10 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
     let widths = if resizing && lay.widths.len() == n {
         lay.widths.clone()
     } else {
-        let min: Vec<f32> = COLUMNS.iter().map(|c| c.3).collect();
+        let min: Vec<f32> = cols.iter().map(|c| c.3).collect();
         // Gaps between columns and the vertical scroll bar.
         let avail = ui.available_width() - gap * (n as f32) - 14.0;
-        let want = wanted(ui, m, &rows, sort);
+        let want = wanted(ui, m, &rows, sort, &cols, view.extra);
         let w: Vec<f32> = fit_widths(&want, &min, &STRETCH, &lay.manual, avail)
             .iter()
             .map(|w| w.round())
@@ -275,7 +350,7 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let mut table = TableBuilder::new(ui)
-                .id_salt(("overview", lay.key))
+                .id_salt(("overview", view.salt, lay.key))
                 .striped(true)
                 .resizable(true)
                 // Rows highlight on hover and open the host on click (#83).
@@ -283,7 +358,7 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .auto_shrink([false, false]);
             let last = n - 1;
-            for (i, (_, _, _, min)) in COLUMNS.iter().enumerate() {
+            for (i, (_, _, _, min)) in cols.iter().enumerate() {
                 let col = if i == 0 {
                     Column::exact(widths[i].max(*min))
                 } else if i == last {
@@ -296,9 +371,13 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
             }
             table
                 .header(ROW_HEIGHT, |mut header| {
-                    for (c, (title, key, _, _)) in COLUMNS.into_iter().enumerate() {
+                    for (c, &(title, key, _, _)) in cols.iter().enumerate() {
                         let (_, r) = header.col(|ui| {
-                            let Some(key) = key else { return };
+                            let Some(key) = key else {
+                                // Group / Cluster: not sortable.
+                                crate::widgets::cell_text(ui, RichText::new(title).strong());
+                                return;
+                            };
                             let name = if title.is_empty() { "status" } else { title };
                             crate::widgets::cell_text(
                                 ui,
@@ -332,22 +411,20 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
                 .body(|body| {
                     body.rows(ROW_HEIGHT, rows.len(), |mut row| {
                         let i = rows[row.index()];
-                        host_row(&mut row, i, &m.hosts[i], m.host_paused(&m.hosts[i]), reorder);
+                        host_row(
+                            &mut row,
+                            i,
+                            &m.hosts[i],
+                            m.host_paused(&m.hosts[i]),
+                            reorder,
+                            view.extra,
+                        );
                         let resp = row.response();
                         if resp.clicked() {
                             out.push(Msg::Select(Some(i)));
                         }
                         // SSH, Files, databases, edit… on right-click (#83).
-                        resp.context_menu(|ui| {
-                            host_menu(
-                                ui,
-                                &m.hosts[i],
-                                i,
-                                m.rdp.contains_key(&m.hosts[i].entry.alias),
-                                m.host_paused(&m.hosts[i]),
-                                out,
-                            )
-                        });
+                        resp.context_menu(|ui| host_menu(ui, m, i, out));
                         if reorder {
                             drop_target(&row.response(), i, accent, out);
                         }
@@ -373,7 +450,14 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
     ui.data_mut(|d| d.insert_temp(layout_id, lay));
 }
 
-fn host_row(row: &mut TableRow<'_, '_>, i: usize, h: &HostState, paused: bool, grip: bool) {
+fn host_row(
+    row: &mut TableRow<'_, '_>,
+    i: usize,
+    h: &HostState,
+    paused: bool,
+    grip: bool,
+    extra: &[SetKind],
+) {
     row.col(|ui| {
         if grip {
             grip_handle(ui, i);
@@ -412,6 +496,9 @@ fn host_row(row: &mut TableRow<'_, '_>, i: usize, h: &HostState, paused: bool, g
                 row.col(|_| {});
             }
         }
+    }
+    for kind in extra {
+        row.col(|ui| clipped(ui, RichText::new(h.entry.set(*kind))));
     }
     row.col(|ui| {
         if paused {

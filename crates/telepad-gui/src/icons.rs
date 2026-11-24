@@ -79,6 +79,10 @@ pub const BROWSERS: &str = "\u{e0f6}";
 pub const ARROW_LINE_DOWN: &str = "\u{e05c}";
 pub const ARROW_LINE_UP: &str = "\u{e066}";
 pub const LAYOUT: &str = "\u{e6d6}";
+/// Host groups (#144).
+pub const FOLDERS: &str = "\u{e260}";
+/// Host clusters (#145).
+pub const CIRCLES_THREE: &str = "\u{e192}";
 
 /// Add Phosphor as a fallback font so icon codepoints render in any text.
 pub fn install(ctx: &egui::Context) {
@@ -456,6 +460,8 @@ mod tests {
             ARROW_LINE_DOWN,
             ARROW_LINE_UP,
             LAYOUT,
+            FOLDERS,
+            CIRCLES_THREE,
         ] {
             for c in icon.chars() {
                 used.entry(c).or_insert_with(|| "icons.rs".to_string());

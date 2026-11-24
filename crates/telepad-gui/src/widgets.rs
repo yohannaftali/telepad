@@ -453,14 +453,10 @@ fn act_widget(
 /// Right-click menu of a host row or card (#83): SSH / RDP, Files, the
 /// databases Telepad detected on it (host and containers), then open, edit,
 /// clone and delete. Coloured like the buttons they replace.
-pub fn host_menu(
-    ui: &mut egui::Ui,
-    h: &HostState,
-    i: usize,
-    has_rdp: bool,
-    paused: bool,
-    out: &mut Vec<Msg>,
-) {
+pub fn host_menu(ui: &mut egui::Ui, m: &telepad_app::Model, i: usize, out: &mut Vec<Msg>) {
+    let Some(h) = m.hosts.get(i) else { return };
+    let has_rdp = m.rdp.contains_key(&h.entry.alias);
+    let paused = m.host_paused(h);
     let item = |ui: &mut egui::Ui, text: RichText, msg: Msg, out: &mut Vec<Msg>| {
         if ui.button(text).clicked() {
             out.push(msg);
@@ -536,6 +532,50 @@ pub fn host_menu(
             out,
         );
     }
+    // Group / cluster (#144, #145): move the host, or take it out.
+    for kind in telepad_core::config::SetKind::ALL {
+        let current = h.entry.set(kind);
+        let icon = match kind {
+            telepad_core::config::SetKind::Group => icons::FOLDERS,
+            telepad_core::config::SetKind::Cluster => icons::CIRCLES_THREE,
+        };
+        let shown = telepad_app::sets::shown_name(kind, current);
+        ui.menu_button(
+            icons::label(icon, &format!("{}: {shown}", kind.title())),
+            |ui| {
+                let sets = telepad_app::sets::list(m, kind);
+                if sets.is_empty() {
+                    ui.label(
+                        RichText::new(format!(
+                            "No {}s yet: add them on the {}s page",
+                            kind.as_str(),
+                            kind.title()
+                        ))
+                        .weak(),
+                    );
+                }
+                let assign = |name: &str| {
+                    Msg::Sets(telepad_app::sets::StMsg::Assign {
+                        kind,
+                        aliases: vec![h.entry.alias.clone()],
+                        name: name.to_string(),
+                    })
+                };
+                for s in sets {
+                    if ui.radio(current == s.name, &s.name).clicked() {
+                        out.push(assign(&s.name));
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.radio(current.is_empty(), kind.none_name()).clicked() {
+                    out.push(assign(""));
+                    ui.close();
+                }
+            },
+        );
+    }
+    ui.separator();
     item(
         ui,
         RichText::new(icons::label(icons::DESKTOP, "Open host window")),

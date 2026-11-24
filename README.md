@@ -20,6 +20,8 @@ minimized, maximized, tabbed and arranged, kept in named workspaces like MikroTi
 - **My Computer**: the same page for the PC Telepad runs on (system, maintenance, usage,
   disks, network, sensors, Docker, ports), without SSH; **Open Terminal**, **Open files…**
   with this computer on both sides, and its local MariaDB / MySQL / PostgreSQL
+- **Groups** and **Clusters**: optional, independent labels for your hosts (a host can be in
+  group *Office* and cluster *Web*); each has a "Hosts - [name]" page like the Hosts page
 - **Open files…**: a WinSCP-style file window per host, this computer on the left and the host
   on the right; upload / download with drag and drop, overwrite questions and progress,
   over SFTP (scp when the host has no SFTP server, rsync when both sides have it); new
@@ -238,7 +240,8 @@ The **top bar** holds the tools for those windows:
 
 | Page | What you do there |
 |---|---|
-| **Hosts** | All hosts as a table or cards. Search box at the top; click a header to sort, drag a border to resize, double-click a border to fit the column. Click a row to open the host, right-click for its menu |
+| **Groups**, **Clusters** | Your host groups and clusters (plus Ungrouped / No cluster): add, rename, describe, reorder, delete; click one for its "Hosts - [name]" page, **Add hosts…** to move hosts in |
+| **Hosts** | All hosts as a table or cards. Search box at the top; click a header to sort; columns fit the page by themselves (drag a border to set a width, double-click it for automatic again). **By group**, Group / Cluster columns. Click a row to open the host, right-click for its menu (incl. Group / Cluster) |
 | **Docker / Podman** | Every container of every host, grouped by compose stack, with start / stop / logs / shell actions (each one shown and confirmed in a terminal) |
 | **Kubernetes**, **Docker Swarm** | The clusters found on your hosts: nodes, workloads, services, problems |
 | **Authorized keys** | Who can log in with which SSH key: by server or by key, grouped by the `#` comment lines in `authorized_keys`. Add or revoke a key on many servers at once (you type `add` / `revoke` to confirm), or edit the file |

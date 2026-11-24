@@ -63,7 +63,7 @@ Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
 | Area | What it shows |
 |---|---|
 | **Top bar** | **Refresh all**, the **workspace** dropdown and the **window picker** (the window in front and how many are open; see below), **Arrange**, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Settings ▸ Theme**, **Update Strategy…**, **Software update…**; Host Management and Authorized keys are in the sidebar, adding, importing and exporting hosts is on the Host Management page) |
-| **Pages** (left sidebar) | One button per page: **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
+| **Pages** (left sidebar) | One button per page: **My Computer**, **Groups**, **Clusters**, **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
 
@@ -232,7 +232,43 @@ restart. The handles are hidden while the search box has text or a column is sor
 
 Click **Hosts** in the sidebar to see every host at once. The page header has the
 **search box** (filters by host name, address, OS or container name) and the **View** switch:
-**Table** or **Cards**; the choice is remembered.
+**Table** or **Cards**; the choice is remembered. **By group** lists the hosts group by group
+(in the order of the [Groups](#groups-and-clusters) page, ungrouped hosts last; the sort
+applies inside each group) and shows the **Group** column; the **Group** and **Cluster**
+boxes add those columns to the table. They last until Telepad closes.
+
+## Groups and clusters
+
+Hosts can be put into **groups** (e.g. *Office*, *Lab*) and, separately, **clusters**
+(e.g. *Web*, *Storage*). Both are optional: a host is in at most one group and at most one
+cluster, and the two do not depend on each other — one host can be in group *Office* and
+cluster *Web* while another is in group *Lab* and the same cluster *Web*. These clusters are
+your own labels; the [Kubernetes and Docker Swarm](#kubernetes-and-docker-swarm) pages show
+the clusters Telepad finds on the hosts and do not change.
+
+**Groups** and **Clusters** (sidebar, below My Computer) list them with their description and
+how many hosts each has, how many are down and how many have flags. The last row, **Ungrouped**
+/ **No cluster**, holds the hosts without one; it is fixed (no rename, no delete).
+
+| Control | What it does |
+|---|---|
+| Search box | Filters by name or description |
+| **Add group… / Add cluster…** | Name (one line, up to 64 characters, unique ignoring case; *Ungrouped* / *No cluster* are reserved) and an optional description |
+| **⌃ / ⌄** | Moves it up or down (the order of the list, of **By group** and of the menus) |
+| **Edit** | Rename or change the description; its hosts move along, and an open page follows the new name |
+| **Delete** | Asks first; the hosts stay in Telepad without that group / cluster |
+| Click a row | Opens **Hosts - [name]** |
+
+**Hosts - [name]** is the Hosts page for that group or cluster only: search, Table / Cards,
+sort, flags, a click opens the host, right-click for its menu. A group page shows each host's
+**Cluster**, a cluster page its **Group**. **Add hosts…** lists the other hosts with their
+current group / cluster: tick some and **Add** moves them here. These pages come back with the
+[workspace](#workspaces) (saved as group:<name> / cluster:<name>).
+
+Other ways to set a host's group or cluster: right-click a host ▸ **Group: …** / **Cluster: …**
+(pick one, or *Ungrouped* / *No cluster* to take it out), or the **Group** / **Cluster** lists
+in the host editor. Changing it reads nothing from the host again. Cards show the group and
+cluster under the address.
 
 ### Docker / Podman
 
@@ -300,7 +336,7 @@ name, address, OS or container name.
 ### Cards
 
 One card per host, wrapping to the window width: status, OS logo, alias (click it for the
-detail page), address and description, OS, CPU / RAM / fullest-disk bars, hottest
+detail page), address and description, its group and cluster (when it has them), OS, CPU / RAM / fullest-disk bars, hottest
 temperature, Docker summary, how long ago it was checked, and an **SSH** / **RDP** button.
 Unreachable hosts show their error instead of the bars. The search box filters the cards;
 **Sort by** picks the order (the same columns as the table, or inventory order) and the
@@ -622,6 +658,7 @@ opens the editor and saves the host straight into Telepad:
 |---|---|
 | **Alias (Host)** | Name used in ssh and in Telepad: letters, digits, `.`, `_`, `-` |
 | **Description** | Free text shown under the name |
+| **Group**, **Cluster** | Optional; pick one made on the [Groups / Clusters](#groups-and-clusters) pages |
 | **HostName / IP** | Address to connect to (empty = the alias itself) |
 | **User**, **Port**, **IdentityFile** | As in an OpenSSH config; empty = ssh's defaults. For IdentityFile, the arrow next to the field lists the private keys found in `~/.ssh`; **Browse…** opens in `~/.ssh` (on macOS press Cmd+Shift+. in the dialog to see other hidden folders); typing `~/.ssh/id_ed25519` works too |
 | **Access** | **SSH (monitored)** or **RDP only (Windows)** |
@@ -732,9 +769,12 @@ side (sidebar → **Host Management**): the **Import** menu and **Export…**.
   Lines that cannot be read and invalid hosts are left out and listed with their
   line number in the preview; the other hosts can still be imported. If nothing
   can be read, the window stays open and says why.
-- **Export…** writes `.json` (re-importable, keeps every field) or OpenSSH
-  config text. Hosts that are not monitored or RDP-only are marked with
-  `# telepad: not monitored` / `# telepad: rdp only` comments so they round-trip.
+- **Export…** writes `.json` (re-importable, keeps every field, with the groups and
+  clusters and their descriptions) or OpenSSH config text. Hosts that are not monitored or
+  RDP-only are marked with `# telepad: not monitored` / `# telepad: rdp only` comments,
+  and a host's group / cluster with `# telepad: group <name>` / `# telepad: cluster <name>`,
+  so they round-trip (JSON fields `group` / `cluster`; a name that does not exist yet is
+  created on import).
 
 `telepad.db` is a normal SQLite file: back it up by copying it while Telepad is closed,
 or use Export. You can also inspect it with any SQLite tool.
@@ -758,7 +798,7 @@ file that does not exist yet counts as empty and is created on Apply.
 
 - **=** the same on both sides,
 - **≠** different — the column on the right names the fields (HostName, User, Port,
-  IdentityFile, Options, Description, Not monitored, RDP only),
+  IdentityFile, Options, Description, Not monitored, RDP only, Group, Cluster),
 - the database icon: only in Telepad; the monitor icon: only in the config.
 
 **Filter** narrows the rows by alias, address or description; **Only differences** hides the
@@ -779,7 +819,7 @@ changes of that host. Tick several rows to do the same for all of them (copy, de
   red and you pick a side for each with → or ← before you can apply.
 
 **Add to Telepad… / Add to config…** opens a small form (alias, HostName, User, Port,
-IdentityFile, description, other options one per line, Not monitored, RDP only). Edits use
+IdentityFile, description, group, cluster, other options one per line, Not monitored, RDP only). Edits use
 the same form. Hosts are checked like in the host editor.
 
 Changed hosts are marked **pending** and counted at the bottom. **Discard** drops them.
@@ -792,7 +832,7 @@ Changed hosts are marked **pending** and counted at the bottom. **Discard** drop
 - Only the blocks of the hosts you changed are rewritten. Comments, `Include`, `Match`,
   `Host *`, shared lines and the order of everything else stay as they are; new hosts go
   after the last host block, before `Host *` / `Match`. Telepad's description and its
-  "not monitored" / "rdp only" marks are written as `#` comments, as by Export.
+  "not monitored" / "rdp only" marks and the group / cluster are written as `#` comments, as by Export.
 - If the file was changed by something else since it was loaded, Apply stops: click
   **Reload** (your pending changes stay) and look at the preview again.
 - Telepad's changes are saved in one transaction; a renamed host keeps its place in the list.

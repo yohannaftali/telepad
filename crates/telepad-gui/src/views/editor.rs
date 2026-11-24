@@ -1,13 +1,13 @@
 //! Add / edit host window. Fields are drafts; saving goes through [`Msg::EditorSave`].
 
 use eframe::egui::{self, RichText};
-use telepad_app::{Drafts, Msg};
-use telepad_core::config::Access;
+use telepad_app::{Drafts, Model, Msg};
+use telepad_core::config::{Access, SetKind};
 
 use crate::icons::{self, label as il};
 use crate::widgets::{Act, act_button, usage_color};
 
-pub fn editor_window(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
+pub fn editor_window(ctx: &egui::Context, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
     let Some(ed) = &mut d.editor else { return };
     let mut open = true;
     egui::Window::new(ed.title())
@@ -62,6 +62,23 @@ pub fn editor_window(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
                             .hint_text("shown under the host name"),
                     );
                     ui.end_row();
+                    // Optional group and cluster (#144, #145); new ones are
+                    // added on the Groups / Clusters pages.
+                    for kind in SetKind::ALL {
+                        ui.label(kind.title());
+                        let value = ed.entry.set_mut(kind);
+                        let shown = telepad_app::sets::shown_name(kind, value).to_string();
+                        egui::ComboBox::from_id_salt(("edit-set", kind.as_str()))
+                            .selected_text(shown)
+                            .width(220.0)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(value, String::new(), kind.none_name());
+                                for s in telepad_app::sets::list(m, kind) {
+                                    ui.selectable_value(value, s.name.clone(), &s.name);
+                                }
+                            });
+                        ui.end_row();
+                    }
                     ui.label("HostName / IP");
                     ui.add(egui::TextEdit::singleline(&mut ed.entry.hostname).hint_text("192.0.2.58"));
                     ui.end_row();

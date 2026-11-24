@@ -4,11 +4,11 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use telepad_core::authorized_keys::{KeyAction, KeyOutcome};
 use telepad_core::collector::Scope;
-use telepad_core::config::{Access, HostEntry, Inventory};
+use telepad_core::config::{Access, HostEntry, HostSet, Inventory, SetKind};
 use telepad_core::model::HostReport;
 use telepad_core::store::{self, ImportMode, ImportSummary, ThemePref, UiPrefs};
 use telepad_core::strategy::Strategy;
@@ -101,6 +101,13 @@ pub struct Model {
     /// My Computer (#129): this computer's report, read without SSH while
     /// its page is open. `entry` is [`HostEntry::local`].
     pub local: HostState,
+    /// Groups and clusters (#144, #145) with descriptions, in display order.
+    pub sets: BTreeMap<SetKind, Vec<HostSet>>,
+    /// They have been read (restored `group:` / `cluster:` pages wait for it).
+    pub sets_loaded: bool,
+    /// Open "Hosts - [name]" pages.
+    pub set_pages: Vec<crate::sets::SetPage>,
+    pub set_pages_next: crate::sets::SetPageId,
 }
 
 /// A key added to / revoked from several hosts.
@@ -169,6 +176,8 @@ pub struct Drafts {
     pub strategy: StrategyDraft,
     /// Log info pages (#126): sort, filters, page.
     pub logins: std::collections::BTreeMap<crate::logins::LogId, crate::logins::LoginDraft>,
+    /// Groups / Clusters pages and their host pages (#144, #145).
+    pub sets: crate::sets::SetsDraft,
 }
 
 /// The Update Strategy page's form (#122). `paused` is not part of it (the
@@ -415,6 +424,7 @@ impl Default for Drafts {
             ws_leave: None,
             strategy: StrategyDraft::default(),
             logins: Default::default(),
+            sets: Default::default(),
         }
     }
 }

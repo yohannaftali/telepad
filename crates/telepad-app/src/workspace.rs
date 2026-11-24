@@ -7,6 +7,8 @@
 //! from the model, so they follow their session; Overview and Docker are
 //! opened and closed only here.
 
+use telepad_core::config::SetKind;
+
 use crate::state::Model;
 
 /// One page that can be shown in an inner window.
@@ -38,6 +40,10 @@ pub enum Win {
     Editor(crate::files::FmId),
     /// A host's Log info page (#126).
     Logins(crate::logins::LogId),
+    /// The Groups or Clusters page (#144, #145).
+    Sets(SetKind),
+    /// "Hosts - [name]" of one group / cluster.
+    SetHosts(crate::sets::SetPageId),
 }
 
 impl Win {
@@ -54,7 +60,14 @@ impl Win {
             Win::HostSync => Some("hostsync"),
             Win::Keys => Some("keys"),
             Win::Strategy => Some("strategy"),
-            Win::Host | Win::Files(_) | Win::Db(_) | Win::Editor(_) | Win::Logins(_) => None,
+            Win::Sets(SetKind::Group) => Some("groups"),
+            Win::Sets(SetKind::Cluster) => Some("clusters"),
+            Win::Host
+            | Win::Files(_)
+            | Win::Db(_)
+            | Win::Editor(_)
+            | Win::Logins(_)
+            | Win::SetHosts(_) => None,
         }
     }
 
@@ -68,6 +81,8 @@ impl Win {
             "hostsync" => Win::HostSync,
             "keys" => Win::Keys,
             "strategy" => Win::Strategy,
+            "groups" => Win::Sets(SetKind::Group),
+            "clusters" => Win::Sets(SetKind::Cluster),
             _ => return None,
         })
     }
@@ -270,6 +285,9 @@ impl Workspace {
         for s in &m.logins {
             want.push(Win::Logins(s.id));
         }
+        for p in &m.set_pages {
+            want.push(Win::SetHosts(p.id));
+        }
         let session = |w: &Win| {
             matches!(
                 w,
@@ -279,6 +297,7 @@ impl Workspace {
                     | Win::Db(_)
                     | Win::Editor(_)
                     | Win::Logins(_)
+                    | Win::SetHosts(_)
             )
         };
         let gone: Vec<Win> = self
@@ -512,9 +531,11 @@ impl Workspace {
             }
             for t in f[4].split(';') {
                 let key = token_key(t);
-                let known = ["host:", "files:", "editor:", "db:", "logins:"]
-                    .iter()
-                    .any(|p| key.len() > p.len() && key.starts_with(p));
+                let known = [
+                    "host:", "files:", "editor:", "db:", "logins:", "group:", "cluster:",
+                ]
+                .iter()
+                .any(|p| key.len() > p.len() && key.starts_with(p));
                 if !known || self.pending.iter().any(|p| p.key == key) {
                     continue;
                 }
@@ -719,6 +740,15 @@ pub fn session_key(m: &Model, w: Win) -> Option<String> {
             "logins:{}",
             esc(&m.logins.iter().find(|s| s.id == id)?.alias)
         ),
+        Win::SetHosts(id) => {
+            let p = m.set_pages.iter().find(|p| p.id == id)?;
+            // The fixed entry by its reserved name, so the key is never empty.
+            format!(
+                "{}:{}",
+                p.kind.as_str(),
+                esc(crate::sets::shown_name(p.kind, &p.name))
+            )
+        }
         _ => return None,
     })
 }

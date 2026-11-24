@@ -26,7 +26,7 @@ impl Side {
 pub enum Pending {
     /// Save this host (for Telepad keyed by the alias it had, so a rename
     /// keeps the database row).
-    Upsert(HostEntry),
+    Upsert(Box<HostEntry>),
     Delete,
 }
 
@@ -89,6 +89,9 @@ pub struct HostForm {
     pub options: String,
     pub unmonitored: bool,
     pub rdp: bool,
+    /// Group / cluster names (#144, #145); empty = none.
+    pub group: String,
+    pub cluster: String,
     pub error: Option<String>,
 }
 
@@ -107,6 +110,8 @@ impl HostForm {
             options: store::options_text(&h.options),
             unmonitored: h.unmonitored,
             rdp: h.access == Access::Rdp,
+            group: h.group.clone(),
+            cluster: h.cluster.clone(),
             error: None,
         }
     }
@@ -129,6 +134,8 @@ impl HostForm {
             options: store::decode_options(&self.options),
             unmonitored: self.unmonitored,
             access: if self.rdp { Access::Rdp } else { Access::Ssh },
+            group: self.group.trim().to_string(),
+            cluster: self.cluster.trim().to_string(),
         };
         h.validate()?;
         Ok(h)
@@ -217,7 +224,7 @@ fn effective_telepad(db: &[HostEntry], hs: &HostSync) -> Vec<HostEntry> {
             Some(Pending::Delete) => {}
             Some(Pending::Upsert(n)) => out.push(HostEntry {
                 id: h.id,
-                ..n.clone()
+                ..(**n).clone()
             }),
             None => out.push(h.clone()),
         }
@@ -226,7 +233,7 @@ fn effective_telepad(db: &[HostEntry], hs: &HostSync) -> Vec<HostEntry> {
         if let Pending::Upsert(n) = p
             && !db.iter().any(|h| &h.alias == k)
         {
-            out.push(n.clone());
+            out.push((**n).clone());
         }
     }
     out
@@ -236,7 +243,7 @@ fn config_changes(hs: &HostSync) -> Vec<ConfigChange> {
     hs.config
         .iter()
         .map(|(k, p)| match p {
-            Pending::Upsert(h) => ConfigChange::Upsert(h.clone()),
+            Pending::Upsert(h) => ConfigChange::Upsert((**h).clone()),
             Pending::Delete => ConfigChange::Delete(k.clone()),
         })
         .collect()
@@ -305,7 +312,7 @@ fn to_config(hs: &mut HostSync, db: &[HostEntry], alias: &str) -> Result<(), Str
     }
     hs.config.insert(
         alias.to_string(),
-        Pending::Upsert(HostEntry { id: None, ..h }),
+        Pending::Upsert(Box::new(HostEntry { id: None, ..h })),
     );
     hs.conflicts.remove(alias);
     Ok(())
@@ -315,7 +322,8 @@ fn to_telepad(hs: &mut HostSync, alias: &str) {
     let Some(h) = cfg_entry(hs, alias) else {
         return;
     };
-    hs.telepad.insert(alias.to_string(), Pending::Upsert(h));
+    hs.telepad
+        .insert(alias.to_string(), Pending::Upsert(Box::new(h)));
     hs.conflicts.remove(alias);
 }
 
@@ -351,7 +359,10 @@ fn plan(hs: &HostSync, db: &[HostEntry]) -> Result<(Preview, Vec<HostEntry>, Vec
                     (Some(_), false) => format!("rename {k} → {} ({})", h.alias, h.target()),
                     (None, _) => format!("add {} ({})", h.alias, h.target()),
                 });
-                upserts.push(HostEntry { id, ..h.clone() });
+                upserts.push(HostEntry {
+                    id,
+                    ..(**h).clone()
+                });
             }
         }
     }
@@ -586,7 +597,7 @@ pub fn update(
                                 .or_else(|| Some(o.clone()))
                         })
                         .unwrap_or_else(|| entry.alias.clone());
-                    hs.telepad.insert(key, Pending::Upsert(entry));
+                    hs.telepad.insert(key, Pending::Upsert(Box::new(entry)));
                 }
                 Side::Config => {
                     if hs
@@ -612,7 +623,7 @@ pub fn update(
                         }
                     }
                     hs.config
-                        .insert(entry.alias.clone(), Pending::Upsert(entry));
+                        .insert(entry.alias.clone(), Pending::Upsert(Box::new(entry)));
                 }
             }
             d.form = None;

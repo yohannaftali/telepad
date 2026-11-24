@@ -2,7 +2,8 @@
 //! rows and order as the table (search filter + sort).
 
 use eframe::egui::{self, RichText};
-use telepad_app::{HostState, Model, Msg, Sort, fullest_disk, host_flags, hottest, overview_rows};
+use telepad_app::{Model, Msg, fullest_disk, host_flags, hottest};
+use telepad_core::config::SetKind;
 
 use super::overview::docker_text;
 use crate::icons::{self, label as il};
@@ -12,8 +13,8 @@ const CARD_WIDTH: f32 = 300.0;
 const CARD_MIN_HEIGHT: f32 = 168.0;
 const CARD_MARGIN: f32 = 10.0;
 
-pub fn cards(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mut Vec<Msg>) {
-    let rows = overview_rows(m, filter, sort);
+/// Cards of `rows` (see `overview::view_rows`).
+pub fn cards(ui: &mut egui::Ui, m: &Model, rows: &[usize], out: &mut Vec<Msg>) {
     if rows.is_empty() {
         ui.label(RichText::new("No hosts match the search.").weak());
         return;
@@ -30,28 +31,15 @@ pub fn cards(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mut V
             for chunk in rows.chunks(per_row) {
                 ui.horizontal(|ui| {
                     for &i in chunk {
-                        card(
-                            ui,
-                            i,
-                            &m.hosts[i],
-                            m.rdp.contains_key(&m.hosts[i].entry.alias),
-                            m.host_paused(&m.hosts[i]),
-                            out,
-                        );
+                        card(ui, m, i, out);
                     }
                 });
             }
         });
 }
 
-fn card(
-    ui: &mut egui::Ui,
-    i: usize,
-    h: &HostState,
-    has_rdp: bool,
-    paused: bool,
-    out: &mut Vec<Msg>,
-) {
+fn card(ui: &mut egui::Ui, m: &Model, i: usize, out: &mut Vec<Msg>) {
+    let h = &m.hosts[i];
     // Text must not take the right-click meant for the card's menu (#83).
     ui.style_mut().interaction.selectable_labels = false;
     let card = egui::Frame::group(ui.style())
@@ -82,6 +70,24 @@ fn card(
                 }
                 if !sub.is_empty() {
                     ui.add(egui::Label::new(RichText::new(sub).weak().small()).truncate());
+                }
+                // Its group and cluster (#144, #145), when it has them.
+                if !h.entry.group.is_empty() || !h.entry.cluster.is_empty() {
+                    ui.horizontal(|ui| {
+                        for (kind, icon) in [
+                            (SetKind::Group, icons::FOLDERS),
+                            (SetKind::Cluster, icons::CIRCLES_THREE),
+                        ] {
+                            let name = h.entry.set(kind);
+                            if !name.is_empty() {
+                                ui.add(
+                                    egui::Label::new(RichText::new(il(icon, name)).small())
+                                        .truncate(),
+                                )
+                                .on_hover_text(format!("{}: {name}", kind.title()));
+                            }
+                        }
+                    });
                 }
                 ui.add_space(4.0);
                 match &h.report {
@@ -144,5 +150,5 @@ fn card(
     // SSH, Files, databases, edit… on right-click (#83).
     card.response
         .interact(egui::Sense::click())
-        .context_menu(|ui| host_menu(ui, h, i, has_rdp, paused, out));
+        .context_menu(|ui| host_menu(ui, m, i, out));
 }
