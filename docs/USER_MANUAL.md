@@ -892,8 +892,12 @@ The top bar of a file window has four tools that work between the two panes:
   *New and updated files only*, a file that differs is copied even when the target is
   newer. Links are never followed or copied; folders in **Exclude folders** stay out.
   Needs SFTP on the host.
-- **Diff** opens a file of each pane side by side in the [editor](#editor), the lines that
-  differ marked in orange. Select one file in each pane, or one file whose name is also in
+- **Diff** opens a file of each pane side by side in the [editor](#editor), like a git diff:
+  lines only in the left file are red with a **-** in the gutter (deleted), lines only in the
+  right file green with a **+** (added), equal lines in the normal colours; a changed line
+  shows as **-** on the left and **+** on the right. The bar counts *n added, m deleted*.
+  **Sync scroll** (on by default) keeps the two sides at the matching lines while you
+  scroll either one. Select one file in each pane, or one file whose name is also in
   the other pane. Both sides can be edited and each has its own **Save** (with the usual
   changed-on-disk check); **Close compare** goes back to normal tabs. Binary files and
   files over the editor's size limit say so instead.

@@ -295,7 +295,9 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
                     }
                 });
             }
-            TabState::Ready => code(ui, id, t, dr, None),
+            TabState::Ready => {
+                code(ui, id, t, dr, None, None);
+            }
         });
 }
 
@@ -344,16 +346,27 @@ fn compare_view(
     };
     egui::Panel::top(("ed-head", id)).show(ui, |ui| {
         ui.horizontal(|ui| {
-            let n = marks
+            let count = |v: &[bool]| v.iter().filter(|x| **x).count();
+            let (deleted, added) = marks
                 .as_ref()
-                .map_or(0, |m| m.0.iter().chain(&m.1).filter(|x| **x).count());
+                .map_or((0, 0), |m| (count(&m.0), count(&m.1)));
             ui.label(RichText::new(il(icons::NOT_EQUALS, "Compare")).strong());
             if ready {
-                ui.label(if n == 0 {
-                    "the files are the same".to_string()
+                if deleted + added == 0 {
+                    ui.label("the files are the same");
                 } else {
-                    format!("{n} line(s) differ")
-                });
+                    let dark = ui.visuals().dark_mode;
+                    ui.colored_label(mark_colour(true, dark).1, format!("{added} added"));
+                    ui.colored_label(mark_colour(false, dark).1, format!("{deleted} deleted"));
+                }
+            }
+            let mut sync = !dr.no_sync_scroll;
+            if ui
+                .checkbox(&mut sync, "Sync scroll")
+                .on_hover_text("Scrolling one side scrolls the other to the matching line")
+                .changed()
+            {
+                dr.no_sync_scroll = !sync;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -374,6 +387,13 @@ fn compare_view(
             }
         }
     });
+    // Synchronized scrolling (#135): last offsets and the offsets to apply
+    // this frame, per side.
+    type Sync = ([egui::Vec2; 2], [Option<egui::Vec2>; 2]);
+    let key = egui::Id::unique(("telepad-ed-sync", id));
+    let (last, force): Sync = ui.ctx().data(|m| m.get_temp(key)).unwrap_or_default();
+    let mut now = [egui::Vec2::ZERO; 2];
+    let mut row_h = 14.0f32;
     let fill = ui.visuals().extreme_bg_color;
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(fill))
@@ -413,13 +433,48 @@ fn compare_view(
                             col.colored_label(red(), format!("{} {why}", icons::WARNING));
                         }
                         TabState::Ready => {
-                            let m = marks.as_ref().map(|m| if k == 0 { &m.0 } else { &m.1 });
-                            code(col, id, t, dr, m.map(Vec::as_slice));
+                            let m = marks.as_ref().map(|m| Marks {
+                                lines: if k == 0 { &m.0 } else { &m.1 },
+                                added: k == 1,
+                            });
+                            let (o, h) = code(col, id, t, dr, m, force[k]);
+                            now[k] = o;
+                            row_h = h.max(1.0);
                         }
                     }
                 }
             });
         });
+    let mut next: [Option<egui::Vec2>; 2] = [None, None];
+    if !dr.no_sync_scroll
+        && let Some(m) = &marks
+    {
+        let (l2r, r2l) = telepad_core::files::compare::line_map(&m.0, &m.1);
+        let moved = |k: usize| force[k].is_none() && (now[k] - last[k]).length() > 0.5;
+        // The side the user scrolled leads; the other follows to the matching line.
+        let lead = if moved(0) {
+            Some((0, &l2r))
+        } else if moved(1) {
+            Some((1, &r2l))
+        } else {
+            None
+        };
+        if let Some((k, map)) = lead {
+            let line = (now[k].y / row_h).floor().max(0.0) as usize;
+            let frac = now[k].y - line as f32 * row_h;
+            let other = map.get(line).copied().unwrap_or(line);
+            next[1 - k] = Some(egui::vec2(now[k].x, other as f32 * row_h + frac));
+            ui.ctx().request_repaint();
+        }
+    }
+    // A forced side reports the offset it was given, so it does not lead.
+    for k in 0..2 {
+        if let Some(f) = next[k] {
+            now[k] = f;
+        }
+    }
+    ui.ctx()
+        .data_mut(|d| d.insert_temp::<Sync>(key, (now, next)));
 }
 
 fn focus_field(ctx: &egui::Context, win: u64, which: &'static str) {
@@ -962,12 +1017,51 @@ fn layout(ui: &egui::Ui, txt: &str, lang: Lang, font: &egui::FontId) -> LayoutJo
     job
 }
 
-/// `marks`: lines to highlight (the differing lines of a compare, #131).
-fn code(ui: &mut egui::Ui, win: u64, t: &EdTab, dr: &mut EdDraft, marks: Option<&[bool]>) {
+/// Lines of one side of a compare (#131, #135): which lines, and whether
+/// they are added (green `+`, right side) or deleted (red `-`, left side).
+#[derive(Clone, Copy)]
+struct Marks<'a> {
+    lines: &'a [bool],
+    added: bool,
+}
+
+fn mark_colour(added: bool, dark: bool) -> (Color32, Color32) {
+    // (line background, sign)
+    match (added, dark) {
+        (true, true) => (
+            Color32::from_rgba_unmultiplied(46, 160, 67, 55),
+            Color32::from_rgb(87, 200, 110),
+        ),
+        (true, false) => (
+            Color32::from_rgba_unmultiplied(46, 160, 67, 60),
+            Color32::from_rgb(26, 127, 55),
+        ),
+        (false, true) => (
+            Color32::from_rgba_unmultiplied(248, 81, 73, 55),
+            Color32::from_rgb(255, 123, 114),
+        ),
+        (false, false) => (
+            Color32::from_rgba_unmultiplied(248, 81, 73, 55),
+            Color32::from_rgb(207, 34, 46),
+        ),
+    }
+}
+
+/// `marks`: the differing lines of a compare; `scroll_to`: vertical offset
+/// to show (synchronized scrolling, #135). Returns (vertical offset, row
+/// height) after drawing.
+fn code(
+    ui: &mut egui::Ui,
+    win: u64,
+    t: &EdTab,
+    dr: &mut EdDraft,
+    marks: Option<Marks>,
+    scroll_to: Option<egui::Vec2>,
+) -> (egui::Vec2, f32) {
     let eid = edit_id(win, t.id);
     let ctx = ui.ctx().clone();
     let Some(buf) = dr.texts.get_mut(&t.id) else {
-        return;
+        return (egui::Vec2::ZERO, 14.0);
     };
     let mono = egui::TextStyle::Monospace.resolve(ui.style());
     // Tab / Shift+Tab: indent / outdent the selected lines.
@@ -1013,147 +1107,163 @@ fn code(ui: &mut egui::Ui, win: u64, t: &EdTab, dr: &mut EdDraft, marks: Option<
         let job = layout(ui, b.as_str(), lang, &mono);
         ui.fonts_mut(|f| f.layout_job(job))
     };
-    egui::ScrollArea::both()
+    let mut area = egui::ScrollArea::both()
         .id_salt(("ed-scroll", win, t.id))
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.horizontal_top(|ui| {
-                ui.add_space(gutter);
-                let under = ui.painter().add(egui::Shape::Noop);
-                let min = egui::vec2(ui.available_width(), ui.available_height().max(100.0));
-                let output = egui::TextEdit::multiline(buf)
-                    .id(eid)
-                    .code_editor()
-                    .frame(egui::Frame::NONE)
-                    .margin(egui::Margin::symmetric(4, 2))
-                    .desired_width(f32::INFINITY)
-                    .min_size(min)
-                    .layouter(&mut layouter)
-                    .show(ui);
-                let galley = &output.galley;
-                let origin = output.galley_pos;
-                let clip = ui.clip_rect();
-                let row_h = galley
-                    .rows
-                    .first()
-                    .map_or(14.0, |r| r.rect().height())
-                    .max(1.0);
-                let cursor = output
-                    .cursor_range
-                    .or_else(|| output.state.cursor.char_range());
-                let cur_rect = cursor.map(|c| {
-                    galley
-                        .pos_from_cursor(c.primary)
-                        .translate(origin.to_vec2())
-                });
-                let mut shapes = Vec::new();
-                let v = ui.visuals();
-                if let Some(marks) = marks {
-                    let tint = if v.dark_mode {
-                        Color32::from_rgba_unmultiplied(220, 120, 40, 46)
-                    } else {
-                        Color32::from_rgba_unmultiplied(230, 150, 40, 70)
-                    };
-                    for (i, row) in galley.rows.iter().enumerate() {
-                        if !marks.get(i).copied().unwrap_or(false) {
-                            continue;
-                        }
-                        let y0 = origin.y + row.rect().min.y;
-                        let y1 = origin.y + row.rect().max.y;
-                        if y1 < clip.top() || y0 > clip.bottom() {
-                            continue;
-                        }
-                        shapes.push(egui::Shape::rect_filled(
-                            egui::Rect::from_x_y_ranges(clip.x_range(), y0..=y1),
-                            0.0,
-                            tint,
-                        ));
+        .auto_shrink([false, false]);
+    if let Some(o) = scroll_to {
+        area = area
+            .vertical_scroll_offset(o.y)
+            .horizontal_scroll_offset(o.x);
+    }
+    let mut row_height = 14.0;
+    let shown = area.show(ui, |ui| {
+        ui.horizontal_top(|ui| {
+            ui.add_space(gutter);
+            let under = ui.painter().add(egui::Shape::Noop);
+            let min = egui::vec2(ui.available_width(), ui.available_height().max(100.0));
+            let output = egui::TextEdit::multiline(buf)
+                .id(eid)
+                .code_editor()
+                .frame(egui::Frame::NONE)
+                .margin(egui::Margin::symmetric(4, 2))
+                .desired_width(f32::INFINITY)
+                .min_size(min)
+                .layouter(&mut layouter)
+                .show(ui);
+            let galley = &output.galley;
+            let origin = output.galley_pos;
+            let clip = ui.clip_rect();
+            let row_h = galley
+                .rows
+                .first()
+                .map_or(14.0, |r| r.rect().height())
+                .max(1.0);
+            let cursor = output
+                .cursor_range
+                .or_else(|| output.state.cursor.char_range());
+            let cur_rect = cursor.map(|c| {
+                galley
+                    .pos_from_cursor(c.primary)
+                    .translate(origin.to_vec2())
+            });
+            let mut shapes = Vec::new();
+            let v = ui.visuals();
+            row_height = row_h;
+            if let Some(mk) = marks {
+                let (tint, _) = mark_colour(mk.added, v.dark_mode);
+                for (i, row) in galley.rows.iter().enumerate() {
+                    if !mk.lines.get(i).copied().unwrap_or(false) {
+                        continue;
                     }
-                }
-                if let Some(r) = cur_rect {
-                    let line = egui::Rect::from_x_y_ranges(clip.x_range(), r.y_range());
+                    let y0 = origin.y + row.rect().min.y;
+                    let y1 = origin.y + row.rect().max.y;
+                    if y1 < clip.top() || y0 > clip.bottom() {
+                        continue;
+                    }
                     shapes.push(egui::Shape::rect_filled(
-                        line,
+                        egui::Rect::from_x_y_ranges(clip.x_range(), y0..=y1),
                         0.0,
-                        if v.dark_mode {
-                            Color32::from_white_alpha(12)
-                        } else {
-                            Color32::from_black_alpha(14)
-                        },
+                        tint,
                     ));
                 }
-                if let Some((q, o)) = &find {
-                    let m = matches(&ctx, buf.as_str(), q, *o);
-                    if let Ok(list) = m.as_ref() {
-                        let sel = current(&ctx, win, t.id);
-                        let base = v.selection.bg_fill;
-                        for r in list {
-                            let a = galley
-                                .pos_from_cursor(CCursor::new(r.start))
-                                .translate(origin.to_vec2());
-                            if a.bottom() < clip.top() || a.top() > clip.bottom() {
-                                continue;
-                            }
-                            let b = galley
-                                .pos_from_cursor(CCursor::new(r.end))
-                                .translate(origin.to_vec2());
-                            let rect = if (b.top() - a.top()).abs() < 1.0 {
-                                egui::Rect::from_min_max(
-                                    a.min,
-                                    egui::pos2(b.max.x.max(a.min.x + 2.0), a.max.y),
-                                )
-                            } else {
-                                egui::Rect::from_min_max(a.min, egui::pos2(clip.right(), a.max.y))
-                            };
-                            let strong = sel.as_ref() == Some(r);
-                            let fill = if strong {
-                                base
-                            } else {
-                                base.gamma_multiply(0.45)
-                            };
-                            shapes.push(egui::Shape::rect_filled(rect, 2.0, fill));
+            }
+            if let Some(r) = cur_rect {
+                let line = egui::Rect::from_x_y_ranges(clip.x_range(), r.y_range());
+                shapes.push(egui::Shape::rect_filled(
+                    line,
+                    0.0,
+                    if v.dark_mode {
+                        Color32::from_white_alpha(12)
+                    } else {
+                        Color32::from_black_alpha(14)
+                    },
+                ));
+            }
+            if let Some((q, o)) = &find {
+                let m = matches(&ctx, buf.as_str(), q, *o);
+                if let Ok(list) = m.as_ref() {
+                    let sel = current(&ctx, win, t.id);
+                    let base = v.selection.bg_fill;
+                    for r in list {
+                        let a = galley
+                            .pos_from_cursor(CCursor::new(r.start))
+                            .translate(origin.to_vec2());
+                        if a.bottom() < clip.top() || a.top() > clip.bottom() {
+                            continue;
                         }
+                        let b = galley
+                            .pos_from_cursor(CCursor::new(r.end))
+                            .translate(origin.to_vec2());
+                        let rect = if (b.top() - a.top()).abs() < 1.0 {
+                            egui::Rect::from_min_max(
+                                a.min,
+                                egui::pos2(b.max.x.max(a.min.x + 2.0), a.max.y),
+                            )
+                        } else {
+                            egui::Rect::from_min_max(a.min, egui::pos2(clip.right(), a.max.y))
+                        };
+                        let strong = sel.as_ref() == Some(r);
+                        let fill = if strong {
+                            base
+                        } else {
+                            base.gamma_multiply(0.45)
+                        };
+                        shapes.push(egui::Shape::rect_filled(rect, 2.0, fill));
                     }
                 }
-                ui.painter().set(under, egui::Shape::Vec(shapes));
-                // Line numbers stay at the left edge when scrolled sideways.
-                let gx = clip.left();
-                let gut = egui::Rect::from_min_max(
-                    egui::pos2(gx, clip.top()),
-                    egui::pos2(gx + gutter, clip.bottom()),
+            }
+            ui.painter().set(under, egui::Shape::Vec(shapes));
+            // Line numbers stay at the left edge when scrolled sideways.
+            let gx = clip.left();
+            let gut = egui::Rect::from_min_max(
+                egui::pos2(gx, clip.top()),
+                egui::pos2(gx + gutter, clip.bottom()),
+            );
+            let p = ui.painter();
+            p.rect_filled(gut, 0.0, v.extreme_bg_color);
+            let cur_line = cur_rect.map(|r| ((r.center().y - origin.y) / row_h).floor() as usize);
+            let first = (((clip.top() - origin.y) / row_h).floor().max(0.0)) as usize;
+            let last = ((((clip.bottom() - origin.y) / row_h).ceil()).max(0.0) as usize)
+                .min(galley.rows.len());
+            for (i, row) in galley.rows.iter().enumerate().take(last).skip(first) {
+                let y = origin.y + row.rect().min.y;
+                let colour = if Some(i) == cur_line {
+                    v.strong_text_color()
+                } else {
+                    v.weak_text_color()
+                };
+                p.text(
+                    egui::pos2(gx + gutter - 12.0, y),
+                    egui::Align2::RIGHT_TOP,
+                    (i + 1).to_string(),
+                    mono.clone(),
+                    colour,
                 );
-                let p = ui.painter();
-                p.rect_filled(gut, 0.0, v.extreme_bg_color);
-                let cur_line =
-                    cur_rect.map(|r| ((r.center().y - origin.y) / row_h).floor() as usize);
-                let first = (((clip.top() - origin.y) / row_h).floor().max(0.0)) as usize;
-                let last = ((((clip.bottom() - origin.y) / row_h).ceil()).max(0.0) as usize)
-                    .min(galley.rows.len());
-                for (i, row) in galley.rows.iter().enumerate().take(last).skip(first) {
-                    let y = origin.y + row.rect().min.y;
-                    let colour = if Some(i) == cur_line {
-                        v.strong_text_color()
-                    } else {
-                        v.weak_text_color()
-                    };
-                    p.text(
-                        egui::pos2(gx + gutter - 12.0, y),
-                        egui::Align2::RIGHT_TOP,
-                        (i + 1).to_string(),
-                        mono.clone(),
-                        colour,
-                    );
-                }
-                if pending.is_some()
-                    && let Some(r) = cur_rect
+                // git-style sign of a compared line (#135): - deleted, + added.
+                if let Some(mk) = marks
+                    && mk.lines.get(i).copied().unwrap_or(false)
                 {
-                    ui.scroll_to_rect(
-                        r.expand2(egui::vec2(gutter + 40.0, row_h * 2.0)),
-                        Some(egui::Align::Center),
+                    let (_, sign) = mark_colour(mk.added, v.dark_mode);
+                    p.text(
+                        egui::pos2(gx + gutter - 4.0, y),
+                        egui::Align2::RIGHT_TOP,
+                        if mk.added { "+" } else { "-" },
+                        mono.clone(),
+                        sign,
                     );
                 }
-            });
+            }
+            if pending.is_some()
+                && let Some(r) = cur_rect
+            {
+                ui.scroll_to_rect(
+                    r.expand2(egui::vec2(gutter + 40.0, row_h * 2.0)),
+                    Some(egui::Align::Center),
+                );
+            }
         });
+    });
+    (shown.state.clamped_offset(), row_height)
 }
 
 /// Save / Don't save / Cancel for unsaved tabs.
