@@ -306,6 +306,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #122 | feat(collector): Update Strategy page — pause, per-tier intervals, ping check, last facts kept in update.db | closed | 2026-11-23 |
 | #125 | fix(collector): hosts that drop ICMP ping stay down until the SSH retry after one failed SSH attempt | open | 2026-11-23 |
 | #126 | feat(keys): Log info page — SSH logins from the systemd journal per host, Register / Unregister journal access | closed | 2026-11-24 |
-| #129 | feat(local): My Computer page — monitor this PC like a host, terminal, files and local databases | ready-for-review | 2026-11-24 |
-| #130 | fix(files): whole file row (.. row, icon, Modified, Size cells) selects on click; centre text vertically | ready-for-review | 2026-11-24 |
-| #131 | feat(files): compare directories, synchronize, diff between panes and transfer settings | ready-for-review | 2026-11-24 |
+| #129 | feat(local): My Computer page — monitor this PC like a host, terminal, files and local databases | closed | 2026-11-24 |
+| #130 | fix(files): whole file row (.. row, icon, Modified, Size cells) selects on click; centre text vertically | closed | 2026-11-24 |
+| #131 | feat(files): compare directories, synchronize, diff between panes and transfer settings | closed | 2026-11-24 |
