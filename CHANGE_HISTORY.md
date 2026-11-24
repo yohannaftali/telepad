@@ -2,6 +2,25 @@
 
 Newest first.
 
+## [2026-11-24] — Tested #134–#140 (stack ending at `139-db-export-import`)
+- Windows 11, release build; fmt, clippy `-D warnings`, `cargo test --workspace` (core 219,
+  app 181, gui 7); live database tests against throwaway MariaDB 11 / PostgreSQL 17
+  containers on 127.0.0.1 (filter boxes, `COUNT(*)`, import incl. rollback) — removed after.
+- GUI via UI Automation on a copy of the inventory: #134 legacy junctions hidden, `My
+  Documents` opens `Documents`; #136 a minimized database window comes back when its
+  button is clicked again; #137 sort from the empty part of headers (database grid, Hosts
+  table), row select from empty cell space; #138 filter box `=Springfield` → 83 of 250,
+  20 rows per page → 13 pages, last page `Record [241 - 250] of 250`, Columns chooser hides
+  a column (kept); #139 CSV export of 250 rows / 4 shown columns in grid order, import of 3
+  CSV rows with a column map (skip, NULL, `O'Brien`) → 253, re-import rolled back with
+  "Row 1 of 3: Duplicate entry"; #135 Diff `-` red / `+` green with counts, synchronized
+  scrolling to the matching line; #140 Log info footer `Record [941 - 955] of 955`, stays
+  visible while rows scroll.
+- Fixed during testing: the database window's status line said "via SSH" for this
+  computer; live MySQL test cleaned its imported rows.
+- Not verified: Excel / SQL export in the GUI (unit-tested round trip), PostgreSQL GUI
+  import, Linux / macOS GUI (CI builds them).
+
 ## [2026-11-24] — #134–#140 implemented (stacked branches `134-…` → `136-…` → `137-…` → `140-…` → `138-…` → `135-…` → `139-…`)
 - #134 fix(files): Windows legacy junctions — hidden / system taken from the link itself,
   a link opens at its target (`list_local_at`), plain "access denied" text. Files: core

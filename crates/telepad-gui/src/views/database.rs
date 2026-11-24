@@ -447,12 +447,13 @@ fn browser(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>
             } else if let Some(n) = &s.notice {
                 ui.colored_label(green(), format!("{} {n}", icons::CHECK_CIRCLE));
             } else {
+                let how = if s.target.host == telepad_core::config::LOCAL_ALIAS {
+                    "on this computer (no SSH)".to_string()
+                } else {
+                    format!("via SSH {}", s.target.host)
+                };
                 ui.label(
-                    RichText::new(format!(
-                        "{}:{} via SSH {}",
-                        s.target.address, s.target.port, s.target.host
-                    ))
-                    .weak(),
+                    RichText::new(format!("{}:{} {how}", s.target.address, s.target.port)).weak(),
                 );
             }
         });

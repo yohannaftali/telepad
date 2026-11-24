@@ -1421,6 +1421,11 @@ mod live {
             2,
             "rolled back"
         );
+        ok(&s.run(
+            "telepad_test",
+            "",
+            &strings(&["DELETE FROM items WHERE name LIKE 'imp%'"]),
+        ));
         // Unchanged value still counts as one matched row.
         assert_eq!(s.apply("telepad_test", &[up]).unwrap(), 1);
         let missing = update_row(
