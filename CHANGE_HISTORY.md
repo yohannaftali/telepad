@@ -2,6 +2,24 @@
 
 Newest first.
 
+## [2026-11-24] — Telepad 0.9.7
+- **My Computer** (#129): a page above **Hosts** for the PC Telepad runs on, without SSH —
+  System, Maintenance, Usage, Disks, Network, Sensors, Docker, Ports in use; **Open
+  Terminal** (a local shell), **Open files…** with this computer on both sides, and its own
+  MariaDB / MySQL / PostgreSQL opened directly on `127.0.0.1`. `telepad-check --local`.
+- **File windows** (#130): a click anywhere on a row selects it (also the `..` row, the
+  icon and the date), Shift+click selects a range, text is centred in the row.
+- **Compare, Synchronize, Diff, Transfer settings** (#131): mark what differs between the
+  two folders; make one folder match the other (or both ways) after a preview of every
+  copy and delete; open a file of each pane side by side in the editor with the differing
+  lines marked; per host Default / Text / Binary mode, new and updated files only, and
+  excluded folders.
+
+## [2026-11-24] — Tested and merged: #129, #130, #131 (PR #132)
+- Full pass on Windows 11 (UI Automation walkthrough, headless `--local` and all hosts);
+  CI green on Windows, macOS, Linux, `db-live`, `files-live`, release builds. Issues closed
+  by the PR; test summary commented on each.
+
 ## [2026-11-24] — Tested #130, #129, #131 (branches `130-file-row-click` → `129-my-computer` → `131-files-compare-sync`)
 - Windows 11, release build; fmt, clippy `-D warnings`, `cargo test --workspace` (core 213,
   app 171, gui 7). Headless: `telepad-check --local` (≈ 1.2–2 s; 52 containers = `docker ps -a`,
