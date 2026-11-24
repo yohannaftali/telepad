@@ -2,6 +2,25 @@
 
 Newest first.
 
+## [2026-11-24] — Telepad 0.9.6
+- **Log info** (#126): a host's **Log info** button opens a page of who logged in over SSH,
+  as which user, from where, how and with which key (the host's systemd journal, last 30
+  days, read without sudo, only on open / Refresh). One table, newest first, with header
+  sort, a filter per column, pages and typed rows per page; key names come from
+  `authorized_keys`; this PC's (Telepad's) logins are hidden unless switched on.
+- **Register Systemd Journal / Unregister**: a terminal that shows and runs
+  `sudo usermod -aG systemd-journal <user>` / `sudo gpasswd -d <user> systemd-journal`
+  after Enter (sudo asks for the password there). Works on Debian / Ubuntu and
+  Fedora / RHEL / CentOS; hosts without systemd say so.
+- Authorized keys: the key sshd actually accepted for Telepad is marked **last used by
+  Telepad**; the lockout guard also covers login keys without a `.pub` file.
+- `telepad-check --logins <alias>`.
+
+## [2026-11-24] — Tested and merged: #126 (PR #127)
+- Full pass on Windows 11 (UI Automation walkthrough, headless `--logins` on 49 hosts);
+  CI green on Windows, macOS, Linux, `db-live`, `files-live`. Issue closed by the PR; test
+  summary commented.
+
 ## [2026-11-24] — Tested #126 (branch `126-login-log`)
 - Windows 11, release build; fmt, clippy `-D warnings`, `cargo test --workspace` (core 205,
   app 160, gui 7). Headless `telepad-check --logins` on all 49 reachable hosts: 33 readable
