@@ -264,8 +264,16 @@ One row per host: **Host**, **Description**, **Address**, **OS**, **Flags**, **C
 host name) to open its host window. **Right-click** a row (or a card) for the host menu:
 **Open SSH** (or **Open RDP**, amber), **Files** (yellow, the host's file window), the
 **databases** Telepad found on the host and in its containers (MariaDB / MySQL / PostgreSQL),
-then **Open host window**, **Edit**, **Clone** and **Delete…**. The table always fills the
-window: the last column takes the spare width.
+then **Open host window**, **Edit**, **Clone** and **Delete…**.
+
+**Column widths are automatic** and follow the page: open, resize, maximize or restore the
+Hosts window (or collapse the page sidebar) and the columns fit again at once. Each column
+gets what its values need; spare width goes to **Description**, **OS**, **Flags** and
+**Docker**, so **Updated** stays as narrow as its text. When the page is too narrow, the long
+text columns (Description, Docker, OS, Address) give way first, then the bars (CPU, Memory,
+Fullest disk, Temp), and Host, Flags and Updated last; at the minimum widths the table
+scrolls sideways. Flags use the normal text size; when a row's flags do not fit, hover the
+cell to read them all.
 
 In inventory order (no column sorted, no search) each row has a **⋮⋮** handle in the first
 column: drag it to reorder hosts. While a column is sorted or the
@@ -277,10 +285,12 @@ search box has text, the handles are hidden and a hint above the table says what
   return to the inventory order. The unlabelled first column sorts by status (down hosts
   first). Addresses sort numerically (`10.0.0.9` before `10.0.0.10`), and hosts without a
   value for the column (no data yet, or unreachable) always stay at the bottom.
-- **Resize:** drag the border between two column headers. **Double-click** a border to fit
-  the column to its longest value, like Excel. Text that does not fit is cut with "…";
-  hover over it to read all of it. Error messages stay inside the OS column. Sortable
-  headers show a hand cursor.
+- **Resize:** drag the border between two column headers: that column keeps the width you
+  gave it and the others make room. **Double-click** the border to put that column back to
+  automatic; **right-click** a header ▸ **Auto-fit columns** puts all of them back. Widths you
+  set last until Telepad closes. Text that does not fit is cut with "…"; hover over it to
+  read all of it. Error messages stay inside the OS column. Sortable headers show a hand
+  cursor; a click right on a border never sorts.
 - The header row stays in place while you scroll; when the columns are wider than the
   window, scroll sideways.
 

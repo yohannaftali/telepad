@@ -601,14 +601,14 @@ pub fn flag_icon(k: FlagKind) -> &'static str {
 }
 
 /// Maintenance flags as coloured icon + short label, details on hover.
+/// One flag chip's text, in the normal text size (#143: small was hard to read).
+pub fn chip_text(f: &Flag) -> RichText {
+    RichText::new(format!("{} {}", flag_icon(f.kind), f.short)).color(severity_color(f.severity))
+}
+
 pub fn flag_chips(ui: &mut egui::Ui, flags: &[Flag]) {
     for f in flags {
-        ui.label(
-            RichText::new(format!("{} {}", flag_icon(f.kind), f.short))
-                .color(severity_color(f.severity))
-                .small(),
-        )
-        .on_hover_text(&f.detail);
+        ui.label(chip_text(f)).on_hover_text(&f.detail);
     }
 }
 

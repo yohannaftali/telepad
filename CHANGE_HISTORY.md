@@ -2,6 +2,17 @@
 
 Newest first.
 
+## [2026-11-24] — fix(ui): Hosts table fills the page width, columns follow the page (#143)
+- Issue #143 addressed on GitHub (branch `143-hosts-table-width`).
+- `views/overview.rs`: `fit_widths` (content widths over every listed host, spare width to
+  Description / OS / Flags / Docker, shrink order: long text, then bars, then Host / Flags /
+  Updated), recomputed every frame so resizing the page re-flows the columns; a dragged column
+  keeps its width (`Layout::manual`), double-click on its border or header ▸ Auto-fit columns
+  makes it automatic again; a click on a border never sorts. Flag chips in the normal text size
+  (`widgets::chip_text`), all flags on hover when cut.
+- Verified: fmt, clippy, tests (gui +3 `fit_widths` tests); GUI on an inventory copy: maximized
+  window, sidebar collapsed, drag / double-click a border, narrow 1400 px window (scrolls).
+
 ## [2026-11-24] — Tested and merged: #125 (PR #146)
 - Windows 11, release build; fmt, clippy, tests green; CI green on Windows, macOS, Linux, `db-live`, `files-live`.
 - `telepad-check` on a copy of the 56-host inventory: 8 failures. GUI on the same copy for ~5 min: 49 up / 7 down, all
