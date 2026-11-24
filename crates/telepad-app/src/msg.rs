@@ -271,6 +271,8 @@ pub enum Msg {
     Files(crate::files::FmMsg),
     /// Log info pages (#126).
     Logins(crate::logins::LgMsg),
+    /// Groups / clusters (#144, #145).
+    Sets(crate::sets::StMsg),
 }
 
 /// Work for the runtime. Effects are the only way to reach the database, ssh,
@@ -398,6 +400,8 @@ pub enum Effect {
     Files(crate::files::FmEffect),
     /// Log info pages (#126): read the journal, open the access terminal.
     Logins(crate::logins::LgEffect),
+    /// Change groups / clusters in `telepad.db` → [`crate::sets::StMsg::Saved`].
+    Sets(crate::sets::StEffect),
     /// Read this computer (#129, background) → [`Msg::LocalCollected`].
     CollectLocal,
     /// Errors come back as [`Msg::Notice`].

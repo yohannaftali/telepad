@@ -22,6 +22,7 @@ mod picker;
 mod ports;
 mod run_info;
 mod sensors;
+mod sets;
 mod strategy;
 mod text_editor;
 mod update_window;
@@ -73,7 +74,7 @@ pub fn draw(root: &mut egui::Ui, m: &Model, d: &mut Drafts, now: Instant) -> Vec
 
     files::close_guard(&ctx, m, d, &mut out);
     text_editor::raise_on_question(&ctx, m, &mut out);
-    editor::editor_window(&ctx, d, &mut out);
+    editor::editor_window(&ctx, m, d, &mut out);
     import::import_window(&ctx, m, &mut out);
     import::paste_window(&ctx, d, &mut out);
     run_info::run_info_window(&ctx, d, &mut out);
@@ -98,12 +99,27 @@ fn page(
         Win::MyComputer => detail::local_page(ui, &m.local, &mut d.ports_nginx_only, out),
         Win::Overview => {
             overview_toolbar(ui, d, out);
+            // Group / Cluster columns and group order (#144, #145).
+            let mut extra: Vec<telepad_core::config::SetKind> =
+                d.sets.hosts_columns.iter().copied().collect();
+            if d.sets.hosts_by_group && !extra.contains(&telepad_core::config::SetKind::Group) {
+                extra.insert(0, telepad_core::config::SetKind::Group);
+            }
+            let view = overview::TableView {
+                only: None,
+                extra: &extra,
+                by_group: d.sets.hosts_by_group,
+                salt: 0,
+            };
             if d.overview_cards {
-                cards::cards(ui, m, &d.filter, d.sort, out);
+                let rows = overview::view_rows(m, &d.filter, d.sort, &view);
+                cards::cards(ui, m, &rows, out);
             } else {
-                overview::overview(ui, m, &d.filter, d.sort, out);
+                overview::table(ui, m, &d.filter, d.sort, &view, out);
             }
         }
+        Win::Sets(kind) => sets::sets_page(ui, m, d, kind, out),
+        Win::SetHosts(id) => sets::set_hosts_page(ui, m, d, id, out),
         Win::Docker => {
             ui.horizontal(|ui| search_box(ui, d));
             ui.add_space(4.0);
@@ -165,6 +181,28 @@ fn overview_toolbar(ui: &mut egui::Ui, d: &mut Drafts, out: &mut Vec<Msg>) {
             .clicked()
         {
             out.push(Msg::SetOverviewCards(true));
+        }
+        // Group by group / Group and Cluster columns (#144, #145).
+        ui.separator();
+        ui.checkbox(&mut d.sets.hosts_by_group, "By group")
+            .on_hover_text(
+                "Hosts in group order, ungrouped hosts last; the sort applies inside each group",
+            );
+        if !d.overview_cards {
+            for kind in telepad_core::config::SetKind::ALL {
+                let mut on = d.sets.hosts_columns.contains(&kind);
+                if ui
+                    .checkbox(&mut on, kind.title())
+                    .on_hover_text(format!("Show the {} column", kind.as_str()))
+                    .changed()
+                {
+                    if on {
+                        d.sets.hosts_columns.insert(kind);
+                    } else {
+                        d.sets.hosts_columns.remove(&kind);
+                    }
+                }
+            }
         }
         if !d.overview_cards {
             let why = match (d.filter.trim().is_empty(), d.sort.key.is_none()) {

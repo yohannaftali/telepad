@@ -10,6 +10,93 @@ use serde::{Deserialize, Serialize};
 const UNMONITORED_TAG: &str = "telepad: not monitored";
 /// Marker comment for hosts reached by Remote Desktop only (no SSH).
 const RDP_TAG: &str = "telepad: rdp only";
+/// Marker comments for a host's group / cluster (#144, #145).
+const GROUP_TAG: &str = "telepad: group ";
+const CLUSTER_TAG: &str = "telepad: cluster ";
+
+/// A named set of hosts (#144 groups, #145 clusters). Optional for every host;
+/// a host is in at most one group and at most one cluster, the two are
+/// independent. Hosts refer to a set by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SetKind {
+    Group,
+    Cluster,
+}
+
+impl SetKind {
+    pub const ALL: [SetKind; 2] = [SetKind::Group, SetKind::Cluster];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SetKind::Group => "group",
+            SetKind::Cluster => "cluster",
+        }
+    }
+
+    pub fn parse_kind(s: &str) -> Option<Self> {
+        match s {
+            "group" => Some(SetKind::Group),
+            "cluster" => Some(SetKind::Cluster),
+            _ => None,
+        }
+    }
+
+    /// "Group" / "Cluster".
+    pub fn title(self) -> &'static str {
+        match self {
+            SetKind::Group => "Group",
+            SetKind::Cluster => "Cluster",
+        }
+    }
+
+    /// The fixed entry for hosts without one: "Ungrouped" / "No cluster".
+    pub fn none_name(self) -> &'static str {
+        match self {
+            SetKind::Group => "Ungrouped",
+            SetKind::Cluster => "No cluster",
+        }
+    }
+
+    fn tag(self) -> &'static str {
+        match self {
+            SetKind::Group => GROUP_TAG,
+            SetKind::Cluster => CLUSTER_TAG,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HostSet {
+    pub name: String,
+    pub description: String,
+}
+
+/// Problems with a group / cluster name: empty, more than one line, longer
+/// than 64 characters, or the name of the fixed entry.
+pub fn check_set_name(kind: SetKind, name: &str) -> Result<(), String> {
+    let t = kind.title();
+    if name.trim().is_empty() {
+        return Err(format!("{t} name is empty"));
+    }
+    if name != name.trim() {
+        return Err(format!("{t} name cannot start or end with a space"));
+    }
+    if name.chars().any(char::is_control) {
+        return Err(format!("{t} name must be a single line"));
+    }
+    if name.chars().count() > 64 {
+        return Err(format!("{t} name is longer than 64 characters"));
+    }
+    if name.eq_ignore_ascii_case(kind.none_name()) {
+        return Err(format!(
+            "'{}' is the fixed entry for hosts without one",
+            kind.none_name()
+        ));
+    }
+    Ok(())
+}
 
 /// How the app reaches a host.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +151,12 @@ pub struct HostEntry {
     pub unmonitored: bool,
     /// SSH (default) or RDP-only Windows host; for RDP, `port` is the RDP port.
     pub access: Access,
+    /// Name of the host's group (#144); empty = ungrouped.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub group: String,
+    /// Name of the host's cluster (#145); empty = none. Independent of the group.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub cluster: String,
 }
 
 /// Name of this computer in file windows, database windows and history
@@ -111,6 +204,21 @@ impl HostEntry {
         }
     }
 
+    /// The host's group or cluster name (empty = none).
+    pub fn set(&self, kind: SetKind) -> &str {
+        match kind {
+            SetKind::Group => &self.group,
+            SetKind::Cluster => &self.cluster,
+        }
+    }
+
+    pub fn set_mut(&mut self, kind: SetKind) -> &mut String {
+        match kind {
+            SetKind::Group => &mut self.group,
+            SetKind::Cluster => &mut self.cluster,
+        }
+    }
+
     /// Problems that would make this entry unusable or unsafe to write out.
     pub fn validate(&self) -> Result<(), String> {
         let ok_alias = |s: &str| {
@@ -137,6 +245,12 @@ impl HostEntry {
         single_line("HostName", &self.hostname)?;
         single_line("User", &self.user)?;
         single_line("Description", &self.note)?;
+        for kind in SetKind::ALL {
+            let name = self.set(kind);
+            if !name.is_empty() {
+                check_set_name(kind, name)?;
+            }
+        }
         if let Some(f) = &self.identity_file {
             single_line("IdentityFile", f)?;
         }
@@ -164,6 +278,10 @@ pub struct Inventory {
     /// an OpenSSH config).
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub rdp: std::collections::BTreeMap<String, crate::rdp::RdpSettings>,
+    /// Groups / clusters with their descriptions, in display order (#144,
+    /// #145; JSON only — an OpenSSH config keeps just the names in the tags).
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub sets: std::collections::BTreeMap<SetKind, Vec<HostSet>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -197,6 +315,7 @@ pub fn parse_inventory(text: &str) -> Inventory {
     let mut pending_note: Vec<String> = Vec::new();
     let mut unmonitored = false;
     let mut rdp = false;
+    let mut tagged: [String; 2] = Default::default();
     // Inside a `Host *` / `Match` block (or before any Host line): copy lines verbatim.
     let mut raw_block = true;
     let mut global: Vec<String> = Vec::new();
@@ -208,6 +327,7 @@ pub fn parse_inventory(text: &str) -> Inventory {
             pending_note.clear();
             unmonitored = false;
             rdp = false;
+            tagged = Default::default();
             if raw_block && !global.is_empty() {
                 global.push(String::new());
             }
@@ -219,6 +339,12 @@ pub fn parse_inventory(text: &str) -> Inventory {
                 unmonitored = true;
             } else if c == RDP_TAG {
                 rdp = true;
+            } else if let Some((i, name)) = SetKind::ALL
+                .iter()
+                .enumerate()
+                .find_map(|(i, k)| c.strip_prefix(k.tag()).map(|n| (i, n)))
+            {
+                tagged[i] = name.trim().to_string();
             } else if !c.is_empty() && current_is_closed(&current, raw) {
                 // Commented-out options (e.g. an indented "#IdentityFile ...") are not notes.
                 pending_note.push(c.to_string());
@@ -236,6 +362,8 @@ pub fn parse_inventory(text: &str) -> Inventory {
                     .filter(|a| !a.contains(['*', '?', '!']))
                     .map(|a| HostEntry {
                         note: note.clone(),
+                        group: tagged[0].clone(),
+                        cluster: tagged[1].clone(),
                         unmonitored,
                         access: if rdp { Access::Rdp } else { Access::Ssh },
                         // A `Port` line below overrides it.
@@ -249,6 +377,7 @@ pub fn parse_inventory(text: &str) -> Inventory {
                     .collect();
                 unmonitored = false;
                 rdp = false;
+                tagged = Default::default();
                 raw_block = current.is_empty();
                 if raw_block {
                     if !note.is_empty() {
@@ -337,6 +466,12 @@ pub fn to_ssh_config(inv: &Inventory) -> String {
         }
         if h.access == Access::Rdp {
             out.push_str(&format!("# {RDP_TAG}\n"));
+        }
+        for kind in SetKind::ALL {
+            let name = h.set(kind);
+            if !name.is_empty() {
+                out.push_str(&format!("# {}{name}\n", kind.tag()));
+            }
         }
         out.push_str(&format!("Host {}\n", h.alias));
         if !h.hostname.is_empty() {

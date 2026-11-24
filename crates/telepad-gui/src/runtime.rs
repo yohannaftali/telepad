@@ -283,6 +283,15 @@ impl Runtime {
                     .sync_ssh_config()
                     .err()
                     .map(|e| format!("Cannot write {}: {e}", ws.ssh_config.display()));
+                // Groups and clusters come with the hosts (#144, #145).
+                let sets = telepad_core::config::SetKind::ALL
+                    .iter()
+                    .map(|&k| ws.store.sets(k).map(|v| (k, v)))
+                    .collect::<Result<_, _>>()
+                    .map_err(|e| e.to_string());
+                let _ = self
+                    .tx
+                    .send(Msg::Sets(telepad_app::sets::StMsg::Loaded(sets)));
                 // Remote Desktop settings come with the hosts (#102).
                 let _ = self.tx.send(Msg::RdpLoaded(
                     ws.store.rdp_all().map_err(|e| e.to_string()),
@@ -322,6 +331,23 @@ impl Runtime {
                     .add_filter("JSON", &["json"])
                     .pick_file()?;
                 Some(read_import(path))
+            }
+            Effect::Sets(e) => {
+                use telepad_app::sets::{StEffect, StMsg};
+                let ws = self.ws.as_mut()?;
+                let r = match e {
+                    StEffect::Save { kind, old, set } => {
+                        ws.store.save_set(kind, old.as_deref(), &set)
+                    }
+                    StEffect::Delete { kind, name } => ws.store.delete_set(kind, &name),
+                    StEffect::Order { kind, names } => ws.store.order_sets(kind, &names),
+                    StEffect::Assign { kind, ids, name } => ws.store.assign_set(kind, &ids, &name),
+                };
+                // The generated ssh config carries the names as comments.
+                let r = r
+                    .map_err(|e| e.to_string())
+                    .and_then(|()| ws.sync_ssh_config());
+                Some(Msg::Sets(StMsg::Saved(r)))
             }
             Effect::SaveOrder(ids) => {
                 let ws = self.ws.as_mut()?;

@@ -9,6 +9,7 @@ use std::time::Instant;
 use eframe::egui::{self, Id, LayerId, Order, Rect, RichText, Sense, Vec2};
 use telepad_app::workspace::{Group, Win, WsMsg};
 use telepad_app::{Drafts, Model, Msg};
+use telepad_core::config::SetKind;
 
 use crate::icons::{self, label as il};
 use crate::widgets::nav_button;
@@ -59,6 +60,16 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
                 .find(|s| s.id == id)
                 .map_or("Log info".into(), |s| format!("Log info — {}", s.alias)),
         ),
+        Win::Sets(SetKind::Group) => (icons::FOLDERS, "Groups".into()),
+        Win::Sets(SetKind::Cluster) => (icons::CIRCLES_THREE, "Clusters".into()),
+        Win::SetHosts(id) => {
+            let p = m.set_pages.iter().find(|p| p.id == id);
+            let icon = match p.map(|p| p.kind) {
+                Some(SetKind::Cluster) => icons::CIRCLES_THREE,
+                _ => icons::FOLDERS,
+            };
+            (icon, p.map_or("Hosts".into(), |p| p.title()))
+        }
     }
 }
 
@@ -67,9 +78,14 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
 fn close_msg(w: Win) -> Msg {
     use telepad_app::files::FmMsg;
     match w {
-        Win::MyComputer | Win::Overview | Win::Docker | Win::Kube | Win::Swarm | Win::Strategy => {
-            Msg::Ws(WsMsg::Close(w))
-        }
+        Win::MyComputer
+        | Win::Overview
+        | Win::Docker
+        | Win::Kube
+        | Win::Swarm
+        | Win::Strategy
+        | Win::Sets(_) => Msg::Ws(WsMsg::Close(w)),
+        Win::SetHosts(id) => Msg::Sets(telepad_app::sets::StMsg::ClosePage(id)),
         Win::Host => Msg::Select(None),
         Win::HostSync => Msg::HostSync(telepad_app::hostsync::HsMsg::Close),
         Win::Keys => Msg::KeysClose,
@@ -97,6 +113,8 @@ fn default_size(w: Win) -> Vec2 {
         Win::Db(_) => egui::vec2(1150.0, 700.0),
         Win::Editor(_) => egui::vec2(1050.0, 720.0),
         Win::Logins(_) => egui::vec2(1200.0, 640.0),
+        Win::Sets(_) => egui::vec2(820.0, 520.0),
+        Win::SetHosts(_) => egui::vec2(1000.0, 600.0),
     }
 }
 
@@ -138,6 +156,18 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
             icons::DESKTOP,
             "My Computer",
             "This computer: system, usage, disks, network, Docker, ports; Terminal and Files",
+        ),
+        (
+            Win::Sets(SetKind::Group),
+            icons::FOLDERS,
+            "Groups",
+            "Your host groups (and Ungrouped); open one for its hosts",
+        ),
+        (
+            Win::Sets(SetKind::Cluster),
+            icons::CIRCLES_THREE,
+            "Clusters",
+            "Your host clusters (separate from groups); open one for its hosts",
         ),
         (
             Win::Overview,

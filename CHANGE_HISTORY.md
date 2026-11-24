@@ -2,6 +2,30 @@
 
 Newest first.
 
+## [2026-11-24] — feat(hosts): host groups and clusters (#144, #145)
+- Issues #144 and #145 addressed on GitHub (branch `144-host-groups-clusters`, one model for both).
+- Core: `HostEntry::group` / `cluster`, `SetKind` / `HostSet` / `check_set_name`; OpenSSH tags
+  `# telepad: group|cluster <name>`; `store` schema 5 (`hosts.grp` / `hosts.cluster`,
+  `host_sets`), `sets` / `save_set` / `delete_set` / `order_sets` / `assign_set`; JSON export /
+  import with `sets`; Host Management compares Group / Cluster.
+- App: `sets.rs` (Groups / Clusters pages, "Hosts - [name]" pages restored with the workspace,
+  add / edit / reorder / delete, Add hosts…, assign); a group change keeps the host's report.
+- GUI: sidebar My Computer – Groups – Clusters – Hosts; `views/sets.rs`; host menu Group / Cluster
+  submenus; editor Group / Cluster; cards show both; Hosts page By group / Group / Cluster columns.
+- Verified: fmt, clippy, tests (core +2, app +7); GUI on an inventory copy: add / rename / page
+  follows / Add hosts / right-click assign / By group / cluster page with Group column / restore.
+
+## [2026-11-24] — fix(ui): Hosts table fills the page width, columns follow the page (#143)
+- Issue #143 addressed on GitHub (branch `143-hosts-table-width`).
+- `views/overview.rs`: `fit_widths` (content widths over every listed host, spare width to
+  Description / OS / Flags / Docker, shrink order: long text, then bars, then Host / Flags /
+  Updated), recomputed every frame so resizing the page re-flows the columns; a dragged column
+  keeps its width (`Layout::manual`), double-click on its border or header ▸ Auto-fit columns
+  makes it automatic again; a click on a border never sorts. Flag chips in the normal text size
+  (`widgets::chip_text`), all flags on hover when cut.
+- Verified: fmt, clippy, tests (gui +3 `fit_widths` tests); GUI on an inventory copy: maximized
+  window, sidebar collapsed, drag / double-click a border, narrow 1400 px window (scrolls).
+
 ## [2026-11-24] — Tested and merged: #125 (PR #146)
 - Windows 11, release build; fmt, clippy, tests green; CI green on Windows, macOS, Linux, `db-live`, `files-live`.
 - `telepad-check` on a copy of the 56-host inventory: 8 failures. GUI on the same copy for ~5 min: 49 up / 7 down, all

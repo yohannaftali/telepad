@@ -573,6 +573,8 @@ fn form_window(ctx: &egui::Context, d: &mut HostSyncDraft, out: &mut Vec<Msg>) {
                         ("Port", &mut f.port),
                         ("IdentityFile", &mut f.identity_file),
                         ("Description", &mut f.note),
+                        ("Group", &mut f.group),
+                        ("Cluster", &mut f.cluster),
                     ] {
                         ui.label(label);
                         ui.add_sized([320.0, 22.0], egui::TextEdit::singleline(value));

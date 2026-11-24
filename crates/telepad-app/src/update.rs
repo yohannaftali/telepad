@@ -1118,6 +1118,16 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             );
         }
         Msg::Logins(lm) => fx.extend(logins(m, d, lm, now)),
+        Msg::Sets(sm) => {
+            let loaded = matches!(sm, crate::sets::StMsg::Loaded(Ok(_)));
+            fx.extend(crate::sets::update(m, &mut d.sets, sm, now, &mut |m, t| {
+                say(m, now, t)
+            }));
+            if loaded {
+                m.sets_loaded = true;
+                fx.extend(start_pending_sets(m, d, now));
+            }
+        }
         Msg::HostSync(hm) => {
             let db: Vec<_> = m.hosts.iter().map(|h| h.entry.clone()).collect();
             let (effects, follow) =
@@ -1142,6 +1152,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         place_pending_host(m);
         fx.extend(start_pending_files(m, d, now));
         fx.extend(start_pending_logins(m, d, now));
+        fx.extend(start_pending_sets(m, d, now));
     }
     if hosts_changed || collected_host {
         fx.extend(start_pending_dbs(m, d, now));
@@ -1172,6 +1183,7 @@ enum Raise {
     EditorOf(String),
     Db(String),
     Logins(String),
+    SetHosts(telepad_core::config::SetKind, String),
     Host,
     Keys,
     HostSync,
@@ -1190,6 +1202,14 @@ fn raise_target(msg: &Msg) -> Option<Raise> {
         | Msg::Files(FmMsg::Diff(id)) => Raise::Editor(*id),
         Msg::Db(crate::db::DbMsg::Open(t)) => Raise::Db(t.key()),
         Msg::Logins(crate::logins::LgMsg::Open(a)) => Raise::Logins(a.clone()),
+        Msg::Sets(crate::sets::StMsg::OpenHosts { kind, name }) => {
+            let name = if name.eq_ignore_ascii_case(kind.none_name()) {
+                String::new()
+            } else {
+                name.clone()
+            };
+            Raise::SetHosts(*kind, name)
+        }
         Msg::Select(Some(_)) | Msg::SelectAlias(_) => Raise::Host,
         Msg::KeysOpen => Raise::Keys,
         Msg::HostSync(crate::hostsync::HsMsg::Open) => Raise::HostSync,
@@ -1205,6 +1225,9 @@ fn raise_win(m: &Model, r: Raise) -> Option<crate::workspace::Win> {
         Raise::EditorOf(a) => Win::Editor(m.files.iter().find(|s| s.host.alias == a)?.id),
         Raise::Db(k) => Win::Db(m.db.iter().find(|s| s.target.key() == k)?.id),
         Raise::Logins(a) => Win::Logins(m.logins.iter().find(|s| s.alias == a)?.id),
+        Raise::SetHosts(k, n) => {
+            Win::SetHosts(m.set_pages.iter().find(|p| p.kind == k && p.name == n)?.id)
+        }
         Raise::Host => Win::Host,
         Raise::Keys => Win::Keys,
         Raise::HostSync => Win::HostSync,
@@ -1392,6 +1415,34 @@ fn start_pending_logins(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> V
             continue;
         }
         fx.extend(logins(m, d, crate::logins::LgMsg::Open(alias), now));
+    }
+    fx
+}
+
+/// "Hosts - [name]" pages of a restored layout (#144, #145), once the
+/// groups / clusters are known; one that no longer exists is left out.
+fn start_pending_sets(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec<Effect> {
+    use telepad_core::config::SetKind;
+    let mut fx = Vec::new();
+    if !m.sets_loaded {
+        return fx;
+    }
+    for kind in SetKind::ALL {
+        for (key, name, _) in m.ws.pending_of(&format!("{}:", kind.as_str())) {
+            let known = name.eq_ignore_ascii_case(kind.none_name())
+                || crate::sets::list(m, kind).iter().any(|s| s.name == name);
+            if !known {
+                m.ws.drop_pending(&key);
+                continue;
+            }
+            fx.extend(crate::sets::update(
+                m,
+                &mut d.sets,
+                crate::sets::StMsg::OpenHosts { kind, name },
+                now,
+                &mut |m, t| say(m, now, t),
+            ));
+        }
     }
     fx
 }
@@ -1874,6 +1925,14 @@ fn switch_to(
     for id in dbs {
         fx.extend(update(state, Msg::Db(crate::db::DbMsg::Close(id)), now));
     }
+    let pages: Vec<_> = state.model.set_pages.iter().map(|p| p.id).collect();
+    for id in pages {
+        fx.extend(update(
+            state,
+            Msg::Sets(crate::sets::StMsg::ClosePage(id)),
+            now,
+        ));
+    }
     let logs: Vec<_> = state.model.logins.iter().map(|s| s.id).collect();
     for id in logs {
         fx.extend(update(
@@ -2159,6 +2218,17 @@ fn reconcile(m: &mut Model, entries: Vec<HostEntry>, now: Instant, fx: &mut Vec<
         }
         let state = match prev {
             Some(h) if h.entry == entry => h,
+            // Only its group / cluster changed (#144, #145): nothing to read again.
+            Some(mut h)
+                if HostEntry {
+                    group: entry.group.clone(),
+                    cluster: entry.cluster.clone(),
+                    ..h.entry.clone()
+                } == entry =>
+            {
+                h.entry = entry;
+                h
+            }
             _ => {
                 let mut h = HostState::new(entry);
                 if let Some(f) = m.restored.remove(&h.entry.alias) {

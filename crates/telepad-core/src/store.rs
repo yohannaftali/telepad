@@ -6,10 +6,10 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
-use crate::config::{self, Access, HostEntry, Inventory};
+use crate::config::{self, Access, HostEntry, HostSet, Inventory, SetKind};
 use crate::update::UpdateConfig;
 
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 const JSON_FORMAT: &str = "telepad/hosts";
 
 #[derive(Debug, thiserror::Error)]
@@ -132,6 +132,24 @@ const RDP_SETTINGS: &str = "CREATE TABLE IF NOT EXISTS rdp_settings (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );";
 
+/// Groups and clusters (#144, #145): name, description and display order.
+/// Hosts refer to them by name (`hosts.grp` / `hosts.cluster`).
+const HOST_SETS: &str = "CREATE TABLE IF NOT EXISTS host_sets (
+    kind        TEXT    NOT NULL,
+    name        TEXT    NOT NULL COLLATE NOCASE,
+    description TEXT    NOT NULL DEFAULT '',
+    position    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (kind, name)
+);";
+
+/// The `hosts` column holding a host's name of `kind`.
+fn set_column(kind: SetKind) -> &'static str {
+    match kind {
+        SetKind::Group => "grp",
+        SetKind::Cluster => "cluster",
+    }
+}
+
 #[derive(Serialize)]
 struct JsonFile {
     format: String,
@@ -160,6 +178,8 @@ impl Store {
                  monitored     INTEGER NOT NULL DEFAULT 1,
                  access        TEXT    NOT NULL DEFAULT 'ssh',
                  sort_order    INTEGER NOT NULL DEFAULT 0,
+                 grp           TEXT    NOT NULL DEFAULT '',
+                 cluster       TEXT    NOT NULL DEFAULT '',
                  updated_at    TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
              );
              CREATE TABLE IF NOT EXISTS settings (
@@ -196,10 +216,37 @@ COMMIT;"
 PRAGMA user_version = 4;
 COMMIT;"
             ))?;
+            v = 4;
+        }
+        if v == 4 {
+            // v5: host groups and clusters (#144, #145).
+            let has = |col: &str| -> Result<bool, rusqlite::Error> {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name = ?1",
+                    params![col],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map(|n| n > 0)
+            };
+            let mut add = String::new();
+            for col in ["grp", "cluster"] {
+                if !has(col)? {
+                    add.push_str(&format!(
+                        "ALTER TABLE hosts ADD COLUMN {col} TEXT NOT NULL DEFAULT '';\n"
+                    ));
+                }
+            }
+            conn.execute_batch(&format!(
+                "BEGIN;
+{add}{HOST_SETS}
+PRAGMA user_version = 5;
+COMMIT;"
+            ))?;
         } else if v == 0 {
             conn.execute_batch(&format!(
                 "{DB_CONNECTIONS}
 {RDP_SETTINGS}
+{HOST_SETS}
 PRAGMA user_version = {SCHEMA_VERSION};"
             ))?;
         } else if v > SCHEMA_VERSION {
@@ -275,7 +322,7 @@ PRAGMA user_version = {SCHEMA_VERSION};"
     pub fn hosts(&self) -> Result<Vec<HostEntry>, StoreError> {
         let mut st = self.conn.prepare(
             "SELECT id, alias, hostname, user, port, identity_file, description, options, monitored,
-                    access
+                    access, grp, cluster
              FROM hosts ORDER BY sort_order, id",
         )?;
         let rows = st.query_map([], |r| {
@@ -291,6 +338,8 @@ PRAGMA user_version = {SCHEMA_VERSION};"
                 options: decode_options(&options),
                 unmonitored: r.get::<_, i64>(8)? == 0,
                 access: Access::from_db(&r.get::<_, String>(9)?),
+                group: r.get(10)?,
+                cluster: r.get(11)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -415,6 +464,10 @@ PRAGMA user_version = {SCHEMA_VERSION};"
             hosts: self.hosts()?,
             global: self.global()?,
             rdp: self.rdp_all()?,
+            sets: SetKind::ALL
+                .iter()
+                .map(|&k| Ok((k, self.sets(k)?)))
+                .collect::<Result<_, StoreError>>()?,
         })
     }
 
@@ -484,7 +537,7 @@ PRAGMA user_version = {SCHEMA_VERSION};"
                 let n = self.conn.execute(
                     "UPDATE hosts SET alias=?2, hostname=?3, user=?4, port=?5, identity_file=?6,
                      description=?7, options=?8, monitored=?9, access=?10,
-                     updated_at=CURRENT_TIMESTAMP
+                     grp=?11, cluster=?12, updated_at=CURRENT_TIMESTAMP
                      WHERE id=?1",
                     params![
                         id,
@@ -496,9 +549,12 @@ PRAGMA user_version = {SCHEMA_VERSION};"
                         h.note,
                         opts,
                         !h.unmonitored,
-                        h.access.as_str()
+                        h.access.as_str(),
+                        h.group,
+                        h.cluster
                     ],
                 )?;
+                ensure_sets(&self.conn, h)?;
                 if n == 0 {
                     return Err(StoreError::Invalid(format!("host #{id} no longer exists")));
                 }
@@ -507,8 +563,8 @@ PRAGMA user_version = {SCHEMA_VERSION};"
             None => {
                 self.conn.execute(
                     "INSERT INTO hosts(alias, hostname, user, port, identity_file, description,
-                     options, monitored, access, sort_order)
-                     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                     options, monitored, access, grp, cluster, sort_order)
+                     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
                             (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM hosts))",
                     params![
                         h.alias,
@@ -519,12 +575,147 @@ PRAGMA user_version = {SCHEMA_VERSION};"
                         h.note,
                         opts,
                         !h.unmonitored,
-                        h.access.as_str()
+                        h.access.as_str(),
+                        h.group,
+                        h.cluster
                     ],
                 )?;
-                Ok(self.conn.last_insert_rowid())
+                let id = self.conn.last_insert_rowid();
+                ensure_sets(&self.conn, h)?;
+                Ok(id)
             }
         }
+    }
+
+    /// Groups or clusters in display order (#144, #145).
+    pub fn sets(&self, kind: SetKind) -> Result<Vec<HostSet>, StoreError> {
+        let mut st = self.conn.prepare(
+            "SELECT name, description FROM host_sets WHERE kind = ?1 ORDER BY position, name",
+        )?;
+        let rows = st.query_map(params![kind.as_str()], |r| {
+            Ok(HostSet {
+                name: r.get(0)?,
+                description: r.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Add a group / cluster (`old` = None) or rename / describe one; a
+    /// rename moves its hosts along, in one transaction.
+    pub fn save_set(
+        &mut self,
+        kind: SetKind,
+        old: Option<&str>,
+        set: &HostSet,
+    ) -> Result<(), StoreError> {
+        config::check_set_name(kind, &set.name).map_err(StoreError::Invalid)?;
+        if set.description.contains(['\n', '\r']) {
+            return Err(StoreError::Invalid(
+                "Description must be a single line".into(),
+            ));
+        }
+        let tx = self.conn.transaction()?;
+        let clash: Option<String> = tx
+            .query_row(
+                "SELECT name FROM host_sets WHERE kind = ?1 AND name = ?2",
+                params![kind.as_str(), set.name],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if clash.is_some_and(|c| old.is_none_or(|o| !c.eq_ignore_ascii_case(o))) {
+            return Err(StoreError::Invalid(format!(
+                "There is already a {} named '{}'",
+                kind.as_str(),
+                set.name
+            )));
+        }
+        match old {
+            Some(o) => {
+                let n = tx.execute(
+                    "UPDATE host_sets SET name = ?3, description = ?4 WHERE kind = ?1 AND name = ?2",
+                    params![kind.as_str(), o, set.name, set.description],
+                )?;
+                if n == 0 {
+                    return Err(StoreError::Invalid(format!("'{o}' no longer exists")));
+                }
+                tx.execute(
+                    &format!("UPDATE hosts SET {0} = ?2 WHERE {0} = ?1", set_column(kind)),
+                    params![o, set.name],
+                )?;
+            }
+            None => {
+                tx.execute(
+                    "INSERT INTO host_sets(kind, name, description, position)
+                     VALUES(?1, ?2, ?3, (SELECT COALESCE(MAX(position), 0) + 1 FROM host_sets
+                                         WHERE kind = ?1))",
+                    params![kind.as_str(), set.name, set.description],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Delete a group / cluster; its hosts stay, without one.
+    pub fn delete_set(&mut self, kind: SetKind, name: &str) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        tx.execute(
+            "DELETE FROM host_sets WHERE kind = ?1 AND name = ?2",
+            params![kind.as_str(), name],
+        )?;
+        tx.execute(
+            &format!("UPDATE hosts SET {0} = '' WHERE {0} = ?1", set_column(kind)),
+            params![name],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Display order of the groups / clusters: `names` first to last.
+    pub fn order_sets(&mut self, kind: SetKind, names: &[String]) -> Result<(), StoreError> {
+        let tx = self.conn.transaction()?;
+        for (i, n) in names.iter().enumerate() {
+            tx.execute(
+                "UPDATE host_sets SET position = ?3 WHERE kind = ?1 AND name = ?2",
+                params![kind.as_str(), n, i as i64 + 1],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Put hosts `ids` into `name` (empty = take them out), in one transaction.
+    pub fn assign_set(&mut self, kind: SetKind, ids: &[i64], name: &str) -> Result<(), StoreError> {
+        if !name.is_empty() {
+            config::check_set_name(kind, name).map_err(StoreError::Invalid)?;
+        }
+        let tx = self.conn.transaction()?;
+        let probe = HostEntry {
+            group: if kind == SetKind::Group {
+                name.into()
+            } else {
+                String::new()
+            },
+            cluster: if kind == SetKind::Cluster {
+                name.into()
+            } else {
+                String::new()
+            },
+            ..HostEntry::default()
+        };
+        ensure_sets(&tx, &probe)?;
+        for id in ids {
+            tx.execute(
+                &format!(
+                    "UPDATE hosts SET {} = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+                    set_column(kind)
+                ),
+                params![id, name],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Store the display order: `ids` first to last, in one transaction.
@@ -684,13 +875,13 @@ PRAGMA user_version = {SCHEMA_VERSION};"
         for (i, h) in inv.hosts.iter().enumerate() {
             tx.execute(
                 "INSERT INTO hosts(alias, hostname, user, port, identity_file, description, options,
-                 monitored, sort_order, access)
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 monitored, sort_order, access, grp, cluster)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                  ON CONFLICT(alias) DO UPDATE SET hostname=excluded.hostname, user=excluded.user,
                    port=excluded.port, identity_file=excluded.identity_file,
                    description=excluded.description, options=excluded.options,
                    monitored=excluded.monitored, access=excluded.access,
-                   updated_at=CURRENT_TIMESTAMP",
+                   grp=excluded.grp, cluster=excluded.cluster, updated_at=CURRENT_TIMESTAMP",
                 params![
                     h.alias,
                     h.hostname,
@@ -701,9 +892,27 @@ PRAGMA user_version = {SCHEMA_VERSION};"
                     encode_options(&h.options),
                     !h.unmonitored,
                     last + i as i64 + 1,
-                    h.access.as_str()
+                    h.access.as_str(),
+                    h.group,
+                    h.cluster
                 ],
             )?;
+        }
+        // Descriptions and order of imported groups / clusters, then any name
+        // a host uses that has no entry yet.
+        for (&kind, sets) in &inv.sets {
+            for s in sets {
+                tx.execute(
+                    "INSERT INTO host_sets(kind, name, description, position)
+                     VALUES(?1, ?2, ?3, (SELECT COALESCE(MAX(position), 0) + 1 FROM host_sets
+                                         WHERE kind = ?1))
+                     ON CONFLICT(kind, name) DO UPDATE SET description = excluded.description",
+                    params![kind.as_str(), s.name, s.description],
+                )?;
+            }
+        }
+        for h in &inv.hosts {
+            ensure_sets(&tx, h)?;
         }
         if mode == ImportMode::Replace || !inv.global.trim().is_empty() {
             tx.execute(
@@ -896,7 +1105,20 @@ fn parse_json_import(t: &str) -> Result<Inventory, StoreError> {
             .unwrap_or_default(),
         _ => Default::default(),
     };
-    Ok(Inventory { hosts, global, rdp })
+    // Telepad's own export keeps groups / clusters with descriptions (#144).
+    let sets = match &v {
+        serde_json::Value::Object(o) => o
+            .get("sets")
+            .and_then(|r| serde_json::from_value(r.clone()).ok())
+            .unwrap_or_default(),
+        _ => Default::default(),
+    };
+    Ok(Inventory {
+        hosts,
+        global,
+        rdp,
+        sets,
+    })
 }
 
 /// Look up a key ignoring case, `_` and `-` (`IdentityFile` = `identity_file`).
@@ -992,7 +1214,25 @@ fn host_from_json(v: &serde_json::Value) -> Option<HostEntry> {
         options,
         unmonitored,
         access,
+        group: text(&["group"]).unwrap_or_default(),
+        cluster: text(&["cluster"]).unwrap_or_default(),
     })
+}
+
+/// Make sure the group / cluster names `h` uses have an entry (#144).
+fn ensure_sets(conn: &Connection, h: &HostEntry) -> Result<(), StoreError> {
+    for kind in SetKind::ALL {
+        let name = h.set(kind);
+        if !name.is_empty() {
+            conn.execute(
+                "INSERT OR IGNORE INTO host_sets(kind, name, position)
+                 VALUES(?1, ?2, (SELECT COALESCE(MAX(position), 0) + 1 FROM host_sets
+                                 WHERE kind = ?1))",
+                params![kind.as_str(), name],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 pub fn export_json(inv: &Inventory) -> Result<String, StoreError> {
@@ -1230,11 +1470,114 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 4, "v1 -> v2 -> v3 -> v4");
+        assert_eq!(v, SCHEMA_VERSION, "v1 -> v2 -> v3 -> v4 -> v5");
+        assert_eq!(s.hosts().unwrap()[0].group, "", "old hosts are ungrouped");
         assert!(s.rdp_all().unwrap().is_empty(), "rdp_settings exists");
         assert_eq!(s.db_profile("x").unwrap(), None, "db_connections exists");
         drop(s);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn groups_and_clusters_rename_delete_assign_and_order() {
+        let mut s = mem();
+        let mut a = HostEntry::new("web1");
+        a.hostname = "192.0.2.10".into();
+        a.group = "Office".into();
+        a.cluster = "Web".into();
+        let a = s.save_host(&a).unwrap();
+        let mut b = HostEntry::new("web2");
+        b.group = "Lab".into();
+        b.cluster = "Web".into();
+        let b = s.save_host(&b).unwrap();
+        // Names a host uses get an entry; group and cluster are separate.
+        let names = |s: &Store, k| {
+            s.sets(k)
+                .unwrap()
+                .into_iter()
+                .map(|x| x.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&s, SetKind::Group), ["Office", "Lab"]);
+        assert_eq!(names(&s, SetKind::Cluster), ["Web"]);
+        // Rename moves the hosts along; the description is kept.
+        let set = HostSet {
+            name: "Head office".into(),
+            description: "Floor 2".into(),
+        };
+        s.save_set(SetKind::Group, Some("Office"), &set).unwrap();
+        let h = s.hosts().unwrap();
+        assert_eq!(h[0].group, "Head office");
+        assert_eq!(h[0].cluster, "Web", "cluster untouched");
+        assert_eq!(s.sets(SetKind::Group).unwrap()[0], set);
+        // Names are unique ignoring case, and the fixed entry is reserved.
+        let dup = HostSet {
+            name: "lab".into(),
+            ..Default::default()
+        };
+        assert!(s.save_set(SetKind::Group, None, &dup).is_err());
+        let fixed = HostSet {
+            name: "Ungrouped".into(),
+            ..Default::default()
+        };
+        assert!(s.save_set(SetKind::Group, None, &fixed).is_err());
+        // Changing the case of its own name is fine.
+        let lab = HostSet {
+            name: "LAB".into(),
+            ..Default::default()
+        };
+        s.save_set(SetKind::Group, Some("Lab"), &lab).unwrap();
+        // Order, assign, delete (hosts stay, without the group).
+        s.order_sets(SetKind::Group, &["LAB".into(), "Head office".into()])
+            .unwrap();
+        assert_eq!(names(&s, SetKind::Group), ["LAB", "Head office"]);
+        s.assign_set(SetKind::Group, &[a, b], "New").unwrap();
+        assert_eq!(names(&s, SetKind::Group), ["LAB", "Head office", "New"]);
+        s.delete_set(SetKind::Group, "New").unwrap();
+        let h = s.hosts().unwrap();
+        assert_eq!(h.len(), 2);
+        assert!(h.iter().all(|h| h.group.is_empty() && h.cluster == "Web"));
+        s.assign_set(SetKind::Cluster, &[b], "").unwrap();
+        assert_eq!(s.hosts().unwrap()[1].cluster, "");
+    }
+
+    #[test]
+    fn groups_and_clusters_survive_json_and_openssh_export() {
+        let mut s = mem();
+        let mut a = HostEntry::new("web1");
+        a.group = "Office".into();
+        a.cluster = "Ceph 1".into();
+        s.save_host(&a).unwrap();
+        s.save_set(
+            SetKind::Group,
+            Some("Office"),
+            &HostSet {
+                name: "Office".into(),
+                description: "Head office".into(),
+            },
+        )
+        .unwrap();
+        let inv = s.inventory().unwrap();
+        let json = export_json(&inv).unwrap();
+        let back = parse_json_import(&json).unwrap();
+        assert_eq!(back.hosts[0].group, "Office");
+        assert_eq!(back.hosts[0].cluster, "Ceph 1");
+        assert_eq!(back.sets[&SetKind::Group][0].description, "Head office");
+        let mut t = mem();
+        t.import(&back, ImportMode::Merge).unwrap();
+        assert_eq!(
+            t.sets(SetKind::Group).unwrap()[0].description,
+            "Head office"
+        );
+        assert_eq!(t.hosts().unwrap()[0].cluster, "Ceph 1");
+        // OpenSSH: names travel in marker comments.
+        let text = config::to_ssh_config(&inv);
+        assert!(text.contains("# telepad: group Office\n"), "{text}");
+        assert!(text.contains("# telepad: cluster Ceph 1\n"), "{text}");
+        let parsed = config::parse(&text);
+        assert_eq!(parsed[0].group, "Office");
+        assert_eq!(parsed[0].cluster, "Ceph 1");
+        assert_eq!(parsed[0].note, "", "tags are not a description");
     }
 
     #[test]

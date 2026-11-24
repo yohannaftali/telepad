@@ -317,6 +317,12 @@ pub fn differences(a: &HostEntry, b: &HostEntry) -> Vec<&'static str> {
     if a.access != b.access {
         d.push("RDP only");
     }
+    if a.group != b.group {
+        d.push("Group");
+    }
+    if a.cluster != b.cluster {
+        d.push("Cluster");
+    }
     d
 }
 

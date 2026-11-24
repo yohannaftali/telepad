@@ -9,6 +9,7 @@ use telepad_app::{
     HostState, Model, Msg, Sort, SortKey, can_reorder, fullest_disk, host_flags, hottest,
     overview_rows,
 };
+use telepad_core::config::SetKind;
 use telepad_core::model::{HostReport, PortainerRole, human_kb};
 
 use crate::icons;
@@ -20,9 +21,9 @@ const ROW_HEIGHT: f32 = 24.0;
 const COLUMNS: [(&str, Option<SortKey>, f32, f32); 12] = [
     ("", Some(SortKey::Status), 36.0, 36.0),
     ("Host", Some(SortKey::Host), 130.0, 60.0),
-    ("Description", Some(SortKey::Description), 170.0, 40.0),
-    ("Address", Some(SortKey::Address), 115.0, 50.0),
-    ("OS", Some(SortKey::Os), 190.0, 60.0),
+    ("Description", Some(SortKey::Description), 170.0, 100.0),
+    ("Address", Some(SortKey::Address), 115.0, 90.0),
+    ("OS", Some(SortKey::Os), 190.0, 110.0),
     ("Flags", Some(SortKey::Flags), 150.0, 40.0),
     ("CPU", Some(SortKey::Cpu), 80.0, 50.0),
     ("Memory", Some(SortKey::Memory), 175.0, 60.0),
@@ -32,22 +33,314 @@ const COLUMNS: [(&str, Option<SortKey>, f32, f32); 12] = [
     ("Updated", Some(SortKey::Updated), 75.0, 50.0),
 ];
 
-/// Column widths after a double-click fit (#83): `round` renames the table so
-/// egui_extras starts from these widths.
-#[derive(Clone, Default)]
-struct Fit {
-    round: u32,
-    widths: Option<Vec<f32>>,
+/// Columns that share the spare width (#143): Description, OS, Flags, Docker.
+const STRETCH: [usize; 4] = [2, 4, 5, 10];
+/// Columns that give way when the page is too narrow (#143), in this order:
+/// long text that cuts well, then the bars; Host, Flags and Updated last.
+const SHRINK_ORDER: [&[usize]; 2] = [&[2, 10, 4, 3], &[6, 7, 8, 9]];
+/// Room around a cell's content.
+const CELL_PAD: f32 = 12.0;
+
+type Col = (&'static str, Option<SortKey>, f32, f32);
+
+/// What a hosts table shows (#144, #145): every host (the Hosts page) or
+/// the hosts of one group / cluster, extra Group / Cluster columns, and on
+/// the Hosts page optionally grouped by group.
+#[derive(Clone, Copy, Default)]
+pub struct TableView<'a> {
+    /// Only the hosts of this group / cluster ("" = the fixed entry).
+    pub only: Option<(SetKind, &'a str)>,
+    /// Group / Cluster columns, before Updated.
+    pub extra: &'a [SetKind],
+    /// Hosts in group order (ungrouped last), the current sort inside.
+    pub by_group: bool,
+    /// Keeps each page's column layout apart.
+    pub salt: u64,
 }
 
-pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mut Vec<Msg>) {
-    let rows = overview_rows(m, filter, sort);
-    let reorder = can_reorder(filter, false, sort);
+/// The columns of a view: the fixed ones with the extra Group / Cluster
+/// columns before Updated.
+fn columns(extra: &[SetKind]) -> Vec<Col> {
+    let mut c: Vec<Col> = COLUMNS[..COLUMNS.len() - 1].to_vec();
+    for k in extra {
+        c.push((k.title(), None, 120.0, 60.0));
+    }
+    c.push(COLUMNS[COLUMNS.len() - 1]);
+    c
+}
+
+/// Hosts of a view in display order: search and sort as on the Hosts page,
+/// then only the hosts of the group / cluster; with `by_group` the groups
+/// in their order, ungrouped hosts last.
+pub fn view_rows(m: &Model, filter: &str, sort: Sort, view: &TableView) -> Vec<usize> {
+    let mut rows = overview_rows(m, filter, sort);
+    if let Some((kind, name)) = view.only {
+        rows.retain(|&i| m.hosts[i].entry.set(kind).eq_ignore_ascii_case(name));
+    }
+    if view.by_group {
+        let order = telepad_app::sets::list(m, SetKind::Group);
+        let rank = |i: usize| {
+            let g = &m.hosts[i].entry.group;
+            if g.is_empty() {
+                return usize::MAX;
+            }
+            order
+                .iter()
+                .position(|s| s.name.eq_ignore_ascii_case(g))
+                .unwrap_or(usize::MAX - 1)
+        };
+        rows.sort_by_key(|&i| rank(i));
+    }
+    rows
+}
+
+/// Column layout of the Hosts table (#143), kept between frames.
+#[derive(Clone, Default)]
+struct Layout {
+    /// Part of the table's id: a new value makes egui_extras start from `widths`.
+    key: u64,
+    widths: Vec<f32>,
+    /// Widths the user dragged a column to; `None` = automatic.
+    manual: Vec<Option<f32>>,
+    /// The header row: a press there may be a column resize.
+    header: Option<egui::Rect>,
+    /// Left edge and width of each column as last drawn.
+    left: Vec<f32>,
+    seen: Vec<f32>,
+    /// The primary button went down in the header and is still down.
+    pressed: bool,
+    /// Bumped to make egui_extras forget widths it changed itself (its own
+    /// double-click auto-size) or a drag that has been taken over.
+    round: u32,
+}
+
+/// Column widths for `avail` points (#143). Each column gets what its content
+/// wants (at least its minimum); a column the user sized keeps that width.
+/// Spare width goes to the `stretch` columns in proportion to what they want;
+/// when there is too little, the automatic columns shrink toward their
+/// minimum in proportion to the room they have above it (then the table
+/// scrolls).
+pub fn fit_widths(
+    want: &[f32],
+    min: &[f32],
+    stretch: &[usize],
+    manual: &[Option<f32>],
+    avail: f32,
+) -> Vec<f32> {
+    let n = want.len();
+    let fixed = |i: usize| manual.get(i).copied().flatten();
+    let mut w: Vec<f32> = (0..n)
+        .map(|i| fixed(i).unwrap_or(want[i]).max(min[i]))
+        .collect();
+    let total: f32 = w.iter().sum();
+    if total < avail {
+        let grow: Vec<usize> = stretch
+            .iter()
+            .copied()
+            .filter(|&i| i < n && fixed(i).is_none())
+            .collect();
+        let weight: f32 = grow.iter().map(|&i| w[i]).sum();
+        if weight > 0.0 {
+            let spare = avail - total;
+            for &i in &grow {
+                w[i] += spare * w[i] / weight;
+            }
+        }
+    } else if total > avail {
+        // Each tier gives way only when the ones before it are at their minimum.
+        let mut over = total - avail;
+        let mut tiers: Vec<Vec<usize>> = SHRINK_ORDER
+            .iter()
+            .map(|t| t.iter().copied().filter(|&i| i < n).collect())
+            .collect();
+        let listed: Vec<usize> = tiers.concat();
+        tiers.push((0..n).filter(|i| !listed.contains(i)).collect());
+        for tier in tiers {
+            let auto: Vec<usize> = tier.into_iter().filter(|&i| fixed(i).is_none()).collect();
+            let room: f32 = auto.iter().map(|&i| w[i] - min[i]).sum();
+            if over <= 0.0 || room <= 0.0 {
+                continue;
+            }
+            let k = (over / room).min(1.0);
+            for &i in &auto {
+                w[i] -= (w[i] - min[i]) * k;
+            }
+            over -= room * k;
+        }
+    }
+    w
+}
+
+/// Width of one line of `text`.
+fn text_w(ui: &egui::Ui, text: impl Into<egui::WidgetText>) -> f32 {
+    text.into()
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::FontSelection::Default,
+        )
+        .size()
+        .x
+}
+
+fn header_text(title: &str, key: Option<SortKey>, sort: Sort) -> String {
+    let arrow = match key.and_then(|k| sort.direction(k)) {
+        Some(true) => format!(" {}", icons::CARET_DOWN),
+        Some(false) => format!(" {}", icons::CARET_UP),
+        None => String::new(),
+    };
+    if title.is_empty() {
+        format!("{}{arrow}", icons::DOT)
+    } else {
+        format!("{title}{arrow}")
+    }
+}
+
+/// What each column's content needs, over every listed host (not only the
+/// rows on screen, so scrolling does not move the columns).
+fn wanted(
+    ui: &egui::Ui,
+    m: &Model,
+    rows: &[usize],
+    sort: Sort,
+    cols: &[Col],
+    extra: &[SetKind],
+) -> Vec<f32> {
+    let mut want: Vec<f32> = cols
+        .iter()
+        .map(|(t, k, _, _)| text_w(ui, RichText::new(header_text(t, *k, sort)).strong()))
+        .collect();
+    let gap = ui.spacing().item_spacing.x;
+    let last = cols.len() - 1;
+    let mut take = |c: usize, w: f32| want[c] = want[c].max(w);
+    take(0, COLUMNS[0].2);
+    for &i in rows {
+        let h = &m.hosts[i];
+        take(1, text_w(ui, RichText::new(&h.entry.alias).strong()));
+        take(
+            2,
+            text_w(ui, RichText::new(&h.entry.note).italics()).min(260.0),
+        );
+        take(3, text_w(ui, RichText::new(&h.entry.hostname)));
+        for (k, kind) in extra.iter().enumerate() {
+            take(11 + k, text_w(ui, h.entry.set(*kind)).min(180.0));
+        }
+        take(
+            last,
+            text_w(ui, ago(h.updated)) + if m.host_paused(h) { 20.0 } else { 0.0 },
+        );
+        let Some(r) = &h.report else {
+            // The message of a host without a report fills the OS cell onward.
+            take(4, 220.0);
+            continue;
+        };
+        take(
+            4,
+            (20.0 + gap + text_w(ui, r.os_pretty.as_str())).min(220.0),
+        );
+        let flags = host_flags(r);
+        let chips: f32 = flags.iter().map(|f| text_w(ui, chip_text(f)) + gap).sum();
+        take(5, chips);
+        take(6, 70.0);
+        if let Some(mem) = &r.memory {
+            let text = format!("{} / {}", human_kb(mem.used_kb()), human_kb(mem.total_kb));
+            take(7, (text_w(ui, text) + 8.0).min(170.0));
+        }
+        if let Some(d) = fullest_disk(r) {
+            take(
+                8,
+                (text_w(ui, format!("{} {:.0}%", d.mount, d.used_pct())) + 8.0).min(180.0),
+            );
+        }
+        take(9, text_w(ui, "100°C"));
+        if let Some(t) = docker_text(r) {
+            take(10, text_w(ui, t).min(200.0));
+        }
+    }
+    want.iter().map(|w| w + CELL_PAD).collect()
+}
+
+/// A hosts table: the Hosts page, or a group / cluster page (#144, #145).
+pub fn table(
+    ui: &mut egui::Ui,
+    m: &Model,
+    filter: &str,
+    sort: Sort,
+    view: &TableView,
+    out: &mut Vec<Msg>,
+) {
+    let rows = view_rows(m, filter, sort, view);
+    // Dragging rows changes the inventory order: only on the full list.
+    let reorder = view.only.is_none() && !view.by_group && can_reorder(filter, false, sort);
     let accent = ui.visuals().selection.bg_fill;
-    let fit_id = egui::Id::unique("overview-fit");
-    let fit: Fit = ui.data(|d| d.get_temp(fit_id)).unwrap_or_default();
-    let mut header_rects = vec![egui::Rect::NOTHING; COLUMNS.len()];
-    let mut used = vec![0.0f32; COLUMNS.len()];
+    let cols = columns(view.extra);
+    let layout_id = egui::Id::unique("overview-layout").with((view.salt, cols.len()));
+    let mut lay: Layout = ui.data(|d| d.get_temp(layout_id)).unwrap_or_default();
+    let n = cols.len();
+    lay.manual.resize(n, None);
+    let gap = ui.spacing().item_spacing.x;
+    let in_header = |p: egui::Pos2| lay.header.is_some_and(|h| h.expand(6.0).contains(p));
+    let (resizing, released, dbl) = ui.input(|i| {
+        let from_header = i.pointer.press_origin().is_some_and(in_header);
+        let dbl = i
+            .pointer
+            .button_double_clicked(egui::PointerButton::Primary)
+            .then(|| i.pointer.latest_pos())
+            .flatten()
+            .filter(|p| in_header(*p));
+        (
+            i.pointer.primary_down() && from_header,
+            i.pointer.primary_released() && (from_header || lay.pressed),
+            dbl,
+        )
+    });
+    // Column borders sit half a gap before the next column's left edge.
+    let border = |c: usize| lay.left.get(c + 1).map(|l| l - gap / 2.0);
+    if let Some(p) = dbl {
+        // Double-click on a border: that column goes back to automatic.
+        let near = (1..n - 1)
+            .filter_map(|c| border(c).map(|b| (c, (p.x - b).abs())))
+            .filter(|&(_, d)| d <= 10.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((c, _)) = near {
+            lay.manual[c] = None;
+        }
+        lay.round = lay.round.wrapping_add(1);
+    } else if released && lay.seen.len() == n && lay.widths.len() == n {
+        // A drag on a border ended: that column keeps its new width.
+        for c in 1..n - 1 {
+            if (lay.seen[c] - lay.widths[c]).abs() > 1.5 {
+                lay.manual[c] = Some(lay.seen[c]);
+                lay.round = lay.round.wrapping_add(1);
+            }
+        }
+    }
+    lay.pressed = resizing;
+    // While a border is dragged the table stays as it is.
+    let widths = if resizing && lay.widths.len() == n {
+        lay.widths.clone()
+    } else {
+        let min: Vec<f32> = cols.iter().map(|c| c.3).collect();
+        // Gaps between columns and the vertical scroll bar.
+        let avail = ui.available_width() - gap * (n as f32) - 14.0;
+        let want = wanted(ui, m, &rows, sort, &cols, view.extra);
+        let w: Vec<f32> = fit_widths(&want, &min, &STRETCH, &lay.manual, avail)
+            .iter()
+            .map(|w| w.round())
+            .collect();
+        use std::hash::{Hash, Hasher};
+        let mut h = std::hash::DefaultHasher::new();
+        lay.round.hash(&mut h);
+        for x in &w {
+            (*x as i32).hash(&mut h);
+        }
+        lay.key = h.finish();
+        lay.widths = w;
+        lay.widths.clone()
+    };
+    let mut header_rects = vec![egui::Rect::NOTHING; n];
+    let mut auto_fit = false;
     // The table scrolls vertically itself; this adds horizontal scrolling
     // when the columns are wider than the window.
     // Labels in the table must not take clicks: the whole row opens the host
@@ -57,145 +350,114 @@ pub fn overview(ui: &mut egui::Ui, m: &Model, filter: &str, sort: Sort, out: &mu
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let mut table = TableBuilder::new(ui)
-                .id_salt(("overview", fit.round))
+                .id_salt(("overview", view.salt, lay.key))
                 .striped(true)
                 .resizable(true)
                 // Rows highlight on hover and open the host on click (#83).
                 .sense(egui::Sense::click())
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .auto_shrink([false, false]);
-            let last = COLUMNS.len() - 1;
-            for (i, (_, _, width, min)) in COLUMNS.iter().enumerate() {
-                let width = fit
-                    .widths
-                    .as_ref()
-                    .and_then(|w| w.get(i).copied())
-                    .unwrap_or(*width);
+            let last = n - 1;
+            for (i, (_, _, _, min)) in cols.iter().enumerate() {
                 let col = if i == 0 {
-                    Column::exact(width.max(*min))
+                    Column::exact(widths[i].max(*min))
                 } else if i == last {
-                    // The last column takes the width the others leave, so
-                    // the table always fills the window (#83).
+                    // Takes what is left, so rounding never leaves a gap.
                     Column::remainder().at_least(*min).clip(true)
                 } else {
-                    Column::initial(width).at_least(*min).clip(true)
+                    Column::initial(widths[i]).at_least(*min).clip(true)
                 };
                 table = table.column(col);
             }
             table
                 .header(ROW_HEIGHT, |mut header| {
-                    for (c, (title, key, _, _)) in COLUMNS.into_iter().enumerate() {
-                        let (u, r) = header.col(|ui| {
-                            let Some(key) = key else { return };
-                            let arrow = match sort.direction(key) {
-                                Some(true) => format!(" {}", icons::CARET_DOWN),
-                                Some(false) => format!(" {}", icons::CARET_UP),
-                                None => String::new(),
-                            };
-                            let text = if title.is_empty() {
-                                format!("{}{arrow}", icons::DOT)
-                            } else {
-                                format!("{title}{arrow}")
+                    for (c, &(title, key, _, _)) in cols.iter().enumerate() {
+                        let (_, r) = header.col(|ui| {
+                            let Some(key) = key else {
+                                // Group / Cluster: not sortable.
+                                crate::widgets::cell_text(ui, RichText::new(title).strong());
+                                return;
                             };
                             let name = if title.is_empty() { "status" } else { title };
-                            crate::widgets::cell_text(ui, RichText::new(text).strong());
+                            crate::widgets::cell_text(
+                                ui,
+                                RichText::new(header_text(title, Some(key), sort)).strong(),
+                            );
                             // The whole header cell sorts (#137).
-                            if crate::widgets::cell_click(ui, ("sort", c))
+                            let resp = crate::widgets::cell_click(ui, ("sort", c))
                                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .on_hover_text(format!(
-                                    "Click to sort by {name} (again to reverse, a third time for inventory order). Double-click a column border to fit it."
-                                ))
-                                .clicked()
-                            {
+                                    "Click to sort by {name} (again to reverse, a third time for inventory order). Columns fit the page by themselves; drag a border to set a width, double-click it to go back to automatic."
+                                ));
+                            // Near the right edge is the column border (resize,
+                            // double-click), not a sort.
+                            let edge = ui.max_rect().right() - 8.0;
+                            let on_border = resp
+                                .interact_pointer_pos()
+                                .is_some_and(|p| p.x >= edge);
+                            if resp.clicked() && !on_border {
                                 out.push(Msg::SortBy(key));
                             }
+                            resp.context_menu(|ui| {
+                                if ui.button("Auto-fit columns").clicked() {
+                                    auto_fit = true;
+                                    ui.close();
+                                }
+                            });
                         });
                         header_rects[c] = r.rect;
-                        used[c] = used[c].max(u.width());
                     }
                 })
                 .body(|body| {
                     body.rows(ROW_HEIGHT, rows.len(), |mut row| {
                         let i = rows[row.index()];
-                        let mut cells = Cells {
-                            row: &mut row,
-                            n: 0,
-                            used: &mut used,
-                        };
-                        host_row(&mut cells, i, &m.hosts[i], m.host_paused(&m.hosts[i]), reorder);
+                        host_row(
+                            &mut row,
+                            i,
+                            &m.hosts[i],
+                            m.host_paused(&m.hosts[i]),
+                            reorder,
+                            view.extra,
+                        );
                         let resp = row.response();
                         if resp.clicked() {
                             out.push(Msg::Select(Some(i)));
                         }
                         // SSH, Files, databases, edit… on right-click (#83).
-                        resp.context_menu(|ui| {
-                            host_menu(
-                                ui,
-                                &m.hosts[i],
-                                i,
-                                m.rdp.contains_key(&m.hosts[i].entry.alias),
-                                m.host_paused(&m.hosts[i]),
-                                out,
-                            )
-                        });
+                        resp.context_menu(|ui| host_menu(ui, m, i, out));
                         if reorder {
                             drop_target(&row.response(), i, accent, out);
                         }
                     });
                 });
         });
-    // Double-click on a header border: fit that column to its longest value.
-    let dbl = ui.input(|i| {
-        i.pointer
-            .button_double_clicked(egui::PointerButton::Primary)
-            .then(|| i.pointer.latest_pos())
-            .flatten()
-    });
-    if let Some(p) = dbl {
-        // A column's border sits half a gap before the next column's left edge
-        // (the header responses are wider than their columns).
-        let gap = ui.spacing().item_spacing.x;
-        let left: Vec<f32> = header_rects.iter().map(|r| r.left()).collect();
-        let (top, bottom) = (header_rects[0].top(), header_rects[0].bottom());
-        let n = COLUMNS.len();
-        let hit = (1..n - 1).find(|&c| {
-            (top..=bottom).contains(&p.y) && (p.x - (left[c + 1] - gap / 2.0)).abs() <= 6.0
-        });
-        if let Some(c) = hit {
-            let mut widths: Vec<f32> = (0..n)
-                .map(|k| match left.get(k + 1) {
-                    Some(next) => next - left[k] - gap,
-                    None => COLUMNS[k].2,
-                })
-                .collect();
-            widths[c] = (used[c] + 8.0).max(COLUMNS[c].3);
-            let next = Fit {
-                round: fit.round.wrapping_add(1),
-                widths: Some(widths),
-            };
-            ui.data_mut(|d| d.insert_temp(fit_id, next));
-        }
+    lay.left = header_rects.iter().map(|r| r.left()).collect();
+    lay.seen = (0..n)
+        .map(|c| match lay.left.get(c + 1) {
+            Some(next) => next - lay.left[c] - gap,
+            None => widths[c],
+        })
+        .collect();
+    if auto_fit {
+        lay.manual = vec![None; n];
+        lay.round = lay.round.wrapping_add(1);
     }
+    lay.header = Some(
+        header_rects
+            .iter()
+            .fold(egui::Rect::NOTHING, |a, r| a.union(*r)),
+    );
+    ui.data_mut(|d| d.insert_temp(layout_id, lay));
 }
 
-/// One row's cells, recording how wide each one's content really is.
-struct Cells<'r, 'a, 'b> {
-    row: &'r mut TableRow<'a, 'b>,
-    n: usize,
-    used: &'r mut [f32],
-}
-
-impl Cells<'_, '_, '_> {
-    fn col(&mut self, add: impl FnOnce(&mut egui::Ui)) {
-        let (r, _) = self.row.col(add);
-        if let Some(u) = self.used.get_mut(self.n) {
-            *u = u.max(r.width());
-        }
-        self.n += 1;
-    }
-}
-
-fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, paused: bool, grip: bool) {
+fn host_row(
+    row: &mut TableRow<'_, '_>,
+    i: usize,
+    h: &HostState,
+    paused: bool,
+    grip: bool,
+    extra: &[SetKind],
+) {
     row.col(|ui| {
         if grip {
             grip_handle(ui, i);
@@ -235,6 +497,9 @@ fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, paused: bool, 
             }
         }
     }
+    for kind in extra {
+        row.col(|ui| clipped(ui, RichText::new(h.entry.set(*kind))));
+    }
     row.col(|ui| {
         if paused {
             ui.label(
@@ -247,12 +512,24 @@ fn host_row(row: &mut Cells<'_, '_, '_>, i: usize, h: &HostState, paused: bool, 
     });
 }
 
-fn report_cells(row: &mut Cells<'_, '_, '_>, h: &HostState, r: &HostReport) {
+fn report_cells(row: &mut TableRow<'_, '_>, h: &HostState, r: &HostReport) {
     row.col(|ui| {
         icons::os_logo(ui, host_os(h), 16.0);
         clipped(ui, RichText::new(&r.os_pretty));
     });
-    row.col(|ui| flag_chips(ui, &host_flags(r)));
+    row.col(|ui| {
+        let flags = host_flags(r);
+        flag_chips(ui, &flags);
+        // Chips past the cell edge are cut: list them all on hover (#143).
+        if ui.min_rect().width() > ui.max_rect().width() + 1.0 {
+            let all = flags
+                .iter()
+                .map(|f| f.detail.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            crate::widgets::cell_click(ui, "flags").on_hover_text(all);
+        }
+    });
     row.col(|ui| match r.cpu_usage_pct {
         Some(c) => bar(ui, c, format!("{c:.0}%"), ui.available_width()),
         None => dash(ui),
@@ -341,7 +618,47 @@ fn dash(ui: &mut egui::Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::docker_text;
+    use super::{docker_text, fit_widths};
+
+    #[test]
+    fn spare_width_goes_to_the_stretch_columns() {
+        let want = [36.0, 100.0, 200.0, 80.0];
+        let min = [36.0, 60.0, 40.0, 50.0];
+        let w = fit_widths(&want, &min, &[2], &[None; 4], 616.0);
+        assert_eq!(w, vec![36.0, 100.0, 400.0, 80.0]);
+        // Two stretch columns share in proportion to what they want.
+        let w = fit_widths(&want, &min, &[1, 2], &[None; 4], 716.0);
+        assert_eq!(w, vec![36.0, 200.0, 400.0, 80.0]);
+    }
+
+    #[test]
+    fn too_little_room_shrinks_toward_the_minimums() {
+        let want = [36.0, 100.0, 200.0, 80.0];
+        let min = [36.0, 60.0, 40.0, 50.0];
+        // 416 wanted, 316 there: 100 taken from 230 of room above the minimums.
+        let w = fit_widths(&want, &min, &[2], &[None; 4], 316.0);
+        assert!((w.iter().sum::<f32>() - 316.0).abs() < 0.01, "{w:?}");
+        assert!(w[2] < 200.0 && w[2] > min[2]);
+        // Far too narrow: every column at its minimum (the table scrolls).
+        assert_eq!(
+            fit_widths(&want, &min, &[2], &[None; 4], 10.0),
+            min.to_vec()
+        );
+    }
+
+    #[test]
+    fn a_column_sized_by_hand_keeps_its_width() {
+        let want = [36.0, 100.0, 200.0, 80.0];
+        let min = [36.0, 60.0, 40.0, 50.0];
+        let manual = [None, None, Some(120.0), None];
+        // The stretch column is manual: nothing else grows.
+        assert_eq!(
+            fit_widths(&want, &min, &[2], &manual, 1000.0),
+            vec![36.0, 100.0, 120.0, 80.0]
+        );
+        let w = fit_widths(&want, &min, &[2], &manual, 300.0);
+        assert_eq!(w[2], 120.0);
+    }
     use telepad_core::cluster::{Cluster, Swarm};
     use telepad_core::model::HostReport;
 

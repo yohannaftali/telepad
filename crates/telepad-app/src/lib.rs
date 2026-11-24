@@ -17,6 +17,7 @@ pub mod logins;
 mod msg;
 pub mod mykeys;
 pub mod pager;
+pub mod sets;
 mod state;
 mod table;
 mod update;
@@ -61,6 +62,8 @@ mod tests_logins;
 mod tests_mykeys;
 #[cfg(test)]
 mod tests_rdp;
+#[cfg(test)]
+mod tests_sets;
 #[cfg(test)]
 mod tests_strategy;
 #[cfg(test)]

@@ -44,8 +44,8 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | Path | Role |
 |---|---|
 | `src/lib.rs` | Workspace: find `config` / `telepad.db`, first-run import, `.env` fallback key, `open_ssh_alias` |
-| `src/config.rs` | OpenSSH config import/export: hosts (alias, HostName, User, Port, IdentityFile, description, other options, not-monitored tag, RDP-only tag) + global `Host *`/`Match` text; renders the file `ssh -F` reads |
-| `src/store.rs` | SQLite inventory (`rusqlite`, bundled): `hosts` + `settings` + `db_connections` (saved database connections, no passwords) tables, `PRAGMA user_version` schema version, transactional import (Merge/Replace), `parse_pasted` (pasted config / JSON / `[alias] [user@]host[:port]` lines), JSON + OpenSSH export, generated `telepad.ssh_config` (atomic write) |
+| `src/config.rs` | OpenSSH config import/export: hosts (alias, HostName, User, Port, IdentityFile, description, other options, not-monitored tag, RDP-only tag, `# telepad: group` / `# telepad: cluster` tags (#144, #145); `SetKind`, `HostSet`, `check_set_name`) + global `Host *`/`Match` text; renders the file `ssh -F` reads |
+| `src/store.rs` | SQLite inventory (`rusqlite`, bundled): `hosts` (incl. `grp` / `cluster` names, #144 / #145) + `settings` + `db_connections` (saved database connections, no passwords) + `host_sets` (kind, name, description, position; schema 5: `sets` / `save_set` (rename moves hosts) / `delete_set` / `order_sets` / `assign_set`) tables, `PRAGMA user_version` schema version, transactional import (Merge/Replace), `parse_pasted` (pasted config / JSON / `[alias] [user@]host[:port]` lines), JSON + OpenSSH export, generated `telepad.ssh_config` (atomic write) |
 | `src/collector.rs` | Runs `ssh -F <config> -T -o BatchMode=yes ... <alias> sh -s` with `script.sh` on stdin; `Scope` (which tiers, ping first for hosts without ping reply; intervals from `strategy::Strategy`, #122) and `carry_over` of skipped facts; timeouts; bounded worker pool; sends `Update`s over a channel; RDP-only hosts get ping + TCP probe; `reach` (#125: ping, else a TCP connect to the SSH port → `Reach`; `Indirect` for `ProxyJump` / `ProxyCommand` hosts) after a failed SSH attempt, in the ping-first path and (down hosts only, `PingJob::port`) in the ping round |
 | `src/script.sh` | Remote read-only collection script, `===SECTION===` markers; tiers `TP_STATIC` (daily by default) / `TP_SLOW` (6 h by default) switched by `collector::Scope`, live sections every round; pending updates only from the local package cache (never `apt-get update`) |
 | `src/bmc_setup.sh` | Interactive, user-started BMC (`ipmitool`) setup — see Conventions |
@@ -97,6 +97,8 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_logins.rs` | Behaviour tests for #126 |
 | `src/tests_strategy.rs` | Behaviour tests for #122 (pause, Update Strategy page, ping rounds, last known facts) |
 | `src/tests_local.rs` | Behaviour tests for #129 (My Computer page, local reads, local file and database windows) |
+| `src/sets.rs` | Groups (#144) and clusters (#145): `SetPage` ("Hosts - [name]", `""` = Ungrouped / No cluster), `members`, `stats`, `SetForm`, `AddHosts`, `SetsDraft` (incl. Hosts page `hosts_by_group` / `hosts_columns`), `StMsg` / `StEffect`, `update` (restored as `group:<name>` / `cluster:<name>`) |
+| `src/tests_sets.rs` | Behaviour tests for #144 / #145 |
 
 ### telepad-gui
 
@@ -105,7 +107,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/main.rs` | Arguments, `--open-ssh`; no console window in Windows release builds |
 | `src/app.rs` | eframe app: each frame `runtime.frame()`, `views::draw()`, dispatch the returned `Msg`s |
 | `src/runtime.rs` | Executes `Effect`s (database, ssh, collector, update threads, dialogs, clipboard read/write via `arboard`, OS) and feeds results back as `Msg`s |
-| `src/views/` | One module per screen: `panels` (top bar, status bar), `detail` (host page and `local_page`, My Computer #129), `workspace` (page sidebar, inner windows: title bar, tabs, move / resize / minimize / maximize, minimized strip), `overview`, `detail`, `sensors`, `docker`, `docker_overview`, `ports`, `editor`, `import`, `keys`, `strategy` (Update Strategy page, #122), `logins` (Log info page, #126), `database` (one inner window per connection), `files` (one inner window per host), `text_editor` (its editor window: tabs, gutter, colours, find bar), `host_sync`, `confirm`, `update_window`. Only the main OS window exists; pages and dialogs are drawn inside it |
+| `src/views/` | One module per screen: `panels` (top bar, status bar), `detail` (host page and `local_page`, My Computer #129), `workspace` (page sidebar, inner windows: title bar, tabs, move / resize / minimize / maximize, minimized strip), `overview` (`TableView`: one group / cluster, extra Group / Cluster columns, by group; `fit_widths` auto column widths #143), `sets` (Groups / Clusters pages and "Hosts - [name]", #144 / #145), `detail`, `sensors`, `docker`, `docker_overview`, `ports`, `editor`, `import`, `keys`, `strategy` (Update Strategy page, #122), `logins` (Log info page, #126), `database` (one inner window per connection), `files` (one inner window per host), `text_editor` (its editor window: tabs, gutter, colours, find bar), `host_sync`, `confirm`, `update_window`. Only the main OS window exists; pages and dialogs are drawn inside it |
 | `src/widgets.rs` | Shared drawing helpers and colours (bars, status dot, fan, thresholds, action buttons `Act`: red danger / yellow edit / green add / amber caution, `host_menu` (right-click host menu), `light_visuals`) |
 | `src/icons.rs` | Phosphor icon font glyphs and OS logo detection; `assets/` holds the font and logos |
 | `assets/icon/` | App icon (`telepad.png` window icon, `.ico` exe/installer, `.icns` macOS app), generated by `scripts/make-icon.py` |
@@ -319,6 +321,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #138 | feat(db): data grid filter row, column chooser and pager footer (Senar / wtbapp style, 100 rows default) | closed | 2026-11-24 |
 | #139 | feat(db): export and import table data (SQL, CSV, Excel) | closed | 2026-11-24 |
 | #140 | feat(keys): Log info pager as a sticky footer with record info and first / previous / next / last | closed | 2026-11-24 |
-| #143 | fix(ui): Hosts table fills the page width, auto-resizes columns, Flags not clipped and readable | open | 2026-11-24 |
-| #144 | feat(hosts): optional host groups — Groups page, Ungrouped, Hosts - [Group] page, group on cards | open | 2026-11-24 |
-| #145 | feat(hosts): user-defined clusters separate from groups — Clusters page, Hosts - [Cluster] page, cluster on cards | open | 2026-11-24 |
+| #143 | fix(ui): Hosts table fills the page width, auto-resizes columns, Flags not clipped and readable | ready-for-review | 2026-11-24 |
+| #144 | feat(hosts): optional host groups — Groups page, Ungrouped, Hosts - [Group] page, group on cards | ready-for-review | 2026-11-24 |
+| #145 | feat(hosts): user-defined clusters separate from groups — Clusters page, Hosts - [Cluster] page, cluster on cards | ready-for-review | 2026-11-24 |
