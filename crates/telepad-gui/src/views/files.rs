@@ -434,11 +434,14 @@ fn table(
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
         .column(Column::initial(190.0).at_least(100.0).clip(true))
         .column(Column::initial(70.0).clip(true))
-        .column(Column::initial(108.0).clip(true))
-        .column(Column::initial(76.0).clip(true));
-    if remote {
-        tb = tb.column(Column::remainder().at_least(60.0).clip(true));
-    }
+        .column(Column::initial(108.0).clip(true));
+    // The last column fills the pane, so a click anywhere on a row hits it (#130).
+    tb = if remote {
+        tb.column(Column::initial(76.0).clip(true))
+            .column(Column::remainder().at_least(60.0).clip(true))
+    } else {
+        tb.column(Column::remainder().at_least(76.0).clip(true))
+    };
     let arrow = |col: SortCol| {
         if p.sort == col {
             if p.descending {
@@ -739,7 +742,12 @@ fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Ms
         .auto_shrink([false, false])
         .show(ui, |ui| {
             if s.transfers.is_empty() {
-                ui.label(RichText::new("Select files and click Upload / Download, press F5, or drag them to the other side.").weak());
+                let hint = if s.host.is_local() {
+                    "Select files and click Copy to right / Copy to left, press F5, or drag them to the other side."
+                } else {
+                    "Select files and click Upload / Download, press F5, or drag them to the other side."
+                };
+                ui.label(RichText::new(hint).weak());
             }
             for t in s.transfers.iter().rev() {
                 ui.horizontal_wrapped(|ui| {
@@ -1010,8 +1018,8 @@ fn toolbar_menu(ui: &mut egui::Ui, s: &FileSession, d: &FileDraft, side: Side, o
 
 fn where_text(s: &FileSession, side: Side) -> String {
     match side {
-        Side::Local => "this computer".into(),
-        Side::Remote => s.host.alias.clone(),
+        Side::Remote if !s.host.is_local() => s.host.alias.clone(),
+        _ => "this computer".into(),
     }
 }
 

@@ -83,6 +83,7 @@ fn wait(mut child: std::process::Child, limit: Duration) -> Result<String, Strin
 
 /// Output of a short read-only command, `None` when it is missing or fails.
 /// Arguments are passed separately, never through a shell.
+#[cfg(target_os = "windows")]
 fn run(program: &str, args: &[&str]) -> Option<(bool, String)> {
     let mut cmd = Command::new(program);
     cmd.args(args)

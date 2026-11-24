@@ -37,8 +37,8 @@ fn red() -> Color32 {
 
 fn place(s: &FileSession, side: Side) -> String {
     match side {
-        Side::Local => "this computer".into(),
-        Side::Remote => s.host.alias.clone(),
+        Side::Remote if !s.host.is_local() => s.host.alias.clone(),
+        _ => "this computer".into(),
     }
 }
 

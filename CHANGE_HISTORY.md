@@ -2,6 +2,28 @@
 
 Newest first.
 
+## [2026-11-24] — Tested #130, #129, #131 (branches `130-file-row-click` → `129-my-computer` → `131-files-compare-sync`)
+- Windows 11, release build; fmt, clippy `-D warnings`, `cargo test --workspace` (core 213,
+  app 171, gui 7). Headless: `telepad-check --local` (≈ 1.2–2 s; 52 containers = `docker ps -a`,
+  disks / IPs / ports match), all 56 hosts read-only (49 ok, 7 unreachable or password-only as
+  before — remote collection unchanged).
+- GUI on a copy of the inventory via UI Automation + window captures: My Computer above Hosts;
+  System / Maintenance / Usage / Disks / Network / Sensors (not available) / Docker sections;
+  Open Terminal opened a local shell; Open files… = This computer on both sides; Open
+  PostgreSQL :5432 connected straight to 127.0.0.1 (server's own auth error, no SSH); the
+  layout (My Computer, local files, database, editor) came back after a restart.
+  #130: clicks on the Modified cell and on empty cells of `..` select the row, text centred.
+  #131: Compare marks (only here / newer / older / different / same), Hide identical,
+  Transfer settings (exclude `node_modules` saved), Synchronize preview (3 copies, 2
+  deletes) then run: disk matched the preview, History 2 entries; Diff side by side with
+  marked lines, edit + Save of one side written.
+- Fixed during testing: database window said "through the SSH login" for this computer;
+  file hint said Upload / Download for two local folders; rows did not fill the pane without
+  an Owner column; editor label case; `local::run` gated to Windows (Linux / macOS clippy).
+- Noted: Default mode copies known text files with the target's line endings, so a mixed-
+  ending `.conf` shows "different size" after a copy between two Windows folders.
+- Not verified: Linux / macOS (CI builds them), MariaDB local connect (only PostgreSQL here).
+
 ## [2026-11-24] — feat(files): compare, synchronize, diff, transfer settings (#131)
 - Issue #131 addressed on GitHub (branch `131-files-compare-sync`, on top of `129-my-computer`).
 - **Compare** marks both panes (only here / newer / different size / same, 2 s slack),
