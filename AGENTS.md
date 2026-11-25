@@ -337,4 +337,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #153 | feat(ui): table framework — simple and paged tables, sort and filter row everywhere, right-click menu with Filter by, Clear All Filters, export CSV / Excel / PDF, Copy as JSON | closed | 2026-11-25 |
 | #156 | fix(ui): simple tables do not fill the page like Hosts, and header title / filter heights are unbalanced | closed | 2026-11-25 |
 | #157 | feat(ui): Hosts cards with equal height and whole-card click, sortable Group / Cluster columns instead of By group, shown by default | closed | 2026-11-25 |
-| #160 | feat(hosts): reorder groups and clusters by drag and drop, like the Hosts page | ready-for-review | 2026-11-25 |
+| #160 | feat(hosts): reorder groups and clusters by drag and drop, like the Hosts page | closed | 2026-11-25 |
