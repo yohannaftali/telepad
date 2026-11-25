@@ -226,6 +226,10 @@ pub struct Output {
     pub export: Option<Format>,
     /// Messages for the update loop (exports).
     pub msgs: Vec<Msg>,
+    /// The rows are scrolled within reach of their bottom (#152).
+    pub near_bottom: bool,
+    /// Every row fits: no vertical scrolling yet (#152).
+    pub fits: bool,
 }
 
 /// The view's own order for [`controlled`].
@@ -404,6 +408,7 @@ pub fn controlled(
     let head_h = if filter_row { 2.0 * row_h + 6.0 } else { row_h };
     let target_id = spec.id.with("menu-target");
     let mut pick: Option<Pick> = None;
+    let mut scrolled: Option<(f32, f32, f32)> = None;
     let mut draw = |ui: &mut Ui| {
         ui.style_mut().interaction.selectable_labels = false;
         let fill_h = (ui.available_height() - head_h - 4.0).max(row_h * 2.0);
@@ -491,7 +496,7 @@ pub fn controlled(
                 out.header.push(rect);
             }
         });
-        table.body(|body| {
+        let scroll = table.body(|body| {
             body.rows(row_h, rows.len(), |mut row| {
                 let src = rows[row.index()];
                 row.set_selected(
@@ -537,6 +542,11 @@ pub fn controlled(
                 out.rows.push((src, resp));
             });
         });
+        scrolled = Some((
+            scroll.state.clamped_offset().y,
+            scroll.inner_rect.height(),
+            scroll.content_size.y,
+        ));
     };
     if spec.min_width > 0.0 {
         egui::ScrollArea::horizontal()
@@ -548,6 +558,12 @@ pub fn controlled(
             });
     } else {
         draw(ui);
+    }
+    // Continuous mode (#152): within 80 points of the bottom loads more
+    // (wtbapp); a view the rows do not fill yet is "at the bottom" too.
+    if let Some((offset, view, content)) = scrolled {
+        out.fits = content <= view + 2.0;
+        out.near_bottom = offset + view >= content - 80.0;
     }
     match pick {
         Some(Pick::FilterBy(c, v)) => {
@@ -601,6 +617,9 @@ pub fn show(
     if filters.len() < spec.cols.len() {
         filters.resize(spec.cols.len(), String::new());
     }
+    if spec.kind == Kind::Paged {
+        st.pager.start_mode(ui.available_width());
+    }
     let mut out = if spec.kind == Kind::Paged {
         let h = (ui.available_height() - crate::widgets::PAGER_H - 6.0).max(120.0);
         let o = ui
@@ -636,6 +655,10 @@ pub fn show(
         )
     };
     st.filters = filters;
+    if spec.kind == Kind::Paged && st.pager.wants_more(total, out.near_bottom, out.fits) {
+        st.pager.more(total);
+        ui.ctx().request_repaint();
+    }
     if let Some(c) = out.sort.take() {
         st.click(c);
     }

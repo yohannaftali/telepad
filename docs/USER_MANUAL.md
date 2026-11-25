@@ -217,6 +217,20 @@ shows all its rows (Disks, Network, Ports in use, sensors, Docker containers, cl
 tables, Groups / Clusters, Host Management, Authorized keys, My keys, the database lists);
 a **paged table** has the pager footer under it (the database Data grid, Log info).
 
+**Pager footer** (#152): **Record [1 - 20] of 970** on the left; on the right **Rows per
+page [20]**, then **« ‹ Page [n] of N › »** (type a page and press Enter), then the
+**mode button**:
+
+- **∞ (Switch to continuous)**: the page buttons go away, *Rows per page* becomes **Rows
+  per load**, and scrolling to the bottom of the table adds the next rows (*Record [1 - 60]
+  of 970*). While the rows do not fill the view, more load by themselves (up to 500 rows).
+  The database grid asks the server for one more page at a time; unsaved grid edits stay.
+- **Numbered list (Switch to pages)**: back to pages, from page 1.
+
+Switching, a new filter, sort or Rows per page starts again from the first row. Each table
+has its own mode (not saved); tables open with pages, or continuous when first shown in a
+window narrower than 768 points. In a narrow window the footer wraps onto a second line.
+
 - **Header:** the title row has its own colour band with a line under it, so it stands
   apart from the rows. A title that sorts lights up (accent background, white text) under
   the mouse; the sort arrow (▲ ascending, ▼ descending) sits at the **right edge** of the
@@ -497,9 +511,10 @@ The table (made-up example):
   equal, `>x` / `<x` (numbers by value, times as text, e.g. `>2026-11-20`), `NULL` empty,
   `!NULL` not empty. **Clear filters** empties them all.
 - **Pager** (footer under the table, it stays visible while the rows scroll): *Record [21 - 40]
-  of 279*, then first / previous, **Page [n] of N** (type a page number and press Enter),
-  next / last, and **Rows per page** (type a number and press Enter; 20 by default, empty
-  = 100; more than 100 asks first because a long page is slow).
+  of 279* on the left; on the right **Rows per page** (type a number and press Enter; 20 by
+  default, empty = 100; more than 100 asks first because a long page is slow), first /
+  previous, **Page [n] of N** (type a page number and press Enter), next / last, and the
+  continuous-mode button ([Tables](#tables)).
 - **Show this PC's logins** (off by default): logins from this PC's address with a key
   Telepad logs in with. Telepad does not reuse connections, so every refresh round is one
   login (about 1 440 a day per host at the default 60 s, see [Update Strategy](#update-strategy));
@@ -1373,9 +1388,11 @@ cannot reach the database address, the dialog says so.
 - **Columns ▾**: search the columns and tick the ones to show; **Show all** / **Hide all**.
   Kept for this table of this connection.
 - **Pager** (footer under the grid, it stays visible while the rows scroll): *Record [1 -
-  100] of 2 345* (*of many* when the count is not available), first / previous,
-  **Page [n] of N** (type a page and press Enter), next / last, **Rows per page** (100 by
-  default; type a number and press Enter, empty = 100, more than 100 asks first).
+  100] of 2 345* (*of many* when the count is not available) on the left; on the right
+  **Rows per page** (100 by default; type a number and press Enter, empty = 100, more than
+  100 asks first), first / previous, **Page [n] of N** (type a page and press Enter), next /
+  last, and the continuous-mode button: in continuous mode scrolling to the bottom adds the
+  next page of rows from the server ([Tables](#tables)).
   **↻** reloads. Click a column title (anywhere in it) to sort: ascending, descending, off;
   a new sort or filter goes back to page 1. Click anywhere in a cell to select its row.
 - NULL is shown as a grey *NULL*. Long values and binary data are cut (the full length is

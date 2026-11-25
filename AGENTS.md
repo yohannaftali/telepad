@@ -95,7 +95,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_mykeys.rs` | Behaviour tests for the My keys tab |
 | `src/grid.rs` | Table state of the table component (#153): `TableState` (sort `(col, Dir)`, filter boxes, `Pager`; `click`, `filter_by`, `clear_filters`), `filter_match` (wtbapp rules, numbers with units via `value`), `natural` / `compare` (units, empty last), `view` (filter + stable sort), `data` (export rows), `TableMsg` (Export / Answer / Exported) |
 | `src/tests_grid.rs` | Behaviour tests for #153 |
-| `src/pager.rs` | Table pager (#138, #140, Senar / wtbapp style): `Pager` (page, typed rows per page — empty = 100, above 100 asks — `go(Go)`, `apply_page`, `record_info` "Record [a - b] of n"); drawn by `widgets::pager_bar` |
+| `src/pager.rs` | Table pager (#138, #140, Senar / wtbapp style): `Pager` (page, typed rows per page — empty = 100, above 100 asks — `go(Go)`, `apply_page`, `record_info` "Record [a - b] of n"; continuous mode #152: `continuous`, `loaded`, `toggle`, `start_mode` (narrower than `NARROW` starts continuous), `more`, `wants_more` (auto-fill up to `FILL_MAX`), `size_label`); drawn by `widgets::pager_bar` (record info left, Rows per page / page buttons / ∞ toggle right); database grid appends via `DbMsg::DataMore` (`DataView::appending` / `exhausted`) |
 | `src/logins.rs` | Log info pages (#126): `LoginSession` (model), `LoginDraft` (sort asc / desc / newest first, per-column filters, page, typed rows per page, show this PC's logins), `rows` (key names from `authorized_keys` / own keys / My keys, `Who`), `filter_match` (wtbapp rules), `page_range`, `LgMsg` / `LgEffect` (handled in `update.rs` `logins`, restored as `logins:<alias>`) |
 | `src/tests_logins.rs` | Behaviour tests for #126 |
 | `src/tests_strategy.rs` | Behaviour tests for #122 (pause, Update Strategy page, ping rounds, last known facts) |
@@ -333,5 +333,5 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #144 | feat(hosts): optional host groups — Groups page, Ungrouped, Hosts - [Group] page, group on cards | closed | 2026-11-24 |
 | #145 | feat(hosts): user-defined clusters separate from groups — Clusters page, Hosts - [Cluster] page, cluster on cards | closed | 2026-11-24 |
 | #151 | feat(ui): shared table header component — header background, hover highlight, right-aligned sort icon | ready-for-review | 2026-11-25 |
-| #152 | feat(ui): pager footer — record info left, controls right, continuous mode toggle (wtbapp / Senar style) | open | 2026-11-25 |
+| #152 | feat(ui): pager footer — record info left, controls right, continuous mode toggle (wtbapp / Senar style) | ready-for-review | 2026-11-25 |
 | #153 | feat(ui): table framework — simple and paged tables, sort and filter row everywhere, right-click menu with Filter by, Clear All Filters, export CSV / Excel / PDF, Copy as JSON | ready-for-review | 2026-11-25 |

@@ -96,6 +96,7 @@ pub fn logins_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, id: LogId, out:
         .unwrap_or_default();
     let all = rows(log, &mine, draft);
     controls(ui, draft, all.len(), log.logins.len());
+    draft.pager.start_mode(ui.available_width());
     let (start, end, _) = page_range(all.len(), draft);
     // The table scrolls above the pager, which stays at the bottom (#140).
     let h = (ui.available_height() - PAGER_H - 6.0).max(120.0);
@@ -298,6 +299,11 @@ fn table(
     }
     if o.filter_changed {
         d.pager.reset();
+    }
+    // Continuous mode (#152): more rows at the bottom.
+    if d.pager.wants_more(all.len(), o.near_bottom, o.fits) {
+        d.pager.more(all.len());
+        ui.ctx().request_repaint();
     }
     let mut msgs = o.msgs;
     if let Some(fmt) = o.export {

@@ -1654,10 +1654,19 @@ fn data_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg
     };
     // The grid scrolls above the pager footer, which stays at the bottom (#138).
     let h = (ui.available_height() - PAGER_H - 6.0).max(120.0);
-    ui.allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
-        ui.set_min_height(h);
-        data_grid(ui, s, d, grid, blocked.is_none(), h, out);
-    });
+    d.pager.start_mode(ui.available_width());
+    let (near_bottom, fits) = ui
+        .allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
+            ui.set_min_height(h);
+            data_grid(ui, s, d, grid, blocked.is_none(), h, out)
+        })
+        .inner;
+    // Continuous mode (#152): the next rows from the server at the bottom.
+    let total = s.data.total.map_or(usize::MAX / 2, |t| t as usize);
+    d.pager.loaded = grid.rows.len();
+    if !s.data.exhausted && d.pager.wants_more(total, near_bottom, fits) {
+        send(out, DbMsg::DataMore(s.id));
+    }
     ui.separator();
     if pager_bar(
         ui,
@@ -1743,7 +1752,7 @@ fn data_grid(
     editable: bool,
     _h: f32,
     out: &mut Vec<Msg>,
-) {
+) -> (bool, bool) {
     let id = s.id;
     let existing = grid.rows.len();
     let total = existing + s.data.edits.inserted.len();
@@ -1934,6 +1943,7 @@ fn data_grid(
         None => {}
     }
     out.extend(o.msgs);
+    (o.near_bottom, o.fits)
 }
 
 fn can_edit(s: &DbSession, value: &Option<Cell>, c: usize, deleted: bool, editable: bool) -> bool {

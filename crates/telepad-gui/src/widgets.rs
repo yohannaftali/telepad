@@ -689,9 +689,10 @@ pub fn cell_text(ui: &mut egui::Ui, t: impl Into<egui::WidgetText>) -> egui::Res
 /// Height of a [`pager_bar`] footer.
 pub const PAGER_H: f32 = 34.0;
 
-/// The footer pager of a table (#138, #140), as in the Senar / wtbapp
-/// tables: `Record [1 - 20] of 279`, first / previous / `Page [n] of N` /
-/// next / last, Rows per page (typed; above 100 asks first). `total`:
+/// The footer pager of a table (#138, #140, #152), as in the Senar / wtbapp
+/// tables: `Record [1 - 20] of 279` on the left; on the right Rows per page
+/// (typed; above 100 asks first), first / previous / `Page [n] of N` / next /
+/// last and the continuous-mode toggle (∞ / numbered list). `total`:
 /// `None` while the count is not known (shown as "of many"). Returns
 /// `true` when the page or the size changed.
 pub fn pager_bar(
@@ -703,8 +704,13 @@ pub fn pager_bar(
     use telepad_app::pager::Go;
     let mut changed = false;
     let known = total.unwrap_or(usize::MAX / 2);
-    ui.horizontal(|ui| {
+    // Width of the right-hand controls last frame: the space before them
+    // pushes them to the right edge (#152); a narrow window wraps instead.
+    let width_id = ui.scope_id().with(("pager-controls", salt));
+    let controls_w: f32 = ui.data(|d| d.get_temp(width_id)).unwrap_or(0.0);
+    ui.horizontal_wrapped(|ui| {
         ui.set_min_height(PAGER_H - 8.0);
+        // Left: Record [1 - 20] of 970.
         let info = match total {
             Some(t) => p.record_info(t),
             None => {
@@ -713,80 +719,6 @@ pub fn pager_bar(
             }
         };
         ui.label(RichText::new(info).weak());
-        ui.separator();
-        let pages = p.pages(known);
-        let first = p.page.min(pages - 1) == 0;
-        let last = total.is_some() && p.page + 1 >= pages;
-        let caret = |a: &str, two: bool| {
-            if two {
-                format!("{a}{a}")
-            } else {
-                a.to_string()
-            }
-        };
-        let button = |ui: &mut egui::Ui, text: String, tip: &str, on: bool, to: Go| {
-            ui.add_enabled(on, egui::Button::new(text).small())
-                .on_hover_text(tip)
-                .clicked()
-                .then_some(to)
-        };
-        let mut go = button(
-            ui,
-            caret(crate::icons::CARET_LEFT, true),
-            "First page",
-            !first,
-            Go::First,
-        );
-        go = go.or(button(
-            ui,
-            caret(crate::icons::CARET_LEFT, false),
-            "Previous page",
-            !first,
-            Go::Prev,
-        ));
-        ui.label("Page");
-        let r = ui.add(
-            egui::TextEdit::singleline(&mut p.page_text)
-                .id_salt(("pager-page", salt))
-                .desired_width(40.0),
-        );
-        if r.lost_focus() {
-            changed |= p.apply_page(known);
-        }
-        ui.label(match total {
-            Some(_) => format!("of {pages}"),
-            None => "of many".into(),
-        });
-        go = go.or(button(
-            ui,
-            caret(crate::icons::CARET_RIGHT, false),
-            "Next page",
-            !last,
-            Go::Next,
-        ));
-        go = go.or(button(
-            ui,
-            caret(crate::icons::CARET_RIGHT, true),
-            "Last page",
-            !last && total.is_some(),
-            Go::Last,
-        ));
-        if let Some(to) = go {
-            changed |= p.go(to, known);
-        }
-        ui.separator();
-        ui.label("Rows per page");
-        let r = ui
-            .add(
-                egui::TextEdit::singleline(&mut p.per_page_text)
-                    .id_salt(("pager-size", salt))
-                    .desired_width(48.0)
-                    .hint_text("100"),
-            )
-            .on_hover_text("Type a number (20, 50, 100 …) and press Enter; empty = 100");
-        if r.lost_focus() {
-            changed |= p.apply_per_page();
-        }
         if let Some(n) = p.ask {
             ui.colored_label(
                 usage_color(80.0),
@@ -799,9 +731,108 @@ pub fn pager_bar(
                 p.answer(false);
             }
         }
+        // Flexible space, then the controls at the right edge.
+        let gap = ui.available_width() - controls_w - 2.0;
+        if gap > 0.0 {
+            ui.add_space(gap);
+        }
+        let start = ui.cursor().min.x;
+        ui.label(p.size_label());
+        let r = ui
+            .add(
+                egui::TextEdit::singleline(&mut p.per_page_text)
+                    .id_salt(("pager-size", salt))
+                    .desired_width(48.0)
+                    .hint_text("100"),
+            )
+            .on_hover_text("Type a number (20, 50, 100 …) and press Enter; empty = 100");
+        if r.lost_focus() {
+            changed |= p.apply_per_page();
+        }
+        ui.separator();
+        // Continuous mode has no page buttons (rows load on scroll).
+        if !p.continuous {
+            let pages = p.pages(known);
+            let first = p.page.min(pages - 1) == 0;
+            let last = total.is_some() && p.page + 1 >= pages;
+            let caret = |a: &str, two: bool| {
+                if two {
+                    format!("{a}{a}")
+                } else {
+                    a.to_string()
+                }
+            };
+            let button = |ui: &mut egui::Ui, text: String, tip: &str, on: bool, to: Go| {
+                ui.add_enabled(on, egui::Button::new(text).small())
+                    .on_hover_text(tip)
+                    .clicked()
+                    .then_some(to)
+            };
+            let mut go = button(
+                ui,
+                caret(crate::icons::CARET_LEFT, true),
+                "First page",
+                !first,
+                Go::First,
+            );
+            go = go.or(button(
+                ui,
+                caret(crate::icons::CARET_LEFT, false),
+                "Previous page",
+                !first,
+                Go::Prev,
+            ));
+            ui.label("Page");
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut p.page_text)
+                    .id_salt(("pager-page", salt))
+                    .desired_width(40.0),
+            );
+            if r.lost_focus() {
+                changed |= p.apply_page(known);
+            }
+            ui.label(match total {
+                Some(_) => format!("of {pages}"),
+                None => "of many".into(),
+            });
+            go = go.or(button(
+                ui,
+                caret(crate::icons::CARET_RIGHT, false),
+                "Next page",
+                !last,
+                Go::Next,
+            ));
+            go = go.or(button(
+                ui,
+                caret(crate::icons::CARET_RIGHT, true),
+                "Last page",
+                !last && total.is_some(),
+                Go::Last,
+            ));
+            if let Some(to) = go {
+                changed |= p.go(to, known);
+            }
+            ui.separator();
+        }
+        // The mode toggle, last (wtbapp / Senar #1104).
+        let (icon, tip) = if p.continuous {
+            (crate::icons::LIST_NUMBERS, "Switch to pages")
+        } else {
+            (
+                crate::icons::INFINITY,
+                "Switch to continuous (load more rows on scroll)",
+            )
+        };
+        if ui.button(icon).on_hover_text(tip).clicked() {
+            p.toggle();
+            changed = true;
+        }
+        let w = ui.min_rect().right() - start;
+        ui.data_mut(|d| d.insert_temp(width_id, w));
     });
     changed
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

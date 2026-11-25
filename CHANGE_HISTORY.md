@@ -2,6 +2,18 @@
 
 Newest first.
 
+## [2026-11-25] — feat(ui): pager footer — record info left, controls right, continuous mode (#152)
+- Issue #152 addressed on GitHub (branch `152-pager-continuous`, on top of #151)
+- `telepad-app/src/pager.rs`: continuous mode (`toggle`, `start_mode` < 768 pt, `more`, `wants_more` with the
+  500-row auto-fill cap, `size_label` "Rows per load"), `reset` also resets the loaded rows; `db.rs`:
+  `DbMsg::DataMore` adds the next server page (one request at a time, `appending` / `exhausted`), edits keep their
+  rows, the mode switch reloads the first page; `widgets::pager_bar`: record info left, Rows per page | « ‹ Page ›
+  » | ∞ / numbered-list toggle right-aligned (wraps when narrow); `table.rs` reports `near_bottom` / `fits`
+  (within 80 pt of the bottom, as wtbapp); Log info and in-memory paged tables load more on scroll
+- Verified: fmt, clippy, tests (pager continuous / narrow start, database append test). Not verified on screen
+  (session locked)
+- Docs: manual (Tables ▸ Pager footer, Log info and Data tab pager), AGENTS.md (`pager.rs` row)
+
 ## [2026-11-25] — feat(ui): table headers stand out — header band, hover highlight, right-aligned sort icon (#151)
 - Issue #151 addressed on GitHub (branch `151-table-header`, on top of #153)
 - `telepad-gui/src/table.rs` `title_line`: header band colour + line under it, sortable titles light up on hover
