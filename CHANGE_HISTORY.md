@@ -2,6 +2,31 @@
 
 Newest first.
 
+## [2026-11-25] — fix(ui): table filter box is as tall as the title and data rows (#164)
+- Issue #164 addressed on GitHub (branch `164-filter-height`)
+- `telepad-gui/src/table.rs`:
+  - The filter `TextEdit` gets `min_size(width, row_h + BOX_INSET)`, centred text (`align(LEFT_CENTER)`) and a
+    whole-point margin. egui draws a text box's frame about 2.5 pt inside the space it gets, so the filter row
+    takes `BOX_INSET` = 3 pt more and the header grows by the same amount; the title band is unchanged.
+  - Columns without a box get a slot of the same height instead of `add_space`, so every title is level.
+- Verified: fmt, clippy, tests. Measured by pixel scan:
+  - Groups (26 pt rows) at 2× zoom: filter box 51 px, title band 51 px, row 52 px.
+  - Hosts at 100 %: filter box about 26 pt, title about 26 pt, rows 24 pt plus gap.
+
+  Before the fix: filter box about 20 pt, title area about 30 pt, row about 27 pt at 200 %. The 2× zoom stood
+  in for the 200 % screen, which is no longer attached.
+
+## [2026-11-25] — fix(ui): table filter box is shorter than the title and data rows; make them the same height
+- Issue #164 created on GitHub (follow-up to #156: filter box about 20 pt vs title about 30 pt and rows about 27 pt
+  on Hosts at 200 %)
+- Scope: telepad-gui (table.rs header layout)
+- Labels: bug
+
+## [2026-11-25] — feat(hosts): click a host's group or cluster on the Hosts page to open its hosts page
+- Issue #163 created on GitHub
+- Scope: telepad-gui (views/overview.rs Group / Cluster cell click, views/cards.rs links)
+- Labels: enhancement
+
 ## [2026-11-25] — Tested and merged: #160 (PR #161)
 - Tested on Windows 11 with a release build. The GUI was driven by mouse automation and checked with
   screenshots.

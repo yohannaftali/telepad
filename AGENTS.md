@@ -338,3 +338,5 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #156 | fix(ui): simple tables do not fill the page like Hosts, and header title / filter heights are unbalanced | closed | 2026-11-25 |
 | #157 | feat(ui): Hosts cards with equal height and whole-card click, sortable Group / Cluster columns instead of By group, shown by default | closed | 2026-11-25 |
 | #160 | feat(hosts): reorder groups and clusters by drag and drop, like the Hosts page | closed | 2026-11-25 |
+| #163 | feat(hosts): click a host's group or cluster on the Hosts page to open its hosts page | open | 2026-11-25 |
+| #164 | fix(ui): table filter box is shorter than the title and data rows; make them the same height | ready-for-review | 2026-11-25 |

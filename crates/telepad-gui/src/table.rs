@@ -565,13 +565,20 @@ pub fn controlled(
         .is_some_and(|fs| fs.iter().any(|f| !f.trim().is_empty()));
     let row_h = spec.row_h;
     // Filter box and title line have the same height (#156).
+    // egui draws a text box's frame a little inside the space it gets, so
+    // the filter row takes BOX_INSET more for the box to look one row tall
+    // (#164).
+    const BOX_INSET: f32 = 3.0;
+    let box_h = row_h + BOX_INSET;
     let head_h = if filter_row {
-        2.0 * row_h + ui.spacing().item_spacing.y
+        box_h + row_h + ui.spacing().item_spacing.y
     } else {
         row_h
     };
+    // The filter box is exactly one row tall (#164): its own size, not one
+    // that follows from the text height and a rounded margin.
     let font_h = ui.text_style_height(&egui::TextStyle::Body);
-    let box_margin = ((row_h - font_h) / 2.0 - 1.0).clamp(1.0, 8.0);
+    let box_margin = ((box_h - font_h) / 2.0).floor().clamp(0.0, 8.0);
     let target_id = spec.stable.with("menu-target");
     let mut pick: Option<Pick> = None;
     let mut scrolled: Option<(f32, f32, f32)> = None;
@@ -717,6 +724,8 @@ pub fn controlled(
                                         egui::TextEdit::singleline(&mut fs[ci])
                                             .id(spec.stable.with(("filter", ci)))
                                             .margin(egui::Margin::symmetric(4, box_margin as i8))
+                                            .min_size(egui::vec2(w, box_h))
+                                            .align(egui::Align2::LEFT_CENTER)
                                             .hint_text(icons::FUNNEL)
                                             .desired_width(w),
                                     );
@@ -729,7 +738,11 @@ pub fn controlled(
                                     r.on_hover_text(HINT);
                                 }
                                 _ => {
-                                    ui.add_space(row_h);
+                                    // A slot as tall as the box, so every title is level.
+                                    ui.allocate_exact_size(
+                                        egui::vec2(ui.available_width().min(1.0), box_h),
+                                        egui::Sense::hover(),
+                                    );
                                 }
                             }
                         }
