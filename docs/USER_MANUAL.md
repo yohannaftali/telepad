@@ -317,7 +317,8 @@ how many hosts each has, how many are down and how many have flags. The last row
 |---|---|
 | Search box | Filters by name or description |
 | **Add group… / Add cluster…** | Name (one line, up to 64 characters, unique ignoring case; *Ungrouped* / *No cluster* are reserved) and an optional description |
-| **⌃ / ⌄** | Moves it up or down (the order of the list and of the menus) |
+| **⋮⋮** (drag) | Drag a group / cluster by its handle and drop it on the upper or lower half of another row; a line shows where it lands (#160). The order is saved at once and used by the list and the menus. Ungrouped / No cluster has no handle and stays last. The handles are hidden while the search box, a filter box or a column sort is active (a hint says so) |
+| **⌃ / ⌄** | Moves it one place up or down (the same order; for the keyboard) |
 | **Edit** | Rename or change the description; its hosts move along, and an open page follows the new name |
 | **Delete** | Asks first; the hosts stay in Telepad without that group / cluster |
 | Click a row | Opens **Hosts - [name]** |

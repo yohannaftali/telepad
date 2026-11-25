@@ -101,6 +101,17 @@ pub fn sets_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, kind: SetKind, ou
     // searched, filtered or sorted.
     let can_move = query.is_empty() && state.sort.is_none() && !state.filtered();
     let title = format!("{}s", kind.title());
+    if !can_move && sets.len() > 1 {
+        ui.label(
+            RichText::new(format!(
+                "Clear the search, filter boxes and sort to drag {}s into a new order.",
+                kind.as_str()
+            ))
+            .weak()
+            .small(),
+        );
+    }
+    let accent = ui.visuals().selection.bg_fill;
     let spec = Spec::new(("sets", kind.as_str()), &title, &cols)
         .kind(Kind::Fill)
         .row_h(26.0);
@@ -111,6 +122,11 @@ pub fn sets_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, kind: SetKind, ou
             let s = &stats_of[row];
             match col {
                 0 => {
+                    // The ⋮⋮ handle (#160), as on the Hosts page; never on the
+                    // fixed entry, which stays last.
+                    if can_move && !*fixed {
+                        set_grip(ui, kind, shown[row]);
+                    }
                     let text = RichText::new(il(icon(kind), shown_name(kind, name))).strong();
                     ui.label(if *fixed { text.italics() } else { text });
                 }
@@ -255,6 +271,14 @@ pub fn sets_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, kind: SetKind, ou
                 name: names[r].0.clone(),
             },
         );
+    }
+    if can_move {
+        for (r, resp) in &o.rows {
+            // The fixed entry takes no drop: nothing goes below it.
+            if let Some(&onto) = shown.get(*r) {
+                set_drop_target(resp, kind, onto, sets, accent, out);
+            }
+        }
     }
     for (r, resp) in &o.rows {
         resp.clone().on_hover_text(format!(
@@ -499,5 +523,66 @@ fn add_hosts_dialog(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<
     });
     if modal.should_close() {
         st(out, StMsg::AddHostsCancel);
+    }
+}
+
+/// Drag-and-drop payload of the Groups / Clusters table (#160): the set's
+/// position in its list.
+#[derive(Debug, Clone, Copy)]
+struct SetDrag(SetKind, usize);
+
+/// The ⋮⋮ handle a group / cluster is dragged by.
+fn set_grip(ui: &mut egui::Ui, kind: SetKind, pos: usize) {
+    ui.dnd_drag_source(
+        ui.make_persistent_id(("set-drag", kind.as_str(), pos)),
+        SetDrag(kind, pos),
+        |ui| ui.label(RichText::new(icons::GRIP).weak()),
+    )
+    .response
+    .on_hover_cursor(egui::CursorIcon::Grab)
+    .on_hover_text("Drag to reorder");
+}
+
+/// A row a dragged set can be dropped on: a line marks the upper or lower
+/// edge under the pointer, the release moves it there.
+fn set_drop_target(
+    resp: &egui::Response,
+    kind: SetKind,
+    onto: usize,
+    sets: &[telepad_core::config::HostSet],
+    accent: egui::Color32,
+    out: &mut Vec<Msg>,
+) {
+    let Some(pos) = resp.ctx.pointer_latest_pos() else {
+        return;
+    };
+    let below = pos.y > resp.rect.center().y;
+    if resp
+        .dnd_hover_payload::<SetDrag>()
+        .is_some_and(|d| d.0 == kind)
+    {
+        let y = if below {
+            resp.rect.bottom()
+        } else {
+            resp.rect.top()
+        };
+        resp.ctx.layer_painter(resp.layer_id).hline(
+            resp.rect.x_range(),
+            y,
+            egui::Stroke::new(2.5, accent),
+        );
+    }
+    if let Some(drag) = resp.dnd_release_payload::<SetDrag>()
+        && drag.0 == kind
+        && let Some(set) = sets.get(drag.1)
+    {
+        st(
+            out,
+            StMsg::MoveTo {
+                kind,
+                name: set.name.clone(),
+                to: telepad_app::drop_index(drag.1, onto, below),
+            },
+        );
     }
 }

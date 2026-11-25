@@ -7,7 +7,7 @@ use telepad_core::config::{HostEntry, HostSet, SetKind};
 use telepad_core::store::UiPrefs;
 use telepad_core::update::UpdateConfig;
 
-use crate::sets::{StEffect, StMsg, members, stats};
+use crate::sets::{self, StEffect, StMsg, members, stats};
 use crate::workspace::Win;
 use crate::*;
 
@@ -435,4 +435,70 @@ fn group_and_cluster_columns_sort_on_a_header_click_and_show_by_default() {
         SortKey::ALL.contains(&SortKey::Cluster),
         "the cards' Sort by offers it"
     );
+}
+
+#[test]
+fn a_dragged_set_moves_before_or_after_another_and_the_order_is_saved_once() {
+    // #160: drag and drop on the Groups / Clusters page.
+    let now = Instant::now();
+    let mut s = started(now);
+    loaded(&mut s, now);
+    let order = |s: &State| -> Vec<String> {
+        sets::list(&s.model, SetKind::Group)
+            .iter()
+            .map(|x| x.name.clone())
+            .collect()
+    };
+    assert_eq!(order(&s), ["Office", "Lab"]);
+    // "Office" dropped below "Lab" (drop_index(0, 1, below) = 1).
+    let fx = update(
+        &mut s,
+        Msg::Sets(StMsg::MoveTo {
+            kind: SetKind::Group,
+            name: "Office".into(),
+            to: drop_index(0, 1, true),
+        }),
+        now,
+    );
+    assert_eq!(order(&s), ["Lab", "Office"], "shown at once");
+    assert_eq!(
+        st(&fx),
+        vec![StEffect::Order {
+            kind: SetKind::Group,
+            names: vec!["Lab".into(), "Office".into()],
+        }],
+        "one save of the whole order"
+    );
+    // Dropped onto its own place: nothing changes, nothing is saved.
+    let fx = update(
+        &mut s,
+        Msg::Sets(StMsg::MoveTo {
+            kind: SetKind::Group,
+            name: "Lab".into(),
+            to: drop_index(0, 0, false),
+        }),
+        now,
+    );
+    assert!(st(&fx).is_empty());
+    // A position past the end goes last; an unknown name does nothing.
+    update(
+        &mut s,
+        Msg::Sets(StMsg::MoveTo {
+            kind: SetKind::Group,
+            name: "Lab".into(),
+            to: 99,
+        }),
+        now,
+    );
+    assert_eq!(order(&s), ["Office", "Lab"]);
+    let fx = update(
+        &mut s,
+        Msg::Sets(StMsg::MoveTo {
+            kind: SetKind::Group,
+            name: "Nope".into(),
+            to: 0,
+        }),
+        now,
+    );
+    assert!(st(&fx).is_empty());
 }

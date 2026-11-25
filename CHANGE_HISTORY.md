@@ -2,6 +2,24 @@
 
 Newest first.
 
+## [2026-11-25] — feat(hosts): reorder groups and clusters by drag and drop (#160)
+- Issue #160 addressed on GitHub (branch `160-sets-drag`)
+- `telepad-app/src/sets.rs`: `StMsg::MoveTo { kind, name, to }`: the set moves to `to` (counted as
+  `table::drop_index`). The change shows at once and the whole order is saved in one `StEffect::Order`. A drop
+  onto its own place, or an unknown name, saves nothing.
+- `telepad-gui/src/views/sets.rs`: a ⋮⋮ handle in the name cell (`set_grip`) and a drop line plus move on
+  release (`set_drop_target`), as on the Hosts page. No handle or drop on Ungrouped / No cluster. The handles
+  are hidden while the list is searched, filtered or sorted, with a hint.
+- Owner's choice left open in the issue: the ⌃ / ⌄ buttons are kept as the keyboard way to move a set.
+- Verified: fmt, clippy, tests (new `a_dragged_set_moves_before_or_after_another_and_the_order_is_saved_once`).
+  GUI on Windows with a throwaway inventory: Web dragged below Data and back above it, the order survives a
+  restart, and the handles hide with a hint when sorted. Docs updated: manual (Groups and clusters) and AGENTS.md.
+
+## [2026-11-25] — feat(hosts): reorder groups and clusters by drag and drop, like the Hosts page
+- Issue #160 created on GitHub
+- Scope: telepad-app (sets.rs move / order), telepad-gui (views/sets.rs drag handle and drop target)
+- Labels: enhancement
+
 ## [2026-11-25] — Tested and merged: #156, #157 (PR #158)
 - Tested on Windows 11 with a release build against the real inventory (read-only). The GUI was driven by mouse
   and keyboard automation and checked with screenshots.
