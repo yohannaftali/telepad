@@ -87,13 +87,19 @@ pub fn strategy_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec
         ui.label(RichText::new(status_line(m)).weak().small());
         ui.add_space(10.0);
         ui.separator();
-        hosts(ui, m, &mut d.strategy.host_filter, out);
+        hosts(ui, m, &mut d.strategy.host_filter, &mut d.tables, out);
     });
 }
 
 /// Every monitored host: paused or not, last checked, ping; Pause / Resume
 /// and Refresh one by one or for the listed hosts.
-fn hosts(ui: &mut egui::Ui, m: &Model, filter: &mut String, out: &mut Vec<Msg>) {
+fn hosts(
+    ui: &mut egui::Ui,
+    m: &Model,
+    filter: &mut String,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     ui.heading(il(icons::DESKTOP, "Hosts"));
     ui.label(
         RichText::new(
@@ -154,67 +160,103 @@ fn hosts(ui: &mut egui::Ui, m: &Model, filter: &mut String, out: &mut Vec<Msg>) 
         ui.label(RichText::new(format!("{} paused", m.paused_hosts.len())).weak());
     });
     ui.add_space(4.0);
-    egui::Grid::new("strategy_hosts")
-        .num_columns(5)
-        .spacing([14.0, 4.0])
-        .striped(true)
-        .show(ui, |ui| {
-            ui.label("");
-            ui.label(RichText::new("Host").strong());
-            ui.label(RichText::new("Updated").strong());
-            ui.label(RichText::new("Ping").strong());
-            ui.label("");
-            ui.end_row();
-            for &i in &listed {
+    use crate::table::{self, Col, Ev, Spec};
+    let ping = |h: &telepad_app::HostState| match h.ping {
+        Some(Some(ms)) => format!("{ms:.0} ms"),
+        Some(None) if h.port_open => "no reply, SSH port open".into(),
+        Some(None) => "no reply".into(),
+        None => String::new(),
+    };
+    let cols = [
+        Col::new("").no_filter().no_export(),
+        Col::new("Host"),
+        Col::new("Updated"),
+        Col::new("Ping"),
+        Col::new("Paused"),
+        Col::action(""),
+    ];
+    let cells: Vec<Vec<String>> = listed
+        .iter()
+        .map(|&i| {
+            let h = &m.hosts[i];
+            vec![
+                if h.error.is_some() { "down" } else { "up" }.to_string(),
+                h.entry.alias.clone(),
+                ago(h.updated),
+                ping(h),
+                if m.host_paused(h) { "yes" } else { "no" }.to_string(),
+                String::new(),
+            ]
+        })
+        .collect();
+    let spec = Spec::new("strategy-hosts", "Update Strategy hosts", &cols);
+    let o = table::show(
+        ui,
+        &spec,
+        table::state_in(tables, "strategy-hosts"),
+        &cells,
+        |ui, ev| {
+            if let Ev::Cell { row, col } = ev {
+                let i = listed[row];
                 let h = &m.hosts[i];
                 let paused = m.host_paused(h);
-                status_dot(ui, h);
-                ui.label(RichText::new(&h.entry.alias).strong());
-                if paused {
-                    ui.label(
-                        RichText::new(il(icons::PAUSE, &format!("paused · {}", ago(h.updated))))
-                            .color(usage_color(75.0)),
-                    );
-                } else {
-                    ui.label(RichText::new(ago(h.updated)).weak());
+                match col {
+                    0 => status_dot(ui, h),
+                    1 => {
+                        ui.label(RichText::new(&h.entry.alias).strong());
+                    }
+                    2 => {
+                        if paused {
+                            ui.label(
+                                RichText::new(il(
+                                    icons::PAUSE,
+                                    &format!("paused · {}", ago(h.updated)),
+                                ))
+                                .color(usage_color(75.0)),
+                            );
+                        } else {
+                            table::weak(ui, &cells[row][2]);
+                        }
+                    }
+                    3 => table::weak(
+                        ui,
+                        if cells[row][3].is_empty() {
+                            "—"
+                        } else {
+                            &cells[row][3]
+                        },
+                    ),
+                    4 => table::weak(ui, &cells[row][4]),
+                    _ => {
+                        let (icon, text) = if paused {
+                            (icons::PLAY, "Resume")
+                        } else {
+                            (icons::PAUSE, "Pause")
+                        };
+                        if ui.small_button(il(icon, text)).clicked() {
+                            out.push(Msg::PauseHosts {
+                                aliases: vec![h.entry.alias.clone()],
+                                paused: !paused,
+                            });
+                        }
+                        if ui
+                            .add_enabled(
+                                !h.loading,
+                                egui::Button::new(il(icons::REFRESH, "Refresh")).small(),
+                            )
+                            .clicked()
+                        {
+                            out.push(Msg::Refresh(i));
+                        }
+                        if h.loading {
+                            ui.spinner();
+                        }
+                    }
                 }
-                ui.label(
-                    RichText::new(match h.ping {
-                        Some(Some(ms)) => format!("{ms:.0} ms"),
-                        Some(None) if h.port_open => "no reply, SSH port open".into(),
-                        Some(None) => "no reply".into(),
-                        None => "—".into(),
-                    })
-                    .weak(),
-                );
-                ui.horizontal(|ui| {
-                    let (icon, text) = if paused {
-                        (icons::PLAY, "Resume")
-                    } else {
-                        (icons::PAUSE, "Pause")
-                    };
-                    if ui.small_button(il(icon, text)).clicked() {
-                        out.push(Msg::PauseHosts {
-                            aliases: vec![h.entry.alias.clone()],
-                            paused: !paused,
-                        });
-                    }
-                    if ui
-                        .add_enabled(
-                            !h.loading,
-                            egui::Button::new(il(icons::REFRESH, "Refresh")).small(),
-                        )
-                        .clicked()
-                    {
-                        out.push(Msg::Refresh(i));
-                    }
-                    if h.loading {
-                        ui.spinner();
-                    }
-                });
-                ui.end_row();
             }
-        });
+        },
+    );
+    out.extend(o.msgs);
     if listed.is_empty() {
         ui.label(RichText::new("No matching monitored hosts").weak());
     }

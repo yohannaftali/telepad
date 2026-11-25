@@ -3,15 +3,13 @@
 //! box per column, pages — plus Register / Unregister of journal access.
 
 use eframe::egui::{self, RichText};
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use telepad_app::logins::{Col, Dir, LgMsg, LogId, LoginDraft, Who, page_range, rows};
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::login_log::{DAYS, JournalAccess, LIMIT, LoginLog};
 
 use crate::icons::{self, label as il};
 use crate::widgets::*;
-
-const ROW: f32 = 22.0;
 
 pub fn logins_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, id: LogId, out: &mut Vec<Msg>) {
     let Some(s) = m.logins.iter().find(|s| s.id == id) else {
@@ -103,7 +101,8 @@ pub fn logins_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, id: LogId, out:
     let h = (ui.available_height() - PAGER_H - 6.0).max(120.0);
     ui.allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
         ui.set_min_height(h);
-        table(ui, draft, &all[start..end], h);
+        let title = format!("Log info {}", s.alias);
+        out.extend(table(ui, draft, &all, start..end, &title));
     });
     ui.separator();
     pager_bar(ui, &mut draft.pager, Some(all.len()), ("logins", id));
@@ -231,97 +230,82 @@ fn width(c: Col) -> Column {
     }
 }
 
-/// The table in a horizontal scroll area, so every column stays reachable
-/// in a narrow window.
-fn table(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::logins::Row], h: f32) {
-    egui::ScrollArea::horizontal()
-        .id_salt("login-log-hscroll")
-        .show(ui, |ui| {
-            ui.set_min_width(1250.0);
-            table_inner(ui, d, page, h);
-        });
-}
-
-fn table_inner(ui: &mut egui::Ui, d: &mut LoginDraft, page: &[telepad_app::logins::Row], h: f32) {
-    let mut b = TableBuilder::new(ui)
-        .id_salt("login-log-table")
-        .striped(true)
-        .resizable(true)
-        .auto_shrink([false, false])
-        .max_scroll_height((h - 64.0).max(60.0))
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
-    for c in Col::ALL {
-        b = b.column(width(c));
-    }
-    let mut changed = false;
-    b.header(48.0, |mut h| {
-        for c in Col::ALL {
-            h.col(|ui| {
-                ui.vertical(|ui| {
-                    let arrow = match d.sort {
-                        Some((s, Dir::Asc)) if s == c => format!(" {}", icons::CARET_UP),
-                        Some((s, Dir::Desc)) if s == c => format!(" {}", icons::CARET_DOWN),
-                        None if c == Col::Time => format!(" {}", icons::CARET_DOWN),
-                        _ => String::new(),
-                    };
-                    // The whole title line of the header sorts (#137); the
-                    // filter box under it stays a text field.
-                    let line = ui
-                        .horizontal(|ui| {
-                            crate::widgets::cell_text(
-                                ui,
-                                RichText::new(format!("{}{arrow}", c.title())).strong(),
-                            );
-                            ui.add_space(ui.available_width());
-                        })
-                        .response;
-                    if ui
-                        .interact(line.rect, ui.scope_id().with(("sort", c.title())), egui::Sense::click())
-                        .on_hover_text("Click: ascending → descending → newest first")
-                        .clicked()
-                    {
-                        d.click(c);
+/// The table (#153 component) in a horizontal scroll area, so every column
+/// stays reachable in a narrow window; sort and filters stay in the draft.
+fn table(
+    ui: &mut egui::Ui,
+    d: &mut LoginDraft,
+    all: &[telepad_app::logins::Row],
+    page: std::ops::Range<usize>,
+    title: &str,
+) -> Vec<Msg> {
+    use crate::table::{self, Col as TCol, Controlled, Ev, Kind, Spec};
+    use telepad_app::grid::Dir as GDir;
+    let cols: Vec<TCol> = Col::ALL
+        .iter()
+        .map(|c| {
+            let t = TCol::new(c.title()).width(width(*c));
+            if *c == Col::Time {
+                t.tip("Click: ascending → descending → newest first")
+            } else {
+                t
+            }
+        })
+        .collect();
+    let sort = match d.sort {
+        Some((c, Dir::Asc)) => Some((c.index(), GDir::Asc)),
+        Some((c, Dir::Desc)) => Some((c.index(), GDir::Desc)),
+        None => Some((Col::Time.index(), GDir::Desc)),
+    };
+    let rows: Vec<usize> = page.collect();
+    let text = |r: usize, c: usize| all[r].cell(Col::ALL[c]);
+    let spec = Spec::new("login-log-table", title, &cols)
+        .kind(Kind::Fill)
+        .min_width(1250.0);
+    let mut filters = d.filters.clone();
+    let o = table::controlled(
+        ui,
+        &spec,
+        Controlled {
+            sort,
+            filters: Some(&mut filters[..]),
+            rows: &rows,
+            text: &text,
+        },
+        &mut |ui, ev| {
+            if let Ev::Cell { row, col } = ev {
+                let r = &all[row];
+                let c = Col::ALL[col];
+                let text = r.cell(c);
+                let rt = match (c, r.who) {
+                    (Col::Who, Who::ThisRead) => RichText::new(text).strong(),
+                    (Col::Fingerprint, _) => RichText::new(text).monospace().small(),
+                    (Col::KeyName, _) if text.is_empty() && !r.login.fingerprint.is_empty() => {
+                        RichText::new("unknown key").weak().italics()
                     }
-                    let f = ui.add(
-                        egui::TextEdit::singleline(d.filter_mut(c))
-                            .hint_text(icons::FUNNEL)
-                            .desired_width(f32::INFINITY),
-                    );
-                    if f.changed() {
-                        changed = true;
-                    }
-                    f.on_hover_text(
-                        "Filter: text = contains · =x equal · !x not equal · >x / <x \
-                         (numbers by value, times as text, e.g. >2026-11-20) · NULL empty · !NULL not empty",
-                    );
-                });
-            });
-        }
-    })
-    .body(|mut body| {
-        for r in page {
-            body.row(ROW, |mut row| {
-                for c in Col::ALL {
-                    row.col(|ui| {
-                        let text = r.cell(c);
-                        let rt = match (c, r.who) {
-                            (Col::Who, Who::ThisRead) => RichText::new(text).strong(),
-                            (Col::Fingerprint, _) => RichText::new(text).monospace().small(),
-                            (Col::KeyName, _) if text.is_empty() && !r.login.fingerprint.is_empty() => {
-                                RichText::new("unknown key").weak().italics()
-                            }
-                            _ => RichText::new(text),
-                        };
-                        let resp = ui.add(egui::Label::new(rt).truncate());
-                        if c == Col::From && r.login.port != 0 {
-                            resp.on_hover_text(format!("port {}", r.login.port));
-                        }
-                    });
+                    _ => RichText::new(text),
+                };
+                let resp = ui.add(egui::Label::new(rt).truncate().selectable(false));
+                if c == Col::From && r.login.port != 0 {
+                    resp.on_hover_text(format!("port {}", r.login.port));
                 }
-            });
-        }
-    });
-    if changed {
+            }
+        },
+    );
+    d.filters = filters;
+    if let Some(c) = o.sort {
+        d.click(Col::ALL[c]);
+    }
+    if o.filter_changed {
         d.pager.reset();
     }
+    let mut msgs = o.msgs;
+    if let Some(fmt) = o.export {
+        let cells: Vec<Vec<String>> = all
+            .iter()
+            .map(|r| Col::ALL.iter().map(|c| r.cell(*c)).collect())
+            .collect();
+        msgs.push(table::export_rows(title, &cols, cells, fmt));
+    }
+    msgs
 }

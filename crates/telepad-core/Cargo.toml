@@ -17,7 +17,9 @@ ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 hmac = "0.12"
 keyring = "4.2.0"
 mysql = { version = "28.0.4", default-features = false, features = ["minimal-rust"] }
+miniz_oxide = "0.8.9"
 p12-keystore = "0.4"
+pdf-writer = "0.15.0"
 p256 = { version = "0.13", features = ["pkcs8", "pem"] }
 p384 = { version = "0.13", features = ["pkcs8", "pem"] }
 pgp = "0.21.1"
@@ -38,6 +40,7 @@ sha2.workspace = true
 sha2_010 = { version = "0.10", package = "sha2" }
 ssh-key = { version = "0.6", features = ["std", "ed25519", "p256", "p384", "rsa", "encryption", "getrandom"] }
 thiserror.workspace = true
+ttf-parser = "0.25.1"
 ureq.workspace = true
 zeroize = "1"
 zip.workspace = true

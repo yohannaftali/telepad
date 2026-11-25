@@ -6,11 +6,17 @@ use eframe::egui::{self, Color32, RichText};
 use telepad_app::{Model, Msg, StackRow, docker_stacks};
 use telepad_core::model::Container;
 
-use super::docker::{container_menu, container_ports, manager_text, stack_controls};
+use super::docker::{container_table, manager_text, stack_controls};
 use crate::icons;
 use crate::widgets::*;
 
-pub fn docker_overview(ui: &mut egui::Ui, m: &Model, filter: &str, out: &mut Vec<Msg>) {
+pub fn docker_overview(
+    ui: &mut egui::Ui,
+    m: &Model,
+    filter: &str,
+    d: &mut telepad_app::Drafts,
+    out: &mut Vec<Msg>,
+) {
     let rows = docker_stacks(m, filter);
     let with_docker = m
         .hosts
@@ -54,12 +60,18 @@ pub fn docker_overview(ui: &mut egui::Ui, m: &Model, filter: &str, out: &mut Vec
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for row in &rows {
-                stack(ui, m, row, out);
+                stack(ui, m, row, d, out);
             }
         });
 }
 
-fn stack(ui: &mut egui::Ui, m: &Model, row: &StackRow<'_>, out: &mut Vec<Msg>) {
+fn stack(
+    ui: &mut egui::Ui,
+    m: &Model,
+    row: &StackRow<'_>,
+    d: &mut telepad_app::Drafts,
+    out: &mut Vec<Msg>,
+) {
     let (running, total) = (row.running(), row.containers.len());
     let color = if running == total {
         usage_color(0.0)
@@ -135,7 +147,7 @@ fn stack(ui: &mut egui::Ui, m: &Model, row: &StackRow<'_>, out: &mut Vec<Msg>) {
                 }
             });
             ui.indent(("docker-overview-body", row.name, i), |ui| {
-                containers(ui, row.name, i, &m.hosts[i].entry.alias, &cs, out);
+                container_table(ui, r, Some(i), &h.entry.alias, row.name, &cs, d, out);
             });
         }
     });
@@ -154,65 +166,4 @@ fn host_link(ui: &mut egui::Ui, m: &Model, i: usize, out: &mut Vec<Msg>) {
     if h.report.as_ref().is_some_and(|r| r.docker.is_podman()) {
         ui.label(RichText::new("(podman)").weak().small());
     }
-}
-
-fn containers(
-    ui: &mut egui::Ui,
-    stack: &str,
-    host: usize,
-    alias: &str,
-    cs: &[&Container],
-    out: &mut Vec<Msg>,
-) {
-    egui::Grid::new(("docker-overview", stack, host))
-        .striped(true)
-        .spacing([14.0, 4.0])
-        .show(ui, |ui| {
-            for t in [
-                "",
-                "Container",
-                "Image",
-                "Status",
-                "IP address",
-                "Host port → container",
-                "",
-            ] {
-                ui.label(RichText::new(t).strong());
-            }
-            ui.end_row();
-            for c in cs {
-                let dot = if c.running() {
-                    usage_color(0.0)
-                } else {
-                    Color32::GRAY
-                };
-                let (rect, _) =
-                    ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                ui.painter().circle_filled(rect.center(), 4.5, dot);
-                let mut n = RichText::new(&c.name).strong();
-                if c.is_nginx() {
-                    n = n.color(nginx_color());
-                } else if c.portainer_role().is_some() {
-                    n = n.color(portainer_color());
-                }
-                ui.label(n);
-                let image = c.short_image();
-                let resp = ui.label(RichText::new(&image).weak());
-                if image != c.image {
-                    resp.on_hover_text(&c.image);
-                }
-                ui.label(&c.status);
-                let ips: Vec<String> = c
-                    .networks
-                    .iter()
-                    .filter(|(_, ip)| !ip.is_empty())
-                    .map(|(n, ip)| format!("{ip} ({n})"))
-                    .collect();
-                ui.label(RichText::new(ips.join("\n")).monospace());
-                let (published, _) = container_ports(c);
-                ui.label(RichText::new(published).monospace());
-                container_menu(ui, c, host, alias, out);
-                ui.end_row();
-            }
-        });
 }

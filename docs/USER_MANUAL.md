@@ -210,6 +210,44 @@ and in menus the same meaning shows as red / yellow / green text.
 queries, the file window's path bars, the editor) works with the system clipboard:
 Ctrl+C / Ctrl+X / Ctrl+V (Cmd on macOS), in every window.
 
+### Tables
+
+Every table in Telepad works the same way (#153). There are two kinds: a **simple table**
+shows all its rows (Disks, Network, Ports in use, sensors, Docker containers, cluster
+tables, Groups / Clusters, Host Management, Authorized keys, My keys, the database lists);
+a **paged table** has the pager footer under it (the database Data grid, Log info).
+
+- **Sort:** click a column title: ascending, again descending, a third time back to the
+  table's own order. Numbers sort by value, also with a unit (`5%` before `40%`, `980 MiB`
+  before `1.5 GiB`, `5m ago` before `2h 5m ago`), addresses and names in natural order
+  (`192.0.2.9` before `192.0.2.10`), empty cells always last.
+- **Filter row:** a box above each column title. Text = contains (any case), `=x` equal,
+  `!x` not equal, `>x` / `<x` greater / less (numbers by value, units understood: `>50`
+  finds `75%`, `>1 GiB` finds `1.5 GiB`; dates as text, `>2026-11-20`), `NULL` empty,
+  `!NULL` has a value. Hover a box for the rules. The database grid applies its boxes on
+  Enter (on the server); the other tables filter while you type.
+- **Right-click a row** for its menu: first the table's own commands (e.g. the host menu
+  on the Hosts table, Edit / Set NULL / Copy value on the database grid, container actions
+  on Docker tables, Revoke on Authorized keys), then for every table:
+  - **Filter by *column*: *value*** puts the value of the cell you clicked into that
+    column's box (long values are shortened in the menu; disabled on an empty cell);
+  - **Clear All Filters** empties every box;
+  - **Export as CSV…**, **Export as Excel (.xlsx)…**, **Export as PDF…** save the table
+    to a file you choose (named `<table>-<date>-<time>.<ext>`, UTC);
+  - **Copy as JSON** puts the rows on the clipboard as a JSON array (one object per row,
+    keys = column titles).
+
+  Exports take **every row the filters let through, in the shown order, from all pages**,
+  not only the page on screen; columns that hold only buttons or icons are left out. CSV is
+  UTF-8 with a BOM (Excel shows accents and symbols) and cells that look like a formula get
+  a leading `'`; Excel files have a bold, frozen header with an autofilter and keep text as
+  text (never a formula); the PDF is A4 (landscape when the table is wide) with the header
+  on every page and page numbers. A PDF of more than 5000 rows asks first. The result (or
+  the error) shows in the status bar. Right-clicking a column title offers Clear All
+  Filters and the exports too.
+- In the **database Data grid**, Export as CSV / Excel opens the Export dialog (all
+  filtered rows from the server, #139); PDF and JSON take the rows loaded in the grid.
+
 ## Theme
 
 **☰ → Settings → Theme** switches between **System** (follows the Windows / macOS / desktop
@@ -330,6 +368,10 @@ search box has text, the handles are hidden and a hint above the table says what
   cursor; a click right on a border never sorts.
 - The header row stays in place while you scroll; when the columns are wider than the
   window, scroll sideways.
+- **Filter row and menu:** the boxes above the titles narrow the hosts by column (e.g.
+  `>80%` under CPU, `down` under the status column); the right-click menu ends with
+  Filter by, Clear All Filters, Export (CSV / Excel / PDF) and Copy as JSON — see
+  [Tables](#tables). Rows cannot be dragged while a box has text.
 
 The search box (in the Hosts and Docker / Podman page headers) filters both pages by host
 name, address, OS or container name.
@@ -447,7 +489,7 @@ The table (made-up example):
   *unknown key* (a key in another user's file, or one removed since).
 - **Newest first** by default. Click a header to sort ascending, again for descending, a
   third time for newest first again; empty cells stay last.
-- One **filter** box under each header: text = contains (any case), `=x` equal, `!x` not
+- One **filter** box above each column title: text = contains (any case), `=x` equal, `!x` not
   equal, `>x` / `<x` (numbers by value, times as text, e.g. `>2026-11-20`), `NULL` empty,
   `!NULL` not empty. **Clear filters** empties them all.
 - **Pager** (footer under the table, it stays visible while the rows scroll): *Record [21 - 40]
@@ -1317,7 +1359,7 @@ cannot reach the database address, the dialog says so.
 
 **Data tab**
 
-- **Filter boxes** under every column header (as in the Senar / wtbapp tables): text =
+- **Filter boxes** above every column title (as in the Senar / wtbapp tables): text =
   contains (any case), `=x` equal, `!x` not equal, `>x` / `<x` greater / less (numbers by
   value), `NULL` empty, `!NULL` has a value; Enter applies. Values are sent as quoted
   literals, never as SQL.

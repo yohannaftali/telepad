@@ -1118,6 +1118,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             );
         }
         Msg::Logins(lm) => fx.extend(logins(m, d, lm, now)),
+        Msg::Table(tm) => fx.extend(table_msg(m, now, tm)),
         Msg::Sets(sm) => {
             let loaded = matches!(sm, crate::sets::StMsg::Loaded(Ok(_)));
             fx.extend(crate::sets::update(m, &mut d.sets, sm, now, &mut |m, t| {
@@ -1986,6 +1987,47 @@ fn switch_to(
             now,
             format!("{running} file transfer(s) keep running in the background"),
         );
+    }
+}
+
+/// The table menu (#153): JSON to the clipboard, files through the save
+/// dialog; a PDF above [`crate::grid::PDF_ASK_ABOVE`] rows asks first.
+fn table_msg(m: &mut Model, now: Instant, tm: crate::grid::TableMsg) -> Vec<Effect> {
+    use crate::grid::{Format, PDF_ASK_ABOVE, TableMsg};
+    let export = |data: crate::grid::TableData, format: Format| match format {
+        Format::Json => {
+            let n = data.rows.len();
+            Effect::CopyText {
+                text: telepad_core::table_export::to_json(&data),
+                notice: format!("Copied {n} row{} as JSON", if n == 1 { "" } else { "s" }),
+            }
+        }
+        _ => Effect::ExportTable { data, format },
+    };
+    match tm {
+        TableMsg::Export { data, format } => {
+            if format == Format::Pdf && data.rows.len() > PDF_ASK_ABOVE {
+                m.table_ask = Some((data, format));
+                return vec![];
+            }
+            vec![export(data, format)]
+        }
+        TableMsg::Answer(yes) => match m.table_ask.take() {
+            Some((data, format)) if yes => vec![export(data, format)],
+            _ => vec![],
+        },
+        TableMsg::Exported(r) => {
+            let text = match r {
+                Ok((n, path)) => format!(
+                    "Exported {n} row{} to {}",
+                    if n == 1 { "" } else { "s" },
+                    path.display()
+                ),
+                Err(e) => e,
+            };
+            say(m, now, text);
+            vec![]
+        }
     }
 }
 

@@ -39,6 +39,8 @@ pub struct Model {
     pub fatal: Option<String>,
     /// Host id + alias waiting for delete confirmation.
     pub pending_delete: Option<(i64, String)>,
+    /// A PDF export above [`crate::grid::PDF_ASK_ABOVE`] rows waiting for Yes (#153).
+    pub table_ask: Option<(crate::grid::TableData, crate::grid::Format)>,
     /// Select this host id once the host list is reloaded (after a save).
     pub select_after_load: Option<i64>,
     pub import: Option<ImportDialog>,
@@ -178,6 +180,8 @@ pub struct Drafts {
     pub logins: std::collections::BTreeMap<crate::logins::LogId, crate::logins::LoginDraft>,
     /// Groups / Clusters pages and their host pages (#144, #145).
     pub sets: crate::sets::SetsDraft,
+    /// Sort, filter boxes and page of every table (#153), by table key.
+    pub tables: std::collections::BTreeMap<String, crate::grid::TableState>,
 }
 
 /// The Update Strategy page's form (#122). `paused` is not part of it (the
@@ -425,6 +429,7 @@ impl Default for Drafts {
             strategy: StrategyDraft::default(),
             logins: Default::default(),
             sets: Default::default(),
+            tables: Default::default(),
         }
     }
 }

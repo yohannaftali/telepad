@@ -79,6 +79,7 @@ pub fn draw(root: &mut egui::Ui, m: &Model, d: &mut Drafts, now: Instant) -> Vec
     import::paste_window(&ctx, d, &mut out);
     run_info::run_info_window(&ctx, d, &mut out);
     confirm::delete_confirm(&ctx, m, &mut out);
+    confirm::table_export_confirm(&ctx, m, &mut out);
     update_window::update_window(&ctx, m, d, &mut out);
     host_sync::host_sync_dialogs(&ctx, m, d, &mut out);
     workspaces::dialogs(&ctx, d, &mut out);
@@ -96,7 +97,7 @@ fn page(
     now: Instant,
 ) {
     match win {
-        Win::MyComputer => detail::local_page(ui, &m.local, &mut d.ports_nginx_only, out),
+        Win::MyComputer => detail::local_page(ui, &m.local, d, out),
         Win::Overview => {
             overview_toolbar(ui, d, out);
             // Group / Cluster columns and group order (#144, #145).
@@ -115,7 +116,7 @@ fn page(
                 let rows = overview::view_rows(m, &d.filter, d.sort, &view);
                 cards::cards(ui, m, &rows, out);
             } else {
-                overview::table(ui, m, &d.filter, d.sort, &view, out);
+                overview::table(ui, m, &d.filter, d.sort, &view, &mut d.tables, out);
             }
         }
         Win::Sets(kind) => sets::sets_page(ui, m, d, kind, out),
@@ -123,7 +124,8 @@ fn page(
         Win::Docker => {
             ui.horizontal(|ui| search_box(ui, d));
             ui.add_space(4.0);
-            docker_overview::docker_overview(ui, m, &d.filter, out);
+            let filter = d.filter.clone();
+            docker_overview::docker_overview(ui, m, &filter, d, out);
         }
         Win::Host => {
             let Some(i) = m.selected else { return };
@@ -132,18 +134,10 @@ fn page(
                 .and_then(|j| m.hosts.get(j))
                 .map(|o| o.entry.alias.clone());
             let paused = m.host_paused(h);
-            detail::detail(
-                ui,
-                h,
-                i,
-                shown_by.as_deref(),
-                paused,
-                &mut d.ports_nginx_only,
-                out,
-            );
+            detail::detail(ui, h, i, shown_by.as_deref(), paused, d, out);
         }
-        Win::Kube => cluster::cluster_page(ui, m, telepad_app::ClusterKind::Kube, out),
-        Win::Swarm => cluster::cluster_page(ui, m, telepad_app::ClusterKind::Swarm, out),
+        Win::Kube => cluster::cluster_page(ui, m, telepad_app::ClusterKind::Kube, d, out),
+        Win::Swarm => cluster::cluster_page(ui, m, telepad_app::ClusterKind::Swarm, d, out),
         Win::HostSync => host_sync::host_sync_page(ui, m, d, out),
         Win::Keys => keys::keys_page(ui, m, d, out),
         Win::Strategy => strategy::strategy_page(ui, m, d, out),

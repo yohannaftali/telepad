@@ -2,7 +2,7 @@
 //! file (right), copy / edit / delete per host or all at once, then Apply.
 
 use eframe::egui::{self, Color32, RichText};
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use telepad_app::hostsync::{HostSync, HostSyncDraft, HsMsg, Mode, Pending, Side};
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::config::{Access, HostEntry};
@@ -45,7 +45,7 @@ pub fn host_sync_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Ve
     let Some(hs) = &m.host_sync else {
         return;
     };
-    body(ui, m, hs, &mut d.host_sync, out);
+    body(ui, m, hs, &mut d.host_sync, &mut d.tables, out);
 }
 
 /// Its host form and apply preview, over the workspace.
@@ -57,7 +57,14 @@ pub fn host_sync_dialogs(ctx: &egui::Context, m: &Model, d: &mut Drafts, out: &m
     preview_window(ctx, hs, out);
 }
 
-fn body(ui: &mut egui::Ui, m: &Model, hs: &HostSync, d: &mut HostSyncDraft, out: &mut Vec<Msg>) {
+fn body(
+    ui: &mut egui::Ui,
+    m: &Model,
+    hs: &HostSync,
+    d: &mut HostSyncDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     ui.columns(2, |cols| {
         cols[0].horizontal(|ui| {
             ui.label(RichText::new(il(icons::DATABASE, "Telepad database")).strong());
@@ -328,120 +335,158 @@ fn body(ui: &mut egui::Ui, m: &Model, hs: &HostSync, d: &mut HostSyncDraft, out:
         .as_ref()
         .map(|f| f.shared_aliases())
         .unwrap_or_default();
-    TableBuilder::new(ui)
-        .id_salt("host-sync-table")
-        .striped(true)
-        .resizable(true)
-        .auto_shrink([false, false])
-        .column(Column::exact(28.0))
-        .column(Column::initial(330.0).at_least(160.0).clip(true))
-        .column(Column::exact(150.0))
-        .column(Column::initial(330.0).at_least(160.0).clip(true))
-        .column(Column::remainder().at_least(120.0).clip(true))
-        .header(ROW, |mut h| {
-            h.col(|ui| {
-                let all = !rows.is_empty() && rows.iter().all(|r| d.selected.contains(&r.alias));
-                let mut on = all;
-                if ui
-                    .checkbox(&mut on, "")
-                    .on_hover_text("Select all shown")
-                    .changed()
-                {
-                    for r in &rows {
-                        if on {
-                            d.selected.insert(r.alias.clone());
-                        } else {
-                            d.selected.remove(&r.alias);
+    use crate::table::{self, Col, Ev, Kind, Spec};
+    let all = !rows.is_empty() && rows.iter().all(|r| d.selected.contains(&r.alias));
+    let mut on = all;
+    if ui
+        .checkbox(&mut on, format!("Select all {} shown", rows.len()))
+        .changed()
+    {
+        for r in &rows {
+            if on {
+                d.selected.insert(r.alias.clone());
+            } else {
+                d.selected.remove(&r.alias);
+            }
+        }
+    }
+    let state_text = |r: &Row| match r.state {
+        RowState::Same => "Same",
+        RowState::Different => "Different",
+        RowState::OnlyTelepad => "Only in Telepad",
+        RowState::OnlyConfig => "Only in the config",
+    };
+    let side_text = |h: &Option<HostEntry>| {
+        h.as_ref()
+            .map_or(String::new(), |h| format!("{} {}", h.alias, summary(h)))
+    };
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| {
+            vec![
+                String::new(),
+                side_text(&r.db),
+                state_text(r).to_string(),
+                side_text(&r.cfg),
+                r.diff.join(", "),
+            ]
+        })
+        .collect();
+    let cols = [
+        Col::action("").width(Column::exact(28.0)),
+        Col::new(il(icons::DATABASE, "Telepad"))
+            .width(Column::initial(330.0).at_least(160.0).clip(true)),
+        Col::new("State").width(Column::exact(150.0)),
+        Col::new(il(icons::DESKTOP, "Config"))
+            .width(Column::initial(330.0).at_least(160.0).clip(true)),
+        Col::new("Differences").remainder(),
+    ];
+    let spec = Spec::new("host-sync-table", "Host Management", &cols)
+        .kind(Kind::Fill)
+        .row_h(ROW);
+    let o = table::show(
+        ui,
+        &spec,
+        table::state_in(tables, "host-sync"),
+        &cells,
+        |ui, ev| match ev {
+            Ev::Cell { row, col } => {
+                let r = rows[row];
+                match col {
+                    0 => {
+                        let mut on = d.selected.contains(&r.alias);
+                        if ui.checkbox(&mut on, "").changed() {
+                            if on {
+                                d.selected.insert(r.alias.clone());
+                            } else {
+                                d.selected.remove(&r.alias);
+                            }
                         }
+                    }
+                    1 => side_cell(ui, hs, r, Side::Telepad, false, out),
+                    2 => state_cell(ui, hs, r, &shared, out),
+                    3 => side_cell(ui, hs, r, Side::Config, r.cfg_read_only, out),
+                    _ => {
+                        ui.add(
+                            egui::Label::new(RichText::new(&cells[row][4]).color(amber()))
+                                .truncate()
+                                .selectable(false),
+                        );
                     }
                 }
-            });
-            h.col(|ui| {
-                ui.strong(il(icons::DATABASE, "Telepad"));
-            });
-            h.col(|ui| {
-                ui.strong("");
-            });
-            h.col(|ui| {
-                ui.strong(il(icons::DESKTOP, "Config"));
-            });
-            h.col(|ui| {
-                ui.strong("Differences");
-            });
-        })
-        .body(|body| {
-            body.rows(ROW, rows.len(), |mut row| {
-                let r = rows[row.index()];
-                let conflict = hs.conflicts.contains(&r.alias);
-                row.col(|ui| {
-                    let mut on = d.selected.contains(&r.alias);
-                    if ui.checkbox(&mut on, "").changed() {
-                        if on {
-                            d.selected.insert(r.alias.clone());
-                        } else {
-                            d.selected.remove(&r.alias);
-                        }
-                    }
-                });
-                row.col(|ui| side_cell(ui, hs, r, Side::Telepad, false, out));
-                row.col(|ui| {
-                    ui.horizontal(|ui| {
-                        let (icon, color, tip) = match r.state {
-                            RowState::Same => (icons::EQUALS, green(), "Same on both sides"),
-                            RowState::Different => (icons::NOT_EQUALS, amber(), "Different"),
-                            RowState::OnlyTelepad => (
-                                icons::DATABASE,
-                                ui.visuals().weak_text_color(),
-                                "Only in Telepad",
-                            ),
-                            RowState::OnlyConfig => (
-                                icons::DESKTOP,
-                                ui.visuals().weak_text_color(),
-                                "Only in the config",
-                            ),
-                        };
-                        ui.colored_label(if conflict { red() } else { color }, icon)
-                            .on_hover_text(tip);
-                        let to_cfg = r.db.is_some()
-                            && r.state != RowState::Same
-                            && !r.cfg_read_only
-                            && !shared.contains(&r.alias);
-                        if ui
-                            .add_enabled(to_cfg, egui::Button::new(icons::ARROW_RIGHT).small())
-                            .on_hover_text("Copy Telepad's host to the config")
-                            .clicked()
-                        {
-                            send(out, HsMsg::ToConfig(vec![r.alias.clone()]));
-                        }
-                        let to_tp = r.cfg.is_some() && r.state != RowState::Same;
-                        if ui
-                            .add_enabled(to_tp, egui::Button::new(icons::ARROW_LEFT).small())
-                            .on_hover_text("Copy the config's host to Telepad")
-                            .clicked()
-                        {
-                            send(out, HsMsg::ToTelepad(vec![r.alias.clone()]));
-                        }
-                        if pending(hs, &r.alias)
-                            && ui
-                                .add(egui::Button::new(icons::UNDO).small())
-                                .on_hover_text("Undo the pending changes of this host")
-                                .clicked()
-                        {
-                            send(out, HsMsg::Undo(vec![r.alias.clone()]));
-                        }
-                    });
-                });
-                row.col(|ui| side_cell(ui, hs, r, Side::Config, r.cfg_read_only, out));
-                row.col(|ui| {
-                    let text = if r.diff.is_empty() {
-                        String::new()
+            }
+            Ev::Menu { row, .. } => {
+                let r = rows[row];
+                let on = d.selected.contains(&r.alias);
+                if ui.button(if on { "Unselect" } else { "Select" }).clicked() {
+                    if on {
+                        d.selected.remove(&r.alias);
                     } else {
-                        r.diff.join(", ")
-                    };
-                    ui.label(RichText::new(text).color(amber()));
-                });
-            });
-        });
+                        d.selected.insert(r.alias.clone());
+                    }
+                    ui.close();
+                }
+            }
+            Ev::HeaderMenu => {}
+        },
+    );
+    out.extend(o.msgs);
+}
+
+/// The middle cell: same / different, copy either way, undo.
+fn state_cell(
+    ui: &mut egui::Ui,
+    hs: &HostSync,
+    r: &Row,
+    shared: &std::collections::BTreeSet<String>,
+    out: &mut Vec<Msg>,
+) {
+    let conflict = hs.conflicts.contains(&r.alias);
+    ui.horizontal(|ui| {
+        let (icon, color, tip) = match r.state {
+            RowState::Same => (icons::EQUALS, green(), "Same on both sides"),
+            RowState::Different => (icons::NOT_EQUALS, amber(), "Different"),
+            RowState::OnlyTelepad => (
+                icons::DATABASE,
+                ui.visuals().weak_text_color(),
+                "Only in Telepad",
+            ),
+            RowState::OnlyConfig => (
+                icons::DESKTOP,
+                ui.visuals().weak_text_color(),
+                "Only in the config",
+            ),
+        };
+        ui.colored_label(if conflict { red() } else { color }, icon)
+            .on_hover_text(tip);
+        let to_cfg = r.db.is_some()
+            && r.state != RowState::Same
+            && !r.cfg_read_only
+            && !shared.contains(&r.alias);
+        if ui
+            .add_enabled(to_cfg, egui::Button::new(icons::ARROW_RIGHT).small())
+            .on_hover_text("Copy Telepad's host to the config")
+            .clicked()
+        {
+            send(out, HsMsg::ToConfig(vec![r.alias.clone()]));
+        }
+        let to_tp = r.cfg.is_some() && r.state != RowState::Same;
+        if ui
+            .add_enabled(to_tp, egui::Button::new(icons::ARROW_LEFT).small())
+            .on_hover_text("Copy the config's host to Telepad")
+            .clicked()
+        {
+            send(out, HsMsg::ToTelepad(vec![r.alias.clone()]));
+        }
+        if pending(hs, &r.alias)
+            && ui
+                .add(egui::Button::new(icons::UNDO).small())
+                .on_hover_text("Undo the pending changes of this host")
+                .clicked()
+        {
+            send(out, HsMsg::Undo(vec![r.alias.clone()]));
+        }
+    });
 }
 
 /// The row (or a renamed Telepad host's old alias) has pending changes.

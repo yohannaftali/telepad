@@ -20,7 +20,13 @@ fn name(k: &LocalKey) -> String {
         .unwrap_or_else(|| k.path.display().to_string())
 }
 
-pub fn my_keys(ui: &mut egui::Ui, m: &Model, d: &mut MyKeysDraft, out: &mut Vec<Msg>) {
+pub fn my_keys(
+    ui: &mut egui::Ui,
+    m: &Model,
+    d: &mut MyKeysDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     let mine = &m.my_keys;
     ui.horizontal_wrapped(|ui| {
         if act_button(ui, true, Act::Add, &il(icons::PLUS, "Generate key pair…"))
@@ -102,39 +108,56 @@ pub fn my_keys(ui: &mut egui::Ui, m: &Model, d: &mut MyKeysDraft, out: &mut Vec<
                 }
             }
         });
-    egui::ScrollArea::vertical()
-        .id_salt("mykeys-list")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            egui::Grid::new("mykeys-grid")
-                .striped(true)
-                .num_columns(5)
-                .show(ui, |ui| {
-                    for h in ["File", "Type", "Format", "Passphrase", "Comment"] {
-                        ui.label(RichText::new(h).strong());
-                    }
-                    ui.end_row();
-                    for k in keys {
-                        let selected = d.selected.as_ref() == Some(&k.path);
+    {
+        use crate::table::{self, Col, Ev, Kind, Spec};
+        let cols = [
+            Col::new("File"),
+            Col::new("Type"),
+            Col::new("Format"),
+            Col::new("Passphrase"),
+            Col::new("Comment").remainder(),
+        ];
+        let cells: Vec<Vec<String>> = keys
+            .iter()
+            .map(|k| {
+                vec![
+                    name(k),
+                    k.kind.clone(),
+                    k.format.map(|f| f.label()).unwrap_or("—").to_string(),
+                    if k.encrypted { "yes" } else { "no" }.to_string(),
+                    k.comment.clone(),
+                ]
+            })
+            .collect();
+        let selected = keys
+            .iter()
+            .position(|k| d.selected.as_ref() == Some(&k.path));
+        let spec = Spec::new("mykeys", "My keys", &cols)
+            .kind(Kind::Fill)
+            .selected(selected);
+        let st = table::state_in(tables, "mykeys");
+        let o = table::show(ui, &spec, st, &cells, |ui, ev| {
+            if let Ev::Cell { row, col } = ev {
+                let k = &keys[row];
+                match col {
+                    0 => {
                         let mut text = format!("{} {}", icons::KEY, name(k));
                         if k.error.is_some() || k.permission_warning.is_some() {
                             text.push_str(&format!(" {}", icons::WARNING));
                         }
-                        if ui
-                            .selectable_label(selected, text)
-                            .on_hover_text(k.path.display().to_string())
-                            .clicked()
-                        {
-                            mk(out, MkMsg::Select(k.path.clone()));
-                        }
-                        ui.label(&k.kind);
-                        ui.label(k.format.map(|f| f.label()).unwrap_or("—"));
-                        ui.label(if k.encrypted { "yes" } else { "no" });
-                        ui.label(RichText::new(&k.comment).weak());
-                        ui.end_row();
+                        ui.add(egui::Label::new(text).truncate().selectable(false))
+                            .on_hover_text(k.path.display().to_string());
                     }
-                });
+                    4 => table::weak(ui, &k.comment),
+                    c => table::text(ui, &cells[row][c]),
+                }
+            }
         });
+        if let Some((r, _)) = o.clicked {
+            mk(out, MkMsg::Select(keys[r].path.clone()));
+        }
+        out.extend(o.msgs);
+    }
     generate_dialog(ui.ctx(), d, out);
     convert_dialog(ui.ctx(), d, out);
 }

@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use eframe::egui::{self, Color32, RichText};
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use telepad_app::editor::EdMsg;
 use telepad_app::files::{
     DialogKind, FileDraft, FileSession, FmMsg, Mode, OpKind, Pane, Side, SortCol, Status, TState,
@@ -82,7 +82,7 @@ pub fn files_page(
     let Some(dr) = d.files.get_mut(&s.id) else {
         return;
     };
-    window(ui, s, dr, focused, out, now);
+    window(ui, s, dr, &mut d.tables, focused, out, now);
     ask(ui, s, dr, out);
     dialog(ui, s, dr, out);
     sync_dialog(ui, s, dr, out);
@@ -93,6 +93,7 @@ fn window(
     ui: &mut egui::Ui,
     s: &FileSession,
     d: &mut FileDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
     focused: bool,
     out: &mut Vec<Msg>,
     now: Instant,
@@ -184,7 +185,7 @@ fn window(
         .resizable(true)
         .default_size(190.0f32.min(max_queue))
         .max_size(max_queue)
-        .show(ui, |ui| queue(ui, s, d, out, now));
+        .show(ui, |ui| queue(ui, s, d, tables, out, now));
     egui::CentralPanel::default().show(ui, |ui| {
         if let Some(e) = &s.error {
             ui.colored_label(red(), format!("{} {e}", icons::X_CIRCLE));
@@ -273,8 +274,16 @@ fn window(
             telepad_core::files::compare::compare(&s.local.entries, &s.remote.entries, ci)
         });
         ui.columns(2, |cols| {
-            pane(&mut cols[0], s, d, Side::Local, marks.as_ref(), out);
-            pane(&mut cols[1], s, d, Side::Remote, marks.as_ref(), out);
+            pane(&mut cols[0], s, d, tables, Side::Local, marks.as_ref(), out);
+            pane(
+                &mut cols[1],
+                s,
+                d,
+                tables,
+                Side::Remote,
+                marks.as_ref(),
+                out,
+            );
         });
     });
 }
@@ -285,6 +294,7 @@ fn pane(
     ui: &mut egui::Ui,
     s: &FileSession,
     d: &mut FileDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
     side: Side,
     marks: Option<&Marks>,
     out: &mut Vec<Msg>,
@@ -389,7 +399,7 @@ fn pane(
         .inner_margin(2.0)
         .fill(ui.visuals().extreme_bg_color);
     let (_, dropped) = ui.dnd_drop_zone::<DragFiles, ()>(frame, |ui| {
-        table(ui, s, d, side, p, &rows, has_up, marks, out);
+        table(ui, s, d, tables, side, &rows, has_up, marks, out);
     });
     if let Some(drag) = dropped
         && drag.window == id
@@ -406,179 +416,166 @@ fn pane(
     }
 }
 
+/// The parent folder ("..") row.
+const UP: usize = usize::MAX;
+
 #[allow(clippy::too_many_arguments)]
 fn table(
     ui: &mut egui::Ui,
     s: &FileSession,
     d: &mut FileDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
     side: Side,
-    p: &Pane,
     rows: &[Entry],
     has_up: bool,
     marks: Option<&Marks>,
     out: &mut Vec<Msg>,
 ) {
+    use crate::table::{self, Col as TCol, Controlled, Ev, Kind as TKind, Spec};
     let id = s.id;
+    let p: &Pane = s.pane(side);
     let ci = cfg!(windows) || s.host.is_local();
     let remote = side == Side::Remote && !s.host.is_local();
-    let n = rows.len() + usize::from(has_up);
-    let height = ui.available_height().max(120.0);
-    let mut tb = TableBuilder::new(ui)
-        .id_salt(("files-table", id, side))
-        .striped(true)
-        .resizable(true)
-        .auto_shrink([false, false])
-        .max_scroll_height(height)
-        // The whole row selects, opens and drags (#130); cells are plain text.
-        .sense(egui::Sense::click_and_drag())
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::initial(190.0).at_least(100.0).clip(true))
-        .column(Column::initial(70.0).clip(true))
-        .column(Column::initial(108.0).clip(true));
-    // The last column fills the pane, so a click anywhere on a row hits it (#130).
-    tb = if remote {
-        tb.column(Column::initial(76.0).clip(true))
-            .column(Column::remainder().at_least(60.0).clip(true))
-    } else {
-        tb.column(Column::remainder().at_least(76.0).clip(true))
-    };
-    let arrow = |col: SortCol| {
-        if p.sort == col {
-            if p.descending {
-                format!(" {}", icons::CARET_DOWN)
-            } else {
-                format!(" {}", icons::CARET_UP)
-            }
-        } else {
-            String::new()
-        }
-    };
-    let mut cols = vec![
+    let mut sorts = vec![
         (SortCol::Name, "Name"),
         (SortCol::Size, "Size"),
         (SortCol::Modified, "Modified (UTC)"),
         (SortCol::Permissions, "Permissions"),
     ];
     if remote {
-        cols.push((SortCol::Owner, "Owner"));
+        sorts.push((SortCol::Owner, "Owner"));
     }
-    tb.header(ROW, |mut h| {
-        for (col, title) in &cols {
-            h.col(|ui| {
-                cell(
-                    ui,
-                    RichText::new(format!("{title}{}", arrow(*col))).strong(),
-                );
-                // The whole header cell sorts, not only its text (#137).
-                if crate::widgets::cell_click(ui, ("sort", *title)).clicked() {
-                    send(
-                        out,
-                        FmMsg::Sort {
-                            id,
-                            side,
-                            col: *col,
-                        },
-                    );
-                }
-            });
-        }
-    })
-    .body(|body| {
-        let order: Vec<&str> = rows.iter().map(|e| e.name.as_str()).collect();
-        body.rows(ROW, n, |mut row| {
-            let i = row.index();
-            if has_up && i == 0 {
-                row.set_selected(d.parent_selected.contains(&side));
-                row.col(|ui| {
-                    cell(ui, format!("{} ..", icons::FOLDER));
-                });
-                for _ in 1..cols.len() {
-                    row.col(|_| {});
-                }
-                let r = row.response();
-                if r.double_clicked() {
-                    send(out, FmMsg::Up { id, side });
-                } else if r.clicked() {
-                    d.active = Some(side);
-                    d.click_parent(side);
-                }
-                return;
-            }
-            let e = &rows[i - usize::from(has_up)];
-            let selected = d.selected(side).contains(&e.name);
-            row.set_selected(selected);
-            row.col(|ui| {
-                let icon = match (e.is_dir(), e.kind) {
-                    (true, _) => icons::FOLDER,
-                    (false, Kind::Link) => icons::ARROW_RIGHT,
-                    _ => icons::INFO,
-                };
-                let mark = marks.and_then(|m| m.get(&compare::key(&e.name, ci)));
-                let mut t = RichText::new(format!("{icon} {}", e.name));
-                if e.hidden {
-                    t = t.weak();
-                }
-                match mark {
-                    Some(m) => {
-                        let (dot, colour) = mark_style(*m, side);
-                        cell(ui, RichText::new(dot).color(colour));
-                        let r = ui.add(
-                            egui::Label::new(t.color(colour))
-                                .truncate()
-                                .selectable(false),
-                        );
-                        r.on_hover_text(m.title());
-                    }
-                    None => cell(ui, t),
-                }
-            });
-            row.col(|ui| {
-                if !e.is_dir() {
-                    cell(ui, human_size(e.size));
-                }
-            });
-            row.col(|ui| {
-                cell(ui, RichText::new(time_text(e.mtime)).monospace().small());
-            });
-            row.col(|ui| {
-                cell(ui, RichText::new(perm_text(e.perm)).monospace().small());
-            });
-            if remote {
-                row.col(|ui| {
-                    cell(ui, e.owner.as_str());
-                });
-            }
-            // One response for the whole row: click (select), double-click
-            // (open), drag (copy), right-click (menu).
-            let name_resp = row.response();
-            if name_resp.drag_started() {
-                let names: Vec<String> = if selected {
-                    d.selected(side).iter().cloned().collect()
+    let mut cols: Vec<TCol> = vec![
+        TCol::new("Name").width(Column::initial(190.0).at_least(100.0).clip(true)),
+        TCol::new("Size").width(Column::initial(70.0).clip(true)),
+        TCol::new("Modified (UTC)").width(Column::initial(108.0).clip(true)),
+    ];
+    // The last column fills the pane, so a click anywhere on a row hits it (#130).
+    if remote {
+        cols.push(TCol::new("Permissions").width(Column::initial(76.0).clip(true)));
+        cols.push(TCol::new("Owner").width(Column::remainder().at_least(60.0).clip(true)));
+    } else {
+        cols.push(TCol::new("Permissions").width(Column::remainder().at_least(76.0).clip(true)));
+    }
+    let cells: Vec<Vec<String>> = rows
+        .iter()
+        .map(|e| {
+            let mut v = vec![
+                e.name.clone(),
+                if e.is_dir() {
+                    String::new()
                 } else {
-                    vec![e.name.clone()]
-                };
-                egui::DragAndDrop::set_payload(
-                    &name_resp.ctx,
-                    DragFiles {
-                        window: id,
-                        from: side,
-                        names,
-                    },
-                );
+                    human_size(e.size)
+                },
+                time_text(e.mtime),
+                perm_text(e.perm),
+            ];
+            if remote {
+                v.push(e.owner.clone());
             }
-            if name_resp.dragged() {
-                name_resp.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            v
+        })
+        .collect();
+    let key = format!("files:{id}:{side:?}");
+    let st = tables.entry(key).or_default();
+    if st.filters.len() < cols.len() {
+        st.filters.resize(cols.len(), String::new());
+    }
+    let shown: Vec<usize> = (0..rows.len())
+        .filter(|&i| telepad_app::grid::row_matches(&cells[i], &st.filters))
+        .collect();
+    let order: Vec<&str> = shown.iter().map(|&i| rows[i].name.as_str()).collect();
+    let src: Vec<usize> = has_up
+        .then_some(UP)
+        .into_iter()
+        .chain(shown.iter().copied())
+        .collect();
+    let text = |r: usize, c: usize| {
+        if r == UP {
+            String::new()
+        } else {
+            cells[r][c].clone()
+        }
+    };
+    let sort = sorts.iter().position(|(c, _)| *c == p.sort).map(|i| {
+        (
+            i,
+            if p.descending {
+                telepad_app::grid::Dir::Desc
+            } else {
+                telepad_app::grid::Dir::Asc
+            },
+        )
+    });
+    let side_name = match side {
+        Side::Local => "This computer".to_string(),
+        Side::Remote => s.host.alias.clone(),
+    };
+    let title = format!("Files {side_name} {}", p.path);
+    let selected_names = d.selected(side).clone();
+    let parent_sel = d.parent_selected.contains(&side);
+    let is_sel = |r: usize| {
+        if r == UP {
+            parent_sel
+        } else {
+            selected_names.contains(&rows[r].name)
+        }
+    };
+    let spec = Spec::new(("files-table", id, side), &title, &cols)
+        .kind(TKind::Fill)
+        .row_h(ROW)
+        .drag()
+        .selected_set(&is_sel);
+    let mut filters = std::mem::take(&mut st.filters);
+    let o = table::controlled(
+        ui,
+        &spec,
+        Controlled {
+            sort,
+            filters: Some(&mut filters[..]),
+            rows: &src,
+            text: &text,
+        },
+        &mut |ui, ev| match ev {
+            Ev::Cell { row: UP, col } => {
+                if col == 0 {
+                    cell(ui, format!("{} ..", icons::FOLDER));
+                }
             }
-            if name_resp.secondary_clicked() && !selected {
-                // Right-click acts on the row under the mouse.
-                let sel = d.selected_mut(side);
-                sel.clear();
-                sel.insert(e.name.clone());
+            Ev::Cell { row, col } => {
+                let e = &rows[row];
+                match col {
+                    0 => {
+                        let icon = match (e.is_dir(), e.kind) {
+                            (true, _) => icons::FOLDER,
+                            (false, Kind::Link) => icons::ARROW_RIGHT,
+                            _ => icons::INFO,
+                        };
+                        let mark = marks.and_then(|m| m.get(&compare::key(&e.name, ci)));
+                        let mut t = RichText::new(format!("{icon} {}", e.name));
+                        if e.hidden {
+                            t = t.weak();
+                        }
+                        match mark {
+                            Some(m) => {
+                                let (dot, colour) = mark_style(*m, side);
+                                cell(ui, RichText::new(dot).color(colour));
+                                let r = ui.add(
+                                    egui::Label::new(t.color(colour))
+                                        .truncate()
+                                        .selectable(false),
+                                );
+                                r.on_hover_text(m.title());
+                            }
+                            None => cell(ui, t),
+                        }
+                    }
+                    1 => cell(ui, cells[row][1].as_str()),
+                    2 | 3 => cell(ui, RichText::new(&cells[row][col]).monospace().small()),
+                    _ => cell(ui, e.owner.as_str()),
+                }
             }
-            if name_resp.secondary_clicked() {
-                d.active = Some(side);
-            }
-            name_resp.context_menu(|ui| {
+            Ev::Menu { row, .. } if row != UP => {
                 let (copy, label) = match (side, s.host.is_local()) {
                     (Side::Local, false) => (Side::Local, "Upload"),
                     (Side::Remote, false) => (Side::Remote, "Download"),
@@ -601,46 +598,106 @@ fn table(
                         FmMsg::Copy {
                             id,
                             from: side,
-                            names: d.selected(side).iter().cloned().collect(),
+                            names: selected_names.iter().cloned().collect(),
                         },
                     );
                     ui.close();
                 }
                 ui.separator();
                 toolbar_menu(ui, s, d, side, out);
-            });
-            if name_resp.double_clicked() {
-                if e.is_dir() {
-                    send(
-                        out,
-                        FmMsg::Enter {
-                            id,
+            }
+            _ => {}
+        },
+    );
+    st.filters = filters;
+    if let Some(c) = o.sort
+        && let Some((col, _)) = sorts.get(c)
+    {
+        send(
+            out,
+            FmMsg::Sort {
+                id,
+                side,
+                col: *col,
+            },
+        );
+    }
+    if let Some(fmt) = o.export {
+        out.push(table::export_msg(&title, &cols, &cells, &shown, fmt));
+    }
+    out.extend(o.msgs);
+    // One response per row: click (select), double-click (open), drag
+    // (copy), right-click (menu).
+    for (r, resp) in &o.rows {
+        if *r == UP {
+            if resp.double_clicked() {
+                send(out, FmMsg::Up { id, side });
+            } else if resp.clicked() {
+                d.active = Some(side);
+                d.click_parent(side);
+            }
+            continue;
+        }
+        let e = &rows[*r];
+        let selected = d.selected(side).contains(&e.name);
+        if resp.drag_started() {
+            let names: Vec<String> = if selected {
+                d.selected(side).iter().cloned().collect()
+            } else {
+                vec![e.name.clone()]
+            };
+            egui::DragAndDrop::set_payload(
+                &resp.ctx,
+                DragFiles {
+                    window: id,
+                    from: side,
+                    names,
+                },
+            );
+        }
+        if resp.dragged() {
+            resp.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        }
+        if resp.secondary_clicked() {
+            if !selected {
+                // Right-click acts on the row under the mouse.
+                let sel = d.selected_mut(side);
+                sel.clear();
+                sel.insert(e.name.clone());
+            }
+            d.active = Some(side);
+        }
+        if resp.double_clicked() {
+            if e.is_dir() {
+                send(
+                    out,
+                    FmMsg::Enter {
+                        id,
+                        side,
+                        name: e.name.clone(),
+                    },
+                );
+            } else if e.kind != Kind::Other {
+                d.active = Some(side);
+                send(
+                    out,
+                    FmMsg::Editor {
+                        id,
+                        msg: EdMsg::Open {
                             side,
                             name: e.name.clone(),
                         },
-                    );
-                } else if e.kind != Kind::Other {
-                    d.active = Some(side);
-                    send(
-                        out,
-                        FmMsg::Editor {
-                            id,
-                            msg: EdMsg::Open {
-                                side,
-                                name: e.name.clone(),
-                            },
-                        },
-                    );
-                }
-            } else if name_resp.clicked() {
-                d.active = Some(side);
-                let (ctrl, shift) = name_resp
-                    .ctx
-                    .input(|i| (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift));
-                d.click_row(side, &e.name, &order, ctrl, shift);
+                    },
+                );
             }
-        });
-    });
+        } else if resp.clicked() {
+            d.active = Some(side);
+            let (ctrl, shift) = resp
+                .ctx
+                .input(|i| (i.modifiers.command || i.modifiers.ctrl, i.modifiers.shift));
+            d.click_row(side, &e.name, &order, ctrl, shift);
+        }
+    }
 }
 
 /// Text in a file-list cell: not selectable and not clickable itself, so the
@@ -649,7 +706,14 @@ fn cell(ui: &mut egui::Ui, t: impl Into<egui::WidgetText>) {
     ui.add(egui::Label::new(t).truncate().selectable(false));
 }
 
-fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>, now: Instant) {
+fn queue(
+    ui: &mut egui::Ui,
+    s: &FileSession,
+    d: &mut FileDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+    now: Instant,
+) {
     let id = s.id;
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
@@ -733,7 +797,7 @@ fn queue(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Ms
         }
     });
     if d.show_history {
-        history_view(ui, s, d, out);
+        history_view(ui, s, d, tables, out);
         return;
     }
     egui::ScrollArea::vertical()
@@ -1280,7 +1344,13 @@ fn local_folder(e: &HistEntry) -> Option<String> {
 }
 
 /// History tab of the transfer panel (#100).
-fn history_view(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut Vec<Msg>) {
+fn history_view(
+    ui: &mut egui::Ui,
+    s: &FileSession,
+    d: &mut FileDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     let id = s.id;
     ui.horizontal_wrapped(|ui| {
         ui.add(
@@ -1329,50 +1399,111 @@ fn history_view(ui: &mut egui::Ui, s: &FileSession, d: &mut FileDraft, out: &mut
         }
     });
     let shown = history_shown(s, d);
-    egui::ScrollArea::vertical()
-        .id_salt(("files-history-scroll", id))
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            if shown.is_empty() {
-                ui.label(RichText::new("Nothing here yet: transfers, new / rename / delete / permissions and editor saves are listed as they happen.").weak());
-            }
-            for e in shown.iter().rev() {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new(when(e.at)).weak().small().monospace());
-                    let icon = match e.kind {
-                        HistKind::Transfer if e.title.starts_with("Upload") => icons::ARROW_RIGHT,
-                        HistKind::Transfer => icons::ARROW_LEFT,
-                        _ => icons::FOLDER,
-                    };
-                    ui.label(format!("{icon} {}", e.title)).on_hover_text(&e.detail);
-                    let (text, color) = outcome_text(e.outcome);
-                    ui.colored_label(color, text);
-                    let mut info = Vec::new();
-                    if let Some(b) = e.bytes.filter(|b| *b > 0) {
-                        info.push(human_size(b));
+    if shown.is_empty() {
+        ui.label(RichText::new("Nothing here yet: transfers, new / rename / delete / permissions and editor saves are listed as they happen.").weak());
+        return;
+    }
+    use crate::table::{self, Col as TCol, Ev, Kind as TKind, Spec};
+    // Newest first, as before.
+    let list: Vec<_> = shown.iter().rev().collect();
+    let cols = [
+        TCol::new("Time (UTC)"),
+        TCol::new("Action").initial(260.0),
+        TCol::new("Outcome"),
+        TCol::new("Size"),
+        TCol::new("Duration"),
+        TCol::new("Method"),
+        TCol::new("Error").remainder(),
+        TCol::action(""),
+    ];
+    let cells: Vec<Vec<String>> = list
+        .iter()
+        .map(|e| {
+            vec![
+                when(e.at),
+                e.title.clone(),
+                outcome_text(e.outcome).0.to_string(),
+                e.bytes
+                    .filter(|b| *b > 0)
+                    .map(human_size)
+                    .unwrap_or_default(),
+                e.duration_ms
+                    .map(|ms| format!("{:.1} s", ms as f64 / 1000.0))
+                    .unwrap_or_default(),
+                e.method.clone(),
+                first_line(&e.error).to_string(),
+                String::new(),
+            ]
+        })
+        .collect();
+    let title = format!("File history {}", s.host.alias);
+    let spec = Spec::new(("files-history", id), &title, &cols)
+        .kind(TKind::Fill)
+        .row_h(ROW);
+    let o = table::show(
+        ui,
+        &spec,
+        table::state_in(tables, format!("files-history:{id}")),
+        &cells,
+        |ui, ev| {
+            if let Ev::Cell { row, col } = ev {
+                let e = list[row];
+                match col {
+                    0 => {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&cells[row][0]).weak().small().monospace(),
+                            )
+                            .selectable(false),
+                        );
                     }
-                    if let Some(ms) = e.duration_ms {
-                        info.push(format!("{:.1} s", ms as f64 / 1000.0));
+                    1 => {
+                        let icon = match e.kind {
+                            HistKind::Transfer if e.title.starts_with("Upload") => {
+                                icons::ARROW_RIGHT
+                            }
+                            HistKind::Transfer => icons::ARROW_LEFT,
+                            _ => icons::FOLDER,
+                        };
+                        ui.add(
+                            egui::Label::new(format!("{icon} {}", e.title))
+                                .truncate()
+                                .selectable(false),
+                        )
+                        .on_hover_text(&e.detail);
                     }
-                    if !e.method.is_empty() {
-                        info.push(e.method.clone());
+                    2 => {
+                        let (text, color) = outcome_text(e.outcome);
+                        ui.colored_label(color, text);
                     }
-                    ui.label(RichText::new(info.join(" · ")).weak().small());
-                    if !e.error.is_empty() {
-                        ui.label(RichText::new(first_line(&e.error)).color(red()).small())
+                    6 => {
+                        if !e.error.is_empty() {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&cells[row][6]).color(red()).small(),
+                                )
+                                .truncate()
+                                .selectable(false),
+                            )
                             .on_hover_text(&e.error);
+                        }
                     }
-                    if let Some(dir) = local_folder(e)
-                        && ui
-                            .small_button(icons::FOLDER)
-                            .on_hover_text(format!("Show {dir} in the file manager"))
-                            .clicked()
-                    {
-                        send(out, FmMsg::HistoryOpenFolder { id, path: dir });
+                    7 => {
+                        if let Some(dir) = local_folder(e)
+                            && ui
+                                .small_button(icons::FOLDER)
+                                .on_hover_text(format!("Show {dir} in the file manager"))
+                                .clicked()
+                        {
+                            send(out, FmMsg::HistoryOpenFolder { id, path: dir });
+                        }
                     }
-                });
+                    c => table::weak(ui, &cells[row][c]),
+                }
             }
-        });
+        },
+    );
+    out.extend(o.msgs);
 }
 
 fn first_line(s: &str) -> &str {

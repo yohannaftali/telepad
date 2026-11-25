@@ -4,7 +4,7 @@
 //! error message, a long OS name) can widen its column.
 
 use eframe::egui::{self, RichText};
-use egui_extras::{Column, TableBuilder, TableRow};
+use egui_extras::Column;
 use telepad_app::{
     HostState, Model, Msg, Sort, SortKey, can_reorder, fullest_disk, host_flags, hottest,
     overview_rows,
@@ -266,23 +266,119 @@ fn wanted(
     want.iter().map(|w| w + CELL_PAD).collect()
 }
 
+/// The text of a host's cells (filter row, Filter by, exports), in column
+/// order.
+pub fn host_cells(m: &Model, i: usize, extra: &[SetKind]) -> Vec<String> {
+    let h = &m.hosts[i];
+    let paused = m.host_paused(h);
+    let status = if h.error.is_some() {
+        "down"
+    } else if h.report.is_some() {
+        "up"
+    } else if paused {
+        "paused"
+    } else {
+        "not checked"
+    };
+    let mut v = vec![
+        status.to_string(),
+        h.entry.alias.clone(),
+        h.entry.note.clone(),
+        h.entry.hostname.clone(),
+    ];
+    match &h.report {
+        Some(r) => {
+            let flags = host_flags(r);
+            v.push(r.os_pretty.clone());
+            v.push(
+                flags
+                    .iter()
+                    .map(|f| f.short.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            v.push(
+                r.cpu_usage_pct
+                    .map(|c| format!("{c:.0}%"))
+                    .unwrap_or_default(),
+            );
+            v.push(
+                r.memory
+                    .as_ref()
+                    .map(|mem| format!("{} / {}", human_kb(mem.used_kb()), human_kb(mem.total_kb)))
+                    .unwrap_or_default(),
+            );
+            v.push(
+                fullest_disk(r)
+                    .map(|d| format!("{} {:.0}%", d.mount, d.used_pct()))
+                    .unwrap_or_default(),
+            );
+            v.push(hottest(r).map(|t| format!("{t:.0}°C")).unwrap_or_default());
+            v.push(docker_text(r).unwrap_or_default());
+        }
+        None => {
+            let msg = if let Some(e) = &h.error {
+                e.clone()
+            } else if h.loading {
+                "loading…".into()
+            } else if paused {
+                "paused".into()
+            } else {
+                "queued".into()
+            };
+            v.push(msg);
+            v.extend(std::iter::repeat_n(String::new(), 6));
+        }
+    }
+    for kind in extra {
+        v.push(h.entry.set(*kind).to_string());
+    }
+    v.push(ago(h.updated));
+    v
+}
+
 /// A hosts table: the Hosts page, or a group / cluster page (#144, #145).
+/// Built on the table component (#153): the sort stays the Hosts page's own
+/// (`Msg::SortBy`), the filter row and menu come from the component.
 pub fn table(
     ui: &mut egui::Ui,
     m: &Model,
     filter: &str,
     sort: Sort,
     view: &TableView,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
     out: &mut Vec<Msg>,
 ) {
-    let rows = view_rows(m, filter, sort, view);
-    // Dragging rows changes the inventory order: only on the full list.
-    let reorder = view.only.is_none() && !view.by_group && can_reorder(filter, false, sort);
-    let accent = ui.visuals().selection.bg_fill;
+    use crate::table::{self as tc, Col as TCol, Controlled, Ev, Kind, Spec};
+    let all = view_rows(m, filter, sort, view);
+    let st = tables.entry(format!("hosts:{}", view.salt)).or_default();
     let cols = columns(view.extra);
+    let n = cols.len();
+    if st.filters.len() < n {
+        st.filters.resize(n, String::new());
+    }
+    let cells: Vec<(usize, Vec<String>)> = all
+        .iter()
+        .map(|&i| (i, host_cells(m, i, view.extra)))
+        .collect();
+    let rows: Vec<usize> = cells
+        .iter()
+        .filter(|(_, c)| telepad_app::grid::row_matches(c, &st.filters))
+        .map(|(i, _)| *i)
+        .collect();
+    let text_of = |i: usize, c: usize| {
+        cells
+            .iter()
+            .find(|(h, _)| *h == i)
+            .and_then(|(_, v)| v.get(c).cloned())
+            .unwrap_or_default()
+    };
+    // Dragging rows changes the inventory order: only on the full list.
+    let reorder =
+        view.only.is_none() && !view.by_group && can_reorder(filter, false, sort) && !st.filtered();
+    let accent = ui.visuals().selection.bg_fill;
     let layout_id = egui::Id::unique("overview-layout").with((view.salt, cols.len()));
     let mut lay: Layout = ui.data(|d| d.get_temp(layout_id)).unwrap_or_default();
-    let n = cols.len();
     lay.manual.resize(n, None);
     let gap = ui.spacing().item_spacing.x;
     let in_header = |p: egui::Pos2| lay.header.is_some_and(|h| h.expand(6.0).contains(p));
@@ -344,98 +440,102 @@ pub fn table(
         lay.widths = w;
         lay.widths.clone()
     };
-    let mut header_rects = vec![egui::Rect::NOTHING; n];
-    let mut auto_fit = false;
-    // The table scrolls vertically itself; this adds horizontal scrolling
-    // when the columns are wider than the window.
-    // Labels in the table must not take clicks: the whole row opens the host
-    // (left) and its menu (right), and highlights on hover (#83).
-    ui.style_mut().interaction.selectable_labels = false;
-    egui::ScrollArea::horizontal()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            let mut table = TableBuilder::new(ui)
-                .id_salt(("overview", view.salt, lay.key))
-                .striped(true)
-                .resizable(true)
-                // Rows highlight on hover and open the host on click (#83).
-                .sense(egui::Sense::click())
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .auto_shrink([false, false]);
-            let last = n - 1;
-            for (i, (_, _, _, min)) in cols.iter().enumerate() {
-                let col = if i == 0 {
-                    Column::exact(widths[i].max(*min))
-                } else if i == last {
-                    // Takes what is left, so rounding never leaves a gap.
-                    Column::remainder().at_least(*min).clip(true)
-                } else {
-                    Column::initial(widths[i]).at_least(*min).clip(true)
-                };
-                table = table.column(col);
+    let last = n - 1;
+    let tcols: Vec<TCol> = cols
+        .iter()
+        .enumerate()
+        .map(|(i, &(title, key, _, min))| {
+            let width = if i == 0 {
+                Column::exact(widths[i].max(min))
+            } else if i == last {
+                // Takes what is left, so rounding never leaves a gap.
+                Column::remainder().at_least(min).clip(true)
+            } else {
+                Column::initial(widths[i]).at_least(min).clip(true)
+            };
+            let (shown, name) = if title.is_empty() {
+                (icons::DOT, "status")
+            } else {
+                (title, title)
+            };
+            let c = TCol::new(shown).named(if title.is_empty() { "Status" } else { title }).width(width);
+            if key.is_some() {
+                c.tip(format!(
+                    "Click to sort by {name} (again to reverse, a third time for inventory order). Columns fit the page by themselves; drag a border to set a width, double-click it to go back to automatic."
+                ))
+            } else {
+                // Group / Cluster: not sortable.
+                c.no_sort()
             }
-            table
-                .header(ROW_HEIGHT, |mut header| {
-                    for (c, &(title, key, _, _)) in cols.iter().enumerate() {
-                        let (_, r) = header.col(|ui| {
-                            let Some(key) = key else {
-                                // Group / Cluster: not sortable.
-                                crate::widgets::cell_text(ui, RichText::new(title).strong());
-                                return;
-                            };
-                            let name = if title.is_empty() { "status" } else { title };
-                            crate::widgets::cell_text(
-                                ui,
-                                RichText::new(header_text(title, Some(key), sort)).strong(),
-                            );
-                            // The whole header cell sorts (#137).
-                            let resp = crate::widgets::cell_click(ui, ("sort", c))
-                                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                .on_hover_text(format!(
-                                    "Click to sort by {name} (again to reverse, a third time for inventory order). Columns fit the page by themselves; drag a border to set a width, double-click it to go back to automatic."
-                                ));
-                            // Near the right edge is the column border (resize,
-                            // double-click), not a sort.
-                            let edge = ui.max_rect().right() - 8.0;
-                            let on_border = resp
-                                .interact_pointer_pos()
-                                .is_some_and(|p| p.x >= edge);
-                            if resp.clicked() && !on_border {
-                                out.push(Msg::SortBy(key));
-                            }
-                            resp.context_menu(|ui| {
-                                if ui.button("Auto-fit columns").clicked() {
-                                    auto_fit = true;
-                                    ui.close();
-                                }
-                            });
-                        });
-                        header_rects[c] = r.rect;
-                    }
-                })
-                .body(|body| {
-                    body.rows(ROW_HEIGHT, rows.len(), |mut row| {
-                        let i = rows[row.index()];
-                        host_row(
-                            &mut row,
-                            i,
-                            &m.hosts[i],
-                            m.host_paused(&m.hosts[i]),
-                            reorder,
-                            view.extra,
-                        );
-                        let resp = row.response();
-                        if resp.clicked() {
-                            out.push(Msg::Select(Some(i)));
-                        }
-                        // SSH, Files, databases, edit… on right-click (#83).
-                        resp.context_menu(|ui| host_menu(ui, m, i, out));
-                        if reorder {
-                            drop_target(&row.response(), i, accent, out);
-                        }
-                    });
-                });
-        });
+        })
+        .collect();
+    let dir = cols.iter().enumerate().find_map(|(c, (_, k, _, _))| {
+        k.and_then(|k| sort.direction(k)).map(|desc| {
+            (
+                c,
+                if desc {
+                    telepad_app::grid::Dir::Desc
+                } else {
+                    telepad_app::grid::Dir::Asc
+                },
+            )
+        })
+    });
+    let title = match view.only {
+        Some((kind, "")) => format!("Hosts - {}", kind.none_name()),
+        Some((_, name)) => format!("Hosts - {name}"),
+        None => "Hosts".to_string(),
+    };
+    let min_w: f32 = widths.iter().sum::<f32>() + gap * n as f32;
+    let spec = Spec::new(("overview", view.salt, lay.key), &title, &tcols)
+        .kind(Kind::Fill)
+        .row_h(ROW_HEIGHT)
+        .min_width(min_w);
+    let mut auto_fit = false;
+    let mut filters = std::mem::take(&mut st.filters);
+    let o = tc::controlled(
+        ui,
+        &spec,
+        Controlled {
+            sort: dir,
+            filters: Some(&mut filters[..]),
+            rows: &rows,
+            text: &text_of,
+        },
+        &mut |ui, ev| match ev {
+            Ev::Cell { row: i, col } => {
+                host_cell(ui, m, i, reorder, view.extra, col);
+            }
+            // SSH, Files, databases, edit… on right-click (#83).
+            Ev::Menu { row: i, .. } => host_menu(ui, m, i, out),
+            Ev::HeaderMenu => {
+                if ui.button("Auto-fit columns").clicked() {
+                    auto_fit = true;
+                    ui.close();
+                }
+            }
+        },
+    );
+    st.filters = filters;
+    if let Some(c) = o.sort
+        && let Some(key) = cols[c].1
+    {
+        out.push(Msg::SortBy(key));
+    }
+    if let Some((i, _)) = o.clicked {
+        out.push(Msg::Select(Some(i)));
+    }
+    if reorder {
+        for (i, resp) in &o.rows {
+            drop_target(resp, *i, accent, out);
+        }
+    }
+    if let Some(fmt) = o.export {
+        let data: Vec<Vec<String>> = rows.iter().map(|&i| text_row(&cells, i)).collect();
+        out.push(tc::export_rows(&title, &tcols, data, fmt));
+    }
+    out.extend(o.msgs);
+    let header_rects = o.header;
     lay.left = header_rects.iter().map(|r| r.left()).collect();
     lay.seen = (0..n)
         .map(|c| match lay.left.get(c + 1) {
@@ -455,31 +555,52 @@ pub fn table(
     ui.data_mut(|d| d.insert_temp(layout_id, lay));
 }
 
-fn host_row(
-    row: &mut TableRow<'_, '_>,
-    i: usize,
-    h: &HostState,
-    paused: bool,
-    grip: bool,
-    extra: &[SetKind],
-) {
-    row.col(|ui| {
-        if grip {
-            grip_handle(ui, i);
+fn text_row(cells: &[(usize, Vec<String>)], i: usize) -> Vec<String> {
+    cells
+        .iter()
+        .find(|(h, _)| *h == i)
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default()
+}
+
+/// One cell of a host row.
+fn host_cell(ui: &mut egui::Ui, m: &Model, i: usize, grip: bool, extra: &[SetKind], col: usize) {
+    let h = &m.hosts[i];
+    let paused = m.host_paused(h);
+    let last = COLUMNS.len() + extra.len() - 1;
+    match col {
+        0 => {
+            if grip {
+                grip_handle(ui, i);
+            }
+            status_dot(ui, h);
         }
-        status_dot(ui, h);
-    });
-    // Plain text: the whole row opens the host on click and its menu on
-    // right-click, also over the name.
-    row.col(|ui| {
-        ui.label(RichText::new(&h.entry.alias).strong());
-    });
-    row.col(|ui| clipped(ui, RichText::new(&h.entry.note).italics()));
-    row.col(|ui| clipped(ui, RichText::new(&h.entry.hostname)));
-    match &h.report {
-        Some(r) => report_cells(row, h, r),
-        None => {
-            row.col(|ui| {
+        // Plain text: the whole row opens the host on click and its menu on
+        // right-click, also over the name.
+        1 => {
+            ui.label(RichText::new(&h.entry.alias).strong());
+        }
+        2 => clipped(ui, RichText::new(&h.entry.note).italics()),
+        3 => clipped(ui, RichText::new(&h.entry.hostname)),
+        c if c == last => {
+            if paused {
+                ui.label(
+                    RichText::new(icons::label(icons::PAUSE, &ago(h.updated)))
+                        .color(usage_color(75.0)),
+                )
+                .on_hover_text("Updates paused for this host (right-click → Resume updates)");
+            } else {
+                ui.label(RichText::new(ago(h.updated)).weak());
+            }
+        }
+        c if c >= COLUMNS.len() - 1 => {
+            if let Some(kind) = extra.get(c - (COLUMNS.len() - 1)) {
+                clipped(ui, RichText::new(h.entry.set(*kind)));
+            }
+        }
+        c => match &h.report {
+            Some(r) => report_cell(ui, h, r, c),
+            None if c == 4 => {
                 let known = h
                     .known
                     .as_ref()
@@ -496,80 +617,74 @@ fn host_row(
                     RichText::new(format!("queued{known}")).weak()
                 };
                 clipped(ui, msg);
-            });
-            for _ in 0..6 {
-                row.col(|_| {});
             }
-        }
+            None => {}
+        },
     }
-    for kind in extra {
-        row.col(|ui| clipped(ui, RichText::new(h.entry.set(*kind))));
-    }
-    row.col(|ui| {
-        if paused {
-            ui.label(
-                RichText::new(icons::label(icons::PAUSE, &ago(h.updated))).color(usage_color(75.0)),
-            )
-            .on_hover_text("Updates paused for this host (right-click → Resume updates)");
-        } else {
-            ui.label(RichText::new(ago(h.updated)).weak());
-        }
-    });
 }
 
-fn report_cells(row: &mut TableRow<'_, '_>, h: &HostState, r: &HostReport) {
-    row.col(|ui| {
-        icons::os_logo(ui, host_os(h), 16.0);
-        clipped(ui, RichText::new(&r.os_pretty));
-    });
-    row.col(|ui| {
-        let flags = host_flags(r);
-        let gap = ui.spacing().item_spacing.x;
-        let full: f32 = flags.iter().map(|f| text_w(ui, chip_text(f)) + gap).sum();
-        if full <= ui.available_width() + 1.0 {
-            flag_chips(ui, &flags);
-        } else {
-            // Not enough room for the labels: the coloured icons only, so no
-            // flag is cut off; all details on hover.
-            for f in &flags {
-                ui.label(RichText::new(flag_icon(f.kind)).color(severity_color(f.severity)));
+fn report_cell(ui: &mut egui::Ui, h: &HostState, r: &HostReport, col: usize) {
+    match col {
+        4 => {
+            icons::os_logo(ui, host_os(h), 16.0);
+            clipped(ui, RichText::new(&r.os_pretty));
+        }
+        5 => {
+            let flags = host_flags(r);
+            let gap = ui.spacing().item_spacing.x;
+            let full: f32 = flags.iter().map(|f| text_w(ui, chip_text(f)) + gap).sum();
+            if full <= ui.available_width() + 1.0 {
+                flag_chips(ui, &flags);
+            } else {
+                // Not enough room for the labels: the coloured icons only, so no
+                // flag is cut off; all details on hover.
+                let all = flags
+                    .iter()
+                    .map(|f| f.detail.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let r = ui
+                    .horizontal(|ui| {
+                        for f in &flags {
+                            ui.label(
+                                RichText::new(flag_icon(f.kind)).color(severity_color(f.severity)),
+                            );
+                        }
+                    })
+                    .response;
+                r.on_hover_text(all);
             }
-            let all = flags
-                .iter()
-                .map(|f| f.detail.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            crate::widgets::cell_click(ui, "flags").on_hover_text(all);
         }
-    });
-    row.col(|ui| match r.cpu_usage_pct {
-        Some(c) => bar(ui, c, format!("{c:.0}%"), ui.available_width()),
-        None => dash(ui),
-    });
-    row.col(|ui| match &r.memory {
-        Some(mem) => {
-            let text = format!("{} / {}", human_kb(mem.used_kb()), human_kb(mem.total_kb));
-            bar(ui, mem.used_pct(), text, ui.available_width());
+        6 => match r.cpu_usage_pct {
+            Some(c) => bar(ui, c, format!("{c:.0}%"), ui.available_width()),
+            None => dash(ui),
+        },
+        7 => match &r.memory {
+            Some(mem) => {
+                let text = format!("{} / {}", human_kb(mem.used_kb()), human_kb(mem.total_kb));
+                bar(ui, mem.used_pct(), text, ui.available_width());
+            }
+            None => dash(ui),
+        },
+        8 => match fullest_disk(r) {
+            Some(d) => {
+                let text = format!("{} {:.0}%", d.mount, d.used_pct());
+                bar(ui, d.used_pct(), text, ui.available_width());
+            }
+            None => dash(ui),
+        },
+        9 => {
+            match hottest(r) {
+                Some(t) => ui.colored_label(temp_color(t), format!("{t:.0}°C")),
+                None => ui.label(RichText::new("n/a").weak()),
+            };
         }
-        None => dash(ui),
-    });
-    row.col(|ui| match fullest_disk(r) {
-        Some(d) => {
-            let text = format!("{} {:.0}%", d.mount, d.used_pct());
-            bar(ui, d.used_pct(), text, ui.available_width());
-        }
-        None => dash(ui),
-    });
-    row.col(|ui| {
-        match hottest(r) {
-            Some(t) => ui.colored_label(temp_color(t), format!("{t:.0}°C")),
-            None => ui.label(RichText::new("n/a").weak()),
-        };
-    });
-    row.col(|ui| match docker_text(r) {
-        Some(t) => clipped(ui, RichText::new(t)),
-        None => dash(ui),
-    });
+        10 => match docker_text(r) {
+            Some(t) => clipped(ui, RichText::new(t)),
+            None => dash(ui),
+        },
+        _ => {}
+    }
 }
 
 /// "12/14 running · agent" (with "(podman)"), or None when Docker is not available.

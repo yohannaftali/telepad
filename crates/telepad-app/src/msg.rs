@@ -273,6 +273,8 @@ pub enum Msg {
     Logins(crate::logins::LgMsg),
     /// Groups / clusters (#144, #145).
     Sets(crate::sets::StMsg),
+    /// Table menu exports (#153).
+    Table(crate::grid::TableMsg),
 }
 
 /// Work for the runtime. Effects are the only way to reach the database, ssh,
@@ -406,6 +408,17 @@ pub enum Effect {
     CollectLocal,
     /// Errors come back as [`Msg::Notice`].
     OpenLocalTerminal,
+    /// Save dialog, then write the table on a thread (#153) →
+    /// [`crate::grid::TableMsg::Exported`] (nothing if cancelled).
+    ExportTable {
+        data: crate::grid::TableData,
+        format: crate::grid::Format,
+    },
+    /// Put text on the clipboard, then show `notice` in the status bar.
+    CopyText {
+        text: String,
+        notice: String,
+    },
 }
 
 /// One host of a ping round (#122). `port`: also try the SSH port when ping

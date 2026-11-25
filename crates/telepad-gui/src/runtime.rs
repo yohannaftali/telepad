@@ -633,6 +633,29 @@ impl Runtime {
                     Err(e) => e,
                 }))
             }
+            Effect::CopyText { text, notice } => {
+                self.ctx.copy_text(text);
+                Some(Msg::Notice(notice))
+            }
+            Effect::ExportTable { data, format } => {
+                use telepad_core::table_export::{self as te};
+                let now = unix_now();
+                let path = rfd::FileDialog::new()
+                    .set_title(format!("Export {} as {}", data.title, format.title()))
+                    .set_file_name(te::file_name(&data.title, now, format))
+                    .add_filter(format.title(), &[format.ext()])
+                    .save_file()?;
+                let fonts = pdf_fonts();
+                self.background(move || {
+                    let generated = format!("Telepad · {} UTC", history::format_utc(now));
+                    let refs: Vec<&[u8]> = fonts.iter().map(|f| f.as_ref()).collect();
+                    let r = te::render(&data, format, &refs, &generated)
+                        .and_then(|b| te::write(&path, &b))
+                        .map(|()| (data.rows.len(), path));
+                    Msg::Table(telepad_app::grid::TableMsg::Exported(r))
+                });
+                None
+            }
             Effect::OpenUrl(url) => platform::open_url(&url).err().map(Msg::Notice),
             Effect::Relaunch => match relaunch() {
                 Ok(()) => {
@@ -1850,6 +1873,20 @@ impl Runtime {
     }
 }
 
+/// Fonts a PDF export embeds (#153), in fallback order: egui's text font,
+/// Hack (arrows, symbols), emoji, Phosphor icons.
+fn pdf_fonts() -> Vec<Arc<[u8]>> {
+    let defs = crate::icons::definitions();
+    ["Ubuntu-Light", "Hack", "NotoEmoji-Regular", "phosphor"]
+        .iter()
+        .filter_map(|k| defs.font_data.get(*k))
+        .map(|f| {
+            let b: &[u8] = (*f.font).as_ref();
+            Arc::from(b)
+        })
+        .collect()
+}
+
 /// Ping every host (no SSH), [`WORKERS`] at a time; (alias, ms or no reply).
 /// Ping round (#122); hosts marked `port` (down at the last look) also get the
 /// TCP check of their SSH port when ping stays silent (#125).
@@ -2138,4 +2175,42 @@ fn export(ws: &Workspace, path: &Path) -> Result<usize, String> {
     };
     std::fs::write(path, text).map_err(|e| e.to_string())?;
     Ok(inv.hosts.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use telepad_core::table_export::{Format, TableData, render};
+
+    /// A PDF export (#153) embeds the UI's fonts: text, arrows and degree
+    /// signs all have a glyph. `TELEPAD_TEST_PDF_OUT` keeps the file to look at.
+    #[test]
+    fn pdf_export_embeds_the_ui_fonts() {
+        let fonts = super::pdf_fonts();
+        assert!(fonts.len() >= 2, "text font and Hack at least");
+        let t = TableData {
+            title: "Ports in use on web-01".into(),
+            columns: vec![
+                "Port".into(),
+                "Bind".into(),
+                "→ Container".into(),
+                "Temp".into(),
+            ],
+            rows: (0..60)
+                .map(|i| {
+                    vec![
+                        (8000 + i).to_string(),
+                        format!("192.0.2.{i}"),
+                        "443/tcp".into(),
+                        format!("{}.5 °C", 30 + i % 40),
+                    ]
+                })
+                .collect(),
+        };
+        let refs: Vec<&[u8]> = fonts.iter().map(|f| f.as_ref()).collect();
+        let b = render(&t, Format::Pdf, &refs, "Telepad · test").unwrap();
+        assert!(b.starts_with(b"%PDF-"));
+        if let Ok(p) = std::env::var("TELEPAD_TEST_PDF_OUT") {
+            std::fs::write(p, &b).unwrap();
+        }
+    }
 }

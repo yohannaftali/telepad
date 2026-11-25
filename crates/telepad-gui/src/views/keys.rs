@@ -44,9 +44,9 @@ pub fn keys_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
     });
     ui.separator();
     match k.tab {
-        KeysTab::ByServer => by_server(ui, m, k, out),
-        KeysTab::ByKey => by_key(ui, m, k, out),
-        KeysTab::MyKeys => super::mykeys::my_keys(ui, m, &mut k.mine, out),
+        KeysTab::ByServer => by_server(ui, m, k, &mut d.tables, out),
+        KeysTab::ByKey => by_key(ui, m, k, &mut d.tables, out),
+        KeysTab::MyKeys => super::mykeys::my_keys(ui, m, &mut k.mine, &mut d.tables, out),
         KeysTab::AddRevoke => {
             egui::ScrollArea::vertical()
                 .id_salt("keys-window")
@@ -70,7 +70,13 @@ fn hit(filter: &str, texts: &[&str]) -> bool {
 }
 
 /// Left: SSH hosts with their key count; right: the chosen host's keys.
-fn by_server(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {
+fn by_server(
+    ui: &mut egui::Ui,
+    m: &Model,
+    k: &mut KeysDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     let (ok, bad) = (usage_color(10.0), usage_color(95.0));
     let running = m.key_run.as_ref().is_some_and(|r| r.running());
     filter_box(ui, k, "server");
@@ -167,119 +173,180 @@ fn by_server(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>
                         .small(),
                     );
                 }
-                egui::ScrollArea::vertical()
-                    .id_salt(("ak-keys", &alias))
-                    .auto_shrink(false)
-                    .show(ui, |ui| {
-                        // Keys under their group heading (the `#` line above
-                        // them, #85), groups in file order, "No group" last.
-                        let mut groups: Vec<Option<&str>> = Vec::new();
-                        for ak in &h.keys {
-                            let g = ak.group.as_deref();
-                            if g.is_some() && !groups.contains(&g) {
-                                groups.push(g);
-                            }
-                        }
-                        if h.keys.iter().any(|k| k.group.is_none()) {
-                            groups.push(None);
-                        }
-                        let grouped = groups.iter().any(Option::is_some);
-                        for g in groups {
-                            if grouped {
-                                ui.add_space(4.0);
-                                ui.label(
-                                    RichText::new(il(icons::KEY, g.unwrap_or("No group"))).strong(),
-                                );
-                            }
-                            for ak in h.keys.iter().filter(|k| k.group.as_deref() == g) {
-                                let fp = ak.key.fingerprint();
-                                key_row(
-                                    ui,
-                                    ak,
-                                    (
-                                        h.login.contains(&fp),
-                                        m.telepad_key.get(&alias) == Some(&fp),
-                                    ),
-                                    &alias,
-                                    running,
-                                    ok,
-                                    out,
-                                );
-                            }
-                        }
-                    });
+                server_keys(ui, m, h, &alias, running, ok, tables, out);
             }
         }
     });
 }
 
-/// One key of one server, with its Revoke shortcut.
-fn key_row(
+/// Why a key cannot be revoked from here, if it cannot.
+fn revoke_block(login: bool, supported: bool, running: bool) -> Option<&'static str> {
+    if login {
+        Some("Telepad logs in to this host with this key: revoking it would lock Telepad out")
+    } else if !supported {
+        Some("Telepad does not manage this key type")
+    } else if running {
+        Some("A key run is in progress")
+    } else {
+        None
+    }
+}
+
+/// The keys of one server as a table (#153): group (#85), type, comment,
+/// fingerprint, options, Telepad's use; Revoke per row.
+#[allow(clippy::too_many_arguments)]
+fn server_keys(
     ui: &mut egui::Ui,
-    ak: &AuthKey,
-    // (Telepad logs in with it, sshd accepted it for Telepad's last read)
-    (login, used): (bool, bool),
+    m: &Model,
+    h: &telepad_core::authorized_keys::HostKeys,
     alias: &str,
     running: bool,
     ok: egui::Color32,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
     out: &mut Vec<Msg>,
 ) {
-    ui.group(|ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(&ak.key.kind).strong());
-            ui.label(RichText::new(if ak.key.comment.is_empty() {
-                "(no comment)"
-            } else {
-                &ak.key.comment
-            }));
-            if login {
-                ui.colored_label(ok, format!("{} Telepad logs in with this key", icons::LOCK));
+    use crate::table::{self, Col, Ev, Kind, Spec};
+    let keys: Vec<&AuthKey> = h.keys.iter().collect();
+    let flags: Vec<(bool, bool)> = keys
+        .iter()
+        .map(|ak| {
+            let fp = ak.key.fingerprint();
+            (h.login.contains(&fp), m.telepad_key.get(alias) == Some(&fp))
+        })
+        .collect();
+    let cols = [
+        Col::new("Group"),
+        Col::new("Type"),
+        Col::new("Comment"),
+        Col::new("Fingerprint").initial(260.0),
+        Col::new("Options"),
+        Col::new("Telepad"),
+        Col::action(""),
+    ];
+    let cells: Vec<Vec<String>> = keys
+        .iter()
+        .zip(&flags)
+        .map(|(ak, (login, used))| {
+            let mut t = Vec::new();
+            if *login {
+                t.push("logs in with this key");
             }
-            if used {
-                ui.colored_label(ok, format!("{} last used by Telepad", icons::CHECK))
-                    .on_hover_text("sshd accepted this key for Telepad's login (seen on the host's Log info page)");
+            if *used {
+                t.push("last used");
             }
+            vec![
+                ak.group.clone().unwrap_or_default(),
+                ak.key.kind.clone(),
+                ak.key.comment.clone(),
+                ak.key.fingerprint(),
+                ak.options.clone(),
+                t.join(", "),
+                String::new(),
+            ]
+        })
+        .collect();
+    let title = format!("Authorized keys on {alias}");
+    let spec = Spec::new(("ak-keys", alias), &title, &cols).kind(Kind::Fill);
+    let revoke = |ak: &AuthKey, out: &mut Vec<Msg>| {
+        out.push(Msg::AkPrepare {
+            action: KeyAction::Revoke,
+            line: ak.key.line(),
+            aliases: vec![alias.to_string()],
         });
-        ui.label(RichText::new(ak.key.fingerprint()).monospace().small());
-        if !ak.options.is_empty() {
-            ui.label(
-                RichText::new(format!("options: {}", ak.options))
-                    .monospace()
-                    .small()
-                    .weak(),
-            );
-        }
-        let why = if login {
-            Some("Telepad logs in to this host with this key: revoking it would lock Telepad out")
-        } else if !ak.supported {
-            Some("Telepad does not manage this key type")
-        } else if running {
-            Some("A key run is in progress")
-        } else {
-            None
-        };
-        let r = ui
-            .horizontal(|ui| act_small(ui, why.is_none(), Act::Danger, &il(icons::TRASH, "Revoke")))
-            .inner;
-        let r = match why {
-            Some(w) => r.on_disabled_hover_text(w),
-            None => r.on_hover_text(format!(
-                "Remove this key from {alias} (asks for \"revoke\")"
-            )),
-        };
-        if r.clicked() {
-            out.push(Msg::AkPrepare {
-                action: KeyAction::Revoke,
-                line: ak.key.line(),
-                aliases: vec![alias.to_string()],
-            });
-        }
-    });
+    };
+    let o = table::show(
+        ui,
+        &spec,
+        table::state_in(tables, format!("ak-keys:{alias}")),
+        &cells,
+        |ui, ev| match ev {
+            Ev::Cell { row, col } => {
+                let ak = keys[row];
+                let (login, used) = flags[row];
+                match col {
+                    0 => table::weak(
+                        ui,
+                        if cells[row][0].is_empty() {
+                            "No group"
+                        } else {
+                            &cells[row][0]
+                        },
+                    ),
+                    1 => {
+                        ui.label(RichText::new(&ak.key.kind).strong());
+                    }
+                    2 => table::text(
+                        ui,
+                        if ak.key.comment.is_empty() {
+                            "(no comment)"
+                        } else {
+                            &ak.key.comment
+                        },
+                    ),
+                    3 => table::mono(ui, &cells[row][3]),
+                    4 => table::weak(ui, &ak.options),
+                    5 => {
+                        if login {
+                            ui.colored_label(ok, format!("{} login", icons::LOCK))
+                                .on_hover_text("Telepad logs in with this key");
+                        }
+                        if used {
+                            ui.colored_label(ok, icons::CHECK).on_hover_text(
+                            "sshd accepted this key for Telepad's login (seen on the host's Log info page)",
+                        );
+                        }
+                    }
+                    _ => {
+                        let why = revoke_block(login, ak.supported, running);
+                        let r =
+                            act_small(ui, why.is_none(), Act::Danger, &il(icons::TRASH, "Revoke"));
+                        let r = match why {
+                            Some(w) => r.on_disabled_hover_text(w),
+                            None => r.on_hover_text(format!(
+                                "Remove this key from {alias} (asks for \"revoke\")"
+                            )),
+                        };
+                        if r.clicked() {
+                            revoke(ak, out);
+                        }
+                    }
+                }
+            }
+            Ev::Menu { row, .. } => {
+                let ak = keys[row];
+                let why = revoke_block(flags[row].0, ak.supported, running);
+                if ui
+                    .add_enabled(
+                        why.is_none(),
+                        egui::Button::new(crate::widgets::act_text(
+                            Act::Danger,
+                            &il(icons::TRASH, "Revoke…"),
+                        )),
+                    )
+                    .clicked()
+                {
+                    revoke(ak, out);
+                    ui.close();
+                }
+                if ui.button(il(icons::COPY, "Copy public key")).clicked() {
+                    ui.ctx().copy_text(ak.key.line());
+                    ui.close();
+                }
+            }
+            Ev::HeaderMenu => {}
+        },
+    );
+    out.extend(o.msgs);
 }
 
 /// Every key (by fingerprint) and the servers that have it.
-fn by_key(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {
+fn by_key(
+    ui: &mut egui::Ui,
+    m: &Model,
+    k: &mut KeysDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     let ok = usage_color(10.0);
     let running = m.key_run.as_ref().is_some_and(|r| r.running());
     filter_box(ui, k, "comment, fingerprint or server");
@@ -295,137 +362,207 @@ fn by_key(ui: &mut egui::Ui, m: &Model, k: &mut KeysDraft, out: &mut Vec<Msg>) {
         .filter(|h| key_selectable(&h.entry))
         .map(|h| h.entry.alias.clone())
         .collect();
-    egui::ScrollArea::vertical()
-        .id_salt("ak-by-key")
-        .auto_shrink(false)
-        .show(ui, |ui| {
-            for kh in all {
-                let mut texts: Vec<&str> = vec![&kh.fingerprint, &kh.key.kind];
-                texts.extend(kh.comments.iter().map(String::as_str));
-                texts.extend(kh.groups.iter().map(String::as_str));
-                texts.extend(kh.hosts.iter().map(|(a, _)| a.as_str()));
-                if !hit(&k.list_filter, &texts) {
-                    continue;
-                }
-                let open = k.open_key.as_deref() == Some(kh.fingerprint.as_str());
-                ui.group(|ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal_wrapped(|ui| {
-                        let caret = if open {
-                            icons::CARET_DOWN
-                        } else {
-                            icons::CARET_RIGHT
-                        };
+    use crate::table::{self, Col, Ev, Spec};
+    let list: Vec<_> = all
+        .iter()
+        .filter(|kh| {
+            let mut texts: Vec<&str> = vec![&kh.fingerprint, &kh.key.kind];
+            texts.extend(kh.comments.iter().map(String::as_str));
+            texts.extend(kh.groups.iter().map(String::as_str));
+            texts.extend(kh.hosts.iter().map(|(a, _)| a.as_str()));
+            hit(&k.list_filter, &texts)
+        })
+        .collect();
+    let cols = [
+        Col::new("Type"),
+        Col::new("Comment").initial(220.0),
+        Col::new("Group"),
+        Col::new("Servers"),
+        Col::new("Fingerprint").initial(260.0),
+        Col::action(""),
+    ];
+    let cells: Vec<Vec<String>> = list
+        .iter()
+        .map(|kh| {
+            vec![
+                kh.key.kind.clone(),
+                kh.comments.join(" · "),
+                kh.groups.join(", "),
+                kh.hosts.len().to_string(),
+                kh.fingerprint.clone(),
+                String::new(),
+            ]
+        })
+        .collect();
+    let add = |kh: &telepad_app::KeyHolders, out: &mut Vec<Msg>| {
+        // Pick the servers in Add / revoke; none chosen yet.
+        out.push(Msg::AkPrepare {
+            action: KeyAction::Add,
+            line: kh.key.line(),
+            aliases: Vec::new(),
+        });
+    };
+    let can_add = |kh: &telepad_app::KeyHolders| {
+        kh.supported && !running && ssh.iter().any(|a| !kh.hosts.iter().any(|(h, _)| h == a))
+    };
+    let selected = list
+        .iter()
+        .position(|kh| k.open_key.as_deref() == Some(kh.fingerprint.as_str()));
+    let h = (ui.available_height() * if selected.is_some() { 0.6 } else { 1.0 }).max(120.0);
+    let o = ui
+        .allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
+            let spec = Spec::new("ak-by-key", "Public keys", &cols)
+                .kind(crate::table::Kind::Fill)
+                .selected(selected);
+            table::show(
+                ui,
+                &spec,
+                table::state_in(tables, "ak-by-key"),
+                &cells,
+                |ui, ev| match ev {
+                    Ev::Cell { row, col } => {
+                        let kh = list[row];
+                        match col {
+                            0 => {
+                                ui.label(RichText::new(&kh.key.kind).strong());
+                            }
+                            1 => table::text(
+                                ui,
+                                if kh.comments.is_empty() {
+                                    "(no comment)"
+                                } else {
+                                    &cells[row][1]
+                                },
+                            ),
+                            2 => table::weak(
+                                ui,
+                                if kh.groups.is_empty() {
+                                    "No group"
+                                } else {
+                                    &cells[row][2]
+                                },
+                            ),
+                            4 => table::mono(ui, &kh.fingerprint),
+                            5 => {
+                                if act_small(
+                                    ui,
+                                    can_add(kh),
+                                    Act::Add,
+                                    &il(icons::PLUS, "Add to server…"),
+                                )
+                                .on_hover_text(
+                                    "Choose more servers for this key (asks for \"add\")",
+                                )
+                                .clicked()
+                                {
+                                    add(kh, out);
+                                }
+                            }
+                            c => table::text(ui, &cells[row][c]),
+                        }
+                    }
+                    Ev::Menu { row, .. } => {
+                        let kh = list[row];
                         if ui
-                            .selectable_label(
-                                open,
-                                format!(
-                                    "{caret} {} {}",
-                                    kh.key.kind,
-                                    if kh.comments.is_empty() {
-                                        "(no comment)".to_string()
-                                    } else {
-                                        kh.comments.join(" · ")
-                                    }
-                                ),
+                            .add_enabled(
+                                can_add(kh),
+                                egui::Button::new(crate::widgets::act_text(
+                                    Act::Add,
+                                    &il(icons::PLUS, "Add to server…"),
+                                )),
                             )
                             .clicked()
                         {
-                            k.open_key = (!open).then(|| kh.fingerprint.clone());
+                            add(kh, out);
+                            ui.close();
                         }
-                        ui.label(RichText::new(format!("{} server(s)", kh.hosts.len())).weak());
-                        let groups = if kh.groups.is_empty() {
-                            "No group".to_string()
-                        } else {
-                            kh.groups.join(", ")
-                        };
-                        ui.label(RichText::new(il(icons::KEY, &groups)).small());
-                        let missing: Vec<String> = ssh
-                            .iter()
-                            .filter(|a| !kh.hosts.iter().any(|(h, _)| h == *a))
-                            .cloned()
-                            .collect();
-                        let can = kh.supported && !running && !missing.is_empty();
-                        if act_small(ui, can, Act::Add, &il(icons::PLUS, "Add to server…"))
-                            .on_hover_text("Choose more servers for this key (asks for \"add\")")
-                            .clicked()
-                        {
-                            // Pick the servers in Add / revoke; none chosen yet.
-                            out.push(Msg::AkPrepare {
-                                action: KeyAction::Add,
-                                line: kh.key.line(),
-                                aliases: Vec::new(),
-                            });
+                        if ui.button(il(icons::COPY, "Copy public key")).clicked() {
+                            ui.ctx().copy_text(kh.key.line());
+                            ui.close();
                         }
-                    });
-                    ui.label(RichText::new(&kh.fingerprint).monospace().small());
-                    if !open {
-                        return;
                     }
-                    for (alias, login) in &kh.hosts {
-                        ui.horizontal(|ui| {
-                            ui.label(il(icons::DESKTOP, alias));
-                            if *login {
-                                ui.colored_label(ok, format!("{} login key", icons::LOCK));
-                            }
-                            if m.telepad_key.get(alias) == Some(&kh.fingerprint) {
-                                ui.colored_label(ok, format!("{} last used by Telepad", icons::CHECK))
-                                    .on_hover_text("sshd accepted this key for Telepad's login (seen on the host's Log info page)");
-                            }
-                            let why = if *login {
-                                Some("Telepad logs in to this host with this key")
-                            } else if !kh.supported {
-                                Some("Telepad does not manage this key type")
-                            } else if running {
-                                Some("A key run is in progress")
-                            } else {
-                                None
-                            };
-                            let r = act_small(
-                                ui,
-                                why.is_none(),
-                                Act::Danger,
-                                &il(icons::TRASH, "Revoke"),
-                            );
-                            let r = match why {
-                                Some(w) => r.on_disabled_hover_text(w),
-                                None => r,
-                            };
-                            if r.clicked() {
-                                out.push(Msg::AkPrepare {
-                                    action: KeyAction::Revoke,
-                                    line: kh.key.line(),
-                                    aliases: vec![alias.clone()],
-                                });
-                            }
-                        });
+                    Ev::HeaderMenu => {}
+                },
+            )
+        })
+        .inner;
+    if let Some((r, _)) = o.clicked {
+        let fp = list[r].fingerprint.clone();
+        k.open_key = (k.open_key.as_deref() != Some(fp.as_str())).then_some(fp);
+    }
+    out.extend(o.msgs);
+    let Some(kh) = selected.map(|i| list[i]) else {
+        ui.label(RichText::new("Click a key to see its servers.").weak());
+        return;
+    };
+    ui.separator();
+    ui.label(
+        RichText::new(format!(
+            "{} {} — on {} server(s)",
+            kh.key.kind,
+            kh.fingerprint,
+            kh.hosts.len()
+        ))
+        .strong(),
+    );
+    egui::ScrollArea::vertical()
+        .id_salt("ak-by-key-servers")
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            for (alias, login) in &kh.hosts {
+                ui.horizontal(|ui| {
+                    ui.label(il(icons::DESKTOP, alias));
+                    if *login {
+                        ui.colored_label(ok, format!("{} login key", icons::LOCK));
                     }
-                    let others: Vec<String> = kh
-                        .hosts
-                        .iter()
-                        .filter(|(_, l)| !l)
-                        .map(|(a, _)| a.clone())
-                        .collect();
-                    if kh.supported
-                        && others.len() > 1
-                        && act_small(
-                            ui,
-                            !running,
-                            Act::Danger,
-                            &il(
-                                icons::TRASH,
-                                &format!("Revoke on all {} servers", others.len()),
-                            ),
-                        )
-                        .on_hover_text("Not on servers Telepad logs in to with it")
-                        .clicked()
-                    {
+                    if m.telepad_key.get(alias) == Some(&kh.fingerprint) {
+                        ui.colored_label(ok, format!("{} last used by Telepad", icons::CHECK))
+                            .on_hover_text("sshd accepted this key for Telepad's login (seen on the host's Log info page)");
+                    }
+                    let why = if *login {
+                        Some("Telepad logs in to this host with this key")
+                    } else if !kh.supported {
+                        Some("Telepad does not manage this key type")
+                    } else if running {
+                        Some("A key run is in progress")
+                    } else {
+                        None
+                    };
+                    let r = act_small(ui, why.is_none(), Act::Danger, &il(icons::TRASH, "Revoke"));
+                    let r = match why {
+                        Some(w) => r.on_disabled_hover_text(w),
+                        None => r,
+                    };
+                    if r.clicked() {
                         out.push(Msg::AkPrepare {
                             action: KeyAction::Revoke,
                             line: kh.key.line(),
-                            aliases: others,
+                            aliases: vec![alias.clone()],
                         });
                     }
+                });
+            }
+            let others: Vec<String> = kh
+                .hosts
+                .iter()
+                .filter(|(_, l)| !l)
+                .map(|(a, _)| a.clone())
+                .collect();
+            if kh.supported
+                && others.len() > 1
+                && act_small(
+                    ui,
+                    !running,
+                    Act::Danger,
+                    &il(icons::TRASH, &format!("Revoke on all {} servers", others.len())),
+                )
+                .on_hover_text("Not on servers Telepad logs in to with it")
+                .clicked()
+            {
+                out.push(Msg::AkPrepare {
+                    action: KeyAction::Revoke,
+                    line: kh.key.line(),
+                    aliases: others,
                 });
             }
         });

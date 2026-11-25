@@ -42,7 +42,20 @@ pub fn container_menu(
     alias: &str,
     out: &mut Vec<Msg>,
 ) {
-    ui.menu_button(icons::MENU, |ui| {
+    ui.menu_button(icons::MENU, |ui| container_items(ui, c, host, alias, out))
+        .response
+        .on_hover_text("Shell, logs, start / stop… and how it runs");
+}
+
+/// The container's actions, in its ☰ menu and its right-click menu.
+pub fn container_items(
+    ui: &mut egui::Ui,
+    c: &Container,
+    host: usize,
+    alias: &str,
+    out: &mut Vec<Msg>,
+) {
+    {
         ui.label(RichText::new(&c.name).strong());
         if let Some(t) = telepad_core::db::detect::container_target(alias, c) {
             if ui
@@ -98,9 +111,7 @@ pub fn container_menu(
             });
             ui.close();
         }
-    })
-    .response
-    .on_hover_text("Shell, logs, start / stop… and how it runs");
+    }
 }
 
 /// Compose actions for a stack, or the way to Portainer.
@@ -264,6 +275,7 @@ pub fn docker_stacks(
     host: Option<usize>,
     alias: &str,
     address: &str,
+    d: &mut telepad_app::Drafts,
     out: &mut Vec<Msg>,
 ) {
     for (stack, containers) in r.docker.stacks() {
@@ -318,64 +330,123 @@ pub fn docker_stacks(
             continue;
         }
         ui.indent(("stack-body", stack), |ui| {
-            egui::Grid::new(("docker", stack))
-                .striped(true)
-                .spacing([14.0, 5.0])
-                .show(ui, |ui| {
-                    for t in [
-                        "",
-                        "Container",
-                        "Image",
-                        "Status",
-                        "IP address",
-                        "Host port → container",
-                        "Internal",
-                        "",
-                    ] {
-                        ui.label(RichText::new(t).strong());
-                    }
-                    ui.end_row();
-                    for c in containers {
-                        let dot = if c.running() {
-                            usage_color(0.0)
-                        } else {
-                            Color32::GRAY
-                        };
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                        ui.painter().circle_filled(rect.center(), 4.5, dot);
-                        let mut n = RichText::new(&c.name).strong();
-                        if c.is_nginx() {
-                            n = n.color(nginx_color());
-                        } else if c.portainer_role().is_some() {
-                            n = n.color(portainer_color());
-                        }
-                        let resp = ui.label(n);
-                        if c.mounts_socket {
-                            resp.on_hover_text("Mounts the Docker socket");
-                        }
-                        ui.label(RichText::new(&c.image).weak());
-                        ui.label(&c.status);
-                        let ips: Vec<String> = c
-                            .networks
-                            .iter()
-                            .filter(|(_, ip)| !ip.is_empty())
-                            .map(|(n, ip)| format!("{ip} ({n})"))
-                            .collect();
-                        ui.label(RichText::new(ips.join("\n")).monospace());
-                        let (published, internal) = container_ports(c);
-                        ui.label(RichText::new(published).monospace());
-                        ui.label(RichText::new(internal).monospace().weak());
-                        match host {
-                            Some(host) => container_menu(ui, c, host, alias, out),
-                            None => local_container_db(ui, r, c, out),
-                        }
-                        ui.end_row();
-                    }
-                });
+            container_table(ui, r, host, alias, stack, &containers, d, out);
         });
         ui.add_space(4.0);
     }
+}
+
+/// Text of a container's cells: Container, Image, Status, IP address, Host
+/// port → container, Internal (one line each).
+pub fn container_cells(c: &Container) -> Vec<String> {
+    let ips: Vec<String> = c
+        .networks
+        .iter()
+        .filter(|(_, ip)| !ip.is_empty())
+        .map(|(n, ip)| format!("{ip} ({n})"))
+        .collect();
+    let (published, internal) = container_ports(c);
+    vec![
+        c.name.clone(),
+        c.image.clone(),
+        c.status.clone(),
+        ips.join(", "),
+        published.replace('\n', ", "),
+        internal,
+    ]
+}
+
+/// The containers of one stack (#153: sort, filter, menu).
+#[allow(clippy::too_many_arguments)]
+pub fn container_table(
+    ui: &mut egui::Ui,
+    r: &HostReport,
+    host: Option<usize>,
+    alias: &str,
+    stack: &str,
+    containers: &[&Container],
+    d: &mut telepad_app::Drafts,
+    out: &mut Vec<Msg>,
+) {
+    use crate::table::{self, Col, Ev, Spec};
+    let cols = [
+        Col::action(""),
+        Col::new("Container"),
+        Col::new("Image"),
+        Col::new("Status"),
+        Col::new("IP address"),
+        Col::new("Host port → container"),
+        Col::new("Internal"),
+        Col::action(""),
+    ];
+    let cells: Vec<Vec<String>> = containers
+        .iter()
+        .map(|c| {
+            let mut v = vec![String::new()];
+            v.extend(container_cells(c));
+            v.push(String::new());
+            v
+        })
+        .collect();
+    let title = format!("Containers of {alias} {stack}");
+    let st = table::state(d, format!("docker:{alias}:{stack}"));
+    let spec = Spec::new(("docker", alias, stack), &title, &cols);
+    let o = table::show(ui, &spec, st, &cells, |ui, ev| match ev {
+        Ev::Cell { row, col } => {
+            let c = containers[row];
+            match col {
+                0 => {
+                    let dot = if c.running() {
+                        usage_color(0.0)
+                    } else {
+                        Color32::GRAY
+                    };
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                    ui.painter().circle_filled(rect.center(), 4.5, dot);
+                }
+                1 => {
+                    let mut n = RichText::new(&c.name).strong();
+                    if c.is_nginx() {
+                        n = n.color(nginx_color());
+                    } else if c.portainer_role().is_some() {
+                        n = n.color(portainer_color());
+                    }
+                    let resp = ui.add(egui::Label::new(n).truncate().selectable(false));
+                    if c.mounts_socket {
+                        resp.on_hover_text("Mounts the Docker socket");
+                    }
+                }
+                2 => table::weak(ui, &cells[row][2]),
+                4 | 5 => {
+                    ui.add(
+                        egui::Label::new(RichText::new(&cells[row][col]).monospace())
+                            .truncate()
+                            .selectable(false),
+                    );
+                }
+                6 => {
+                    ui.add(
+                        egui::Label::new(RichText::new(&cells[row][6]).monospace().weak())
+                            .truncate()
+                            .selectable(false),
+                    );
+                }
+                7 => match host {
+                    Some(host) => container_menu(ui, c, host, alias, out),
+                    None => local_container_db(ui, r, c, out),
+                },
+                c => table::text(ui, &cells[row][c]),
+            }
+        }
+        Ev::Menu { row, .. } => {
+            if let Some(host) = host {
+                container_items(ui, containers[row], host, alias, out);
+            }
+        }
+        Ev::HeaderMenu => {}
+    });
+    out.extend(o.msgs);
 }
 
 /// My Computer (#129): a database container published on this computer
