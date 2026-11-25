@@ -154,6 +154,13 @@ pub enum StMsg {
         name: String,
         by: i32,
     },
+    /// Drag and drop (#160): `name` to position `to` of the list (counted
+    /// after taking it out, as `table::drop_index`).
+    MoveTo {
+        kind: SetKind,
+        name: String,
+        to: usize,
+    },
     /// Put hosts into `name` (empty = take them out).
     Assign {
         kind: SetKind,
@@ -306,6 +313,23 @@ pub(crate) fn update(
             if let Some(v) = m.sets.get_mut(&kind) {
                 v.swap(at, to as usize);
             }
+            fx.push(Effect::Sets(StEffect::Order { kind, names }));
+        }
+        StMsg::MoveTo { kind, name, to } => {
+            let Some(v) = m.sets.get_mut(&kind) else {
+                return fx;
+            };
+            let Some(at) = v.iter().position(|s| s.name == name) else {
+                return fx;
+            };
+            let to = to.min(v.len() - 1);
+            if to == at {
+                return fx;
+            }
+            // Shown at once; the store follows in one transaction.
+            let set = v.remove(at);
+            v.insert(to, set);
+            let names = v.iter().map(|s| s.name.clone()).collect();
             fx.push(Effect::Sets(StEffect::Order { kind, names }));
         }
         StMsg::Assign {
