@@ -2,6 +2,15 @@
 
 Newest first.
 
+## [2026-11-25] — feat(ui): table headers stand out — header band, hover highlight, right-aligned sort icon (#151)
+- Issue #151 addressed on GitHub (branch `151-table-header`, on top of #153)
+- `telepad-gui/src/table.rs` `title_line`: header band colour + line under it, sortable titles light up on hover
+  (background and text), title cut with "…" left, sort caret right-aligned; `widgets.rs` `Palette::head`
+  (`HeadColors`, dark and light); Hosts auto-fit always reserves the caret width (`overview.rs` `header_text`)
+- Every table gets it through the #153 component (no per-view code)
+- Verified: fmt, clippy, tests (new `table_header_colours_are_readable_and_stand_out`: WCAG contrast of header /
+  hover text, band vs rows, both themes). Not verified on screen (session locked)
+
 ## [2026-11-25] — feat(ui): table framework — simple and paged tables, filter row, right-click menu, exports (#153)
 - Issue #153 addressed on GitHub (branch `153-table-framework`)
 - New: `telepad-gui/src/table.rs` (component: `show` / `controlled`, `Kind::Simple` / `Fill` / `Paged`, filter row

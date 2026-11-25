@@ -24,6 +24,20 @@ pub struct Palette {
     pub bar: [Color32; 4],
     /// Action buttons (#76, #83), indexed by `Act`: danger, edit, add, caution.
     pub act: [ActColors; 4],
+    /// Table headers (#151).
+    pub head: HeadColors,
+}
+
+/// Table header colours (#151): the header band stands apart from the rows,
+/// and a sortable title lights up under the mouse.
+#[derive(Clone, Copy)]
+pub struct HeadColors {
+    pub bg: Color32,
+    pub text: Color32,
+    pub hover_bg: Color32,
+    pub hover_text: Color32,
+    /// The line under the header.
+    pub line: Color32,
 }
 
 /// Filled action-button colours: rest / hover / pressed fill and the text on them.
@@ -68,6 +82,13 @@ pub const DARK: Palette = Palette {
         act(0x166534, 0x1b7a3f, 0x11522a, 0xe6ffee),
         act(0xb45309, 0xbd5410, 0x92400e, 0xffffff),
     ],
+    head: HeadColors {
+        bg: Color32::from_rgb(0x2a, 0x33, 0x3f),
+        text: Color32::from_rgb(0xe6, 0xec, 0xf3),
+        hover_bg: Color32::from_rgb(0x1c, 0x5a, 0x9c),
+        hover_text: Color32::WHITE,
+        line: Color32::from_rgb(0x5a, 0xa2, 0xf0),
+    },
 };
 
 pub const LIGHT: Palette = Palette {
@@ -91,6 +112,13 @@ pub const LIGHT: Palette = Palette {
         act(0x15803d, 0x13703a, 0x0f5e30, 0xffffff),
         act(0xc2410c, 0xb23c0b, 0x9a3412, 0xffffff),
     ],
+    head: HeadColors {
+        bg: Color32::from_rgb(0xd5, 0xde, 0xea),
+        text: Color32::from_rgb(0x1f, 0x29, 0x37),
+        hover_bg: Color32::from_rgb(0x1d, 0x4e, 0xd8),
+        hover_text: Color32::WHITE,
+        line: Color32::from_rgb(0x1d, 0x4e, 0xd8),
+    },
 };
 
 /// Telepad's light theme (#86). egui's own light colours put panels, windows
@@ -777,6 +805,19 @@ pub fn pager_bar(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #151: header text is readable on the header band and on its hover
+    /// colour, and the band stands apart from the rows in both themes.
+    #[test]
+    fn table_header_colours_are_readable_and_stand_out() {
+        for (p, rows) in [(&DARK, Color32::from_gray(27)), (&LIGHT, Color32::WHITE)] {
+            let h = p.head;
+            assert!(contrast(h.text, h.bg) >= 7.0, "header text");
+            assert!(contrast(h.hover_text, h.hover_bg) >= 4.5, "hover text");
+            assert!(contrast(h.bg, rows) >= 1.3, "band vs rows");
+            assert!(contrast(h.hover_bg, h.bg) >= 1.5, "hover vs band");
+        }
+    }
 
     #[test]
     fn temperature_colours_and_fan_speed() {

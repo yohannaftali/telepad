@@ -331,14 +331,51 @@ fn own_items(ui: &mut Ui, f: &mut dyn FnMut(&mut Ui, Ev), ev: Ev) {
     }
 }
 
-/// The header title: the sort caret follows the title.
-fn title_text(c: &Col, dir: Option<Dir>) -> RichText {
-    let arrow = match dir {
-        Some(Dir::Asc) => format!(" {}", icons::CARET_UP),
-        Some(Dir::Desc) => format!(" {}", icons::CARET_DOWN),
-        None => String::new(),
+/// The title line of a header cell (#151): the title on the left (cut with
+/// "…" when narrow), the sort caret on the right edge, the whole line lit
+/// up under the mouse when it sorts. Returns its click response.
+fn title_line(ui: &mut Ui, c: &Col, dir: Option<Dir>, h: f32, id: egui::Id) -> Response {
+    let colors = crate::widgets::pal().head;
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
+    let resp = ui.interact(rect, id, egui::Sense::click());
+    let lit = c.sort && resp.hovered();
+    // The highlight covers the whole cell width, gaps included.
+    let half = ui.spacing().item_spacing.x / 2.0;
+    if lit {
+        ui.painter()
+            .rect_filled(rect.expand2(egui::vec2(half, 1.0)), 2.0, colors.hover_bg);
+    }
+    let color = if lit { colors.hover_text } else { colors.text };
+    let caret = match dir {
+        Some(Dir::Asc) => Some(icons::CARET_UP),
+        Some(Dir::Desc) => Some(icons::CARET_DOWN),
+        None => None,
     };
-    RichText::new(format!("{}{arrow}", c.title)).strong()
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let icon_w = if caret.is_some() {
+        font.size + 4.0
+    } else {
+        0.0
+    };
+    if let Some(caret) = caret {
+        ui.painter().text(
+            egui::pos2(rect.right() - 2.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            caret,
+            font.clone(),
+            color,
+        );
+    }
+    let galley = egui::WidgetText::from(RichText::new(&c.title).strong().color(color)).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        (rect.width() - icon_w - 2.0).max(8.0),
+        egui::TextStyle::Body,
+    );
+    let pos = egui::pos2(rect.left() + 1.0, rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(pos, galley, color);
+    resp
 }
 
 /// A table whose order the view keeps (see the module docs).
@@ -390,6 +427,16 @@ pub fn controlled(
         let table = b.header(head_h, |mut h| {
             for (ci, c) in spec.cols.iter().enumerate() {
                 let (rect, _) = h.col(|ui| {
+                    // The header band (#151): its own colour, a line under it.
+                    let colors = crate::widgets::pal().head;
+                    let half = ui.spacing().item_spacing.x / 2.0;
+                    let band = ui.max_rect().expand2(egui::vec2(half, 0.0));
+                    ui.painter().rect_filled(band, 0.0, colors.bg);
+                    ui.painter().hline(
+                        band.x_range(),
+                        band.bottom(),
+                        egui::Stroke::new(1.5, colors.line),
+                    );
                     ui.vertical(|ui| {
                         if filter_row {
                             match filters.as_deref_mut() {
@@ -414,13 +461,7 @@ pub fn controlled(
                             }
                         }
                         let dir = sort.filter(|(s, _)| *s == ci).map(|(_, d)| d);
-                        let line = ui
-                            .horizontal(|ui| {
-                                ui.add(egui::Label::new(title_text(c, dir)).truncate().selectable(false));
-                                ui.add_space(ui.available_width());
-                            })
-                            .response;
-                        let resp = ui.interact(line.rect, ui.scope_id().with(("head", ci)), egui::Sense::click());
+                        let resp = title_line(ui, c, dir, row_h, ui.scope_id().with(("head", ci)));
                         let resp = if c.sort {
                             let tip = c.tip.clone().unwrap_or_else(|| {
                                 "Click to sort (again to reverse, a third time for the original order)"

@@ -217,6 +217,10 @@ shows all its rows (Disks, Network, Ports in use, sensors, Docker containers, cl
 tables, Groups / Clusters, Host Management, Authorized keys, My keys, the database lists);
 a **paged table** has the pager footer under it (the database Data grid, Log info).
 
+- **Header:** the title row has its own colour band with a line under it, so it stands
+  apart from the rows. A title that sorts lights up (accent background, white text) under
+  the mouse; the sort arrow (▲ ascending, ▼ descending) sits at the **right edge** of the
+  title cell, and a long title is cut with "…" before the arrow, never the arrow itself.
 - **Sort:** click a column title: ascending, again descending, a third time back to the
   table's own order. Numbers sort by value, also with a unit (`5%` before `40%`, `980 MiB`
   before `1.5 GiB`, `5m ago` before `2h 5m ago`), addresses and names in natural order

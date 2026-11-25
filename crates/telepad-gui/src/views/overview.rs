@@ -189,16 +189,14 @@ fn text_w(ui: &egui::Ui, text: impl Into<egui::WidgetText>) -> f32 {
         .x
 }
 
-fn header_text(title: &str, key: Option<SortKey>, sort: Sort) -> String {
-    let arrow = match key.and_then(|k| sort.direction(k)) {
-        Some(true) => format!(" {}", icons::CARET_DOWN),
-        Some(false) => format!(" {}", icons::CARET_UP),
-        None => String::new(),
-    };
-    if title.is_empty() {
-        format!("{}{arrow}", icons::DOT)
-    } else {
-        format!("{title}{arrow}")
+/// A header's width text: the title, and room for the sort caret on the
+/// right (#151) whether or not the column is sorted, so sorting never
+/// moves the columns.
+fn header_text(title: &str, key: Option<SortKey>, _sort: Sort) -> String {
+    let title = if title.is_empty() { icons::DOT } else { title };
+    match key {
+        Some(_) => format!("{title}  {}", icons::CARET_DOWN),
+        None => title.to_string(),
     }
 }
 
