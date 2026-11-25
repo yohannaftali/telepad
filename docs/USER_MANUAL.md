@@ -235,6 +235,12 @@ window narrower than 768 points. In a narrow window the footer wraps onto a seco
   apart from the rows. A title that sorts lights up (accent background, white text) under
   the mouse; the sort arrow (▲ ascending, ▼ descending) sits at the **right edge** of the
   title cell, and a long title is cut with "…" before the arrow, never the arrow itself.
+- **Widths** (#156): every table fills its page, as the Hosts table does, and follows each
+  resize. Columns get the width their text needs, spare room goes to the long text columns,
+  and on a narrow page the long columns give way first, down to their titles; after that
+  the table scrolls sideways. Button columns always keep their buttons. If you drag a
+  border, that column keeps its width until you double-click the border or right-click a
+  title ▸ **Auto-fit columns**. The filter box and the title row have the same height.
 - **Sort:** click a column title: ascending, again descending, a third time back to the
   table's own order. Numbers sort by value, also with a unit (`5%` before `40%`, `980 MiB`
   before `1.5 GiB`, `5m ago` before `2h 5m ago`), addresses and names in natural order

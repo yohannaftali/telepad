@@ -3,7 +3,6 @@
 //! page of one group / cluster (same table / cards as the Hosts page).
 
 use eframe::egui::{self, RichText};
-use egui_extras::Column;
 use telepad_app::sets::{SetPageId, StMsg, list, shown_name, stats};
 use telepad_app::{Drafts, Model, Msg, matches_query};
 use telepad_core::config::SetKind;
@@ -89,12 +88,12 @@ pub fn sets_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, kind: SetKind, ou
         .collect();
     use crate::table::{self, Col, Ev, Kind, Spec};
     let cols = [
-        Col::new(kind.title()).initial(200.0),
-        Col::new("Description").remainder(),
-        Col::new("Hosts").width(Column::exact(60.0)),
-        Col::new("Down").width(Column::exact(60.0)),
-        Col::new("Flags").width(Column::exact(60.0)),
-        Col::action("").width(Column::exact(250.0)),
+        Col::new(kind.title()),
+        Col::new("Description"),
+        Col::new("Hosts"),
+        Col::new("Down"),
+        Col::new("Flags"),
+        Col::action(""),
     ];
     let key = format!("sets:{}", kind.as_str());
     let state = d.tables.entry(key).or_default();
