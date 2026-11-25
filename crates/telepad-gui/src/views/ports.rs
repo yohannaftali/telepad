@@ -65,12 +65,12 @@ pub fn ports_in_use(
     }
     let shown: Vec<_> = usage.iter().filter(|u| !*nginx_only || u.nginx).collect();
     let cols = [
-        Col::new("Port"),
-        Col::new("Proto"),
-        Col::new("Bind"),
-        Col::new("Used by"),
-        Col::new("Stack"),
-        Col::new("→ Container"),
+        Col::new("Port").mono(),
+        Col::new("Proto").mono(),
+        Col::new("Bind").mono(),
+        Col::new("Used by").mono(),
+        Col::new("Stack").mono(),
+        Col::new("→ Container").mono(),
     ];
     let cells: Vec<Vec<String>> = shown
         .iter()

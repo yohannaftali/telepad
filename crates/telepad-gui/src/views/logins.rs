@@ -99,7 +99,7 @@ pub fn logins_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, id: LogId, out:
     draft.pager.start_mode(ui.available_width());
     let (start, end, _) = page_range(all.len(), draft);
     // The table scrolls above the pager, which stays at the bottom (#140).
-    let h = (ui.available_height() - PAGER_H - 6.0).max(120.0);
+    let h = (ui.available_height() - pager_height(ui.available_width()) - 6.0).max(120.0);
     ui.allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
         ui.set_min_height(h);
         let title = format!("Log info {}", s.alias);

@@ -374,9 +374,9 @@ pub fn container_table(
         Col::new("Container"),
         Col::new("Image"),
         Col::new("Status"),
-        Col::new("IP address"),
-        Col::new("Host port → container"),
-        Col::new("Internal"),
+        Col::new("IP address").mono(),
+        Col::new("Host port → container").mono(),
+        Col::new("Internal").mono(),
         Col::action(""),
     ];
     let cells: Vec<Vec<String>> = containers

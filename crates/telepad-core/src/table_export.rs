@@ -367,6 +367,27 @@ pub mod pdf {
         miniz_oxide::deflate::compress_to_vec_zlib(data, 6)
     }
 
+    /// Widths that fit `avail`: the room above each column's least width
+    /// shrinks in proportion (long text gives way, short columns keep their
+    /// titles); when even the least widths do not fit, all scale down.
+    pub fn fit_columns(want: &[f32], least: &[f32], avail: f32) -> Vec<f32> {
+        let total: f32 = want.iter().sum();
+        if total <= avail {
+            return want.to_vec();
+        }
+        let floor: f32 = least.iter().sum();
+        if floor >= avail {
+            let k = avail / floor.max(1.0);
+            return least.iter().map(|w| w * k).collect();
+        }
+        let room = total - floor;
+        let k = (avail - floor) / room;
+        want.iter()
+            .zip(least)
+            .map(|(w, l)| l + (w - l) * k)
+            .collect()
+    }
+
     pub fn to_pdf(t: &TableData, fonts: &[&[u8]], generated: &str) -> Result<Vec<u8>, String> {
         let mut fonts: Vec<Font> = fonts
             .iter()
@@ -388,18 +409,23 @@ pub mod pdf {
         }
         let n = t.columns.len().max(1);
         // Natural widths: the header or the widest value, capped.
-        let mut want: Vec<f32> = (0..n)
-            .map(|c| {
-                let h = t.columns.get(c).map_or(0.0, |s| width(&fonts, s, HEAD));
-                let body = t
-                    .rows
-                    .iter()
-                    .take(2000)
-                    .map(|r| r.get(c).map_or(0.0, |s| width(&fonts, s, BODY)))
-                    .fold(0.0, f32::max);
-                (h.max(body) + 2.0 * PAD).clamp(COL_MIN, COL_MAX)
-            })
-            .collect();
+        // Natural widths (the header or the widest value, capped) and the
+        // least each column keeps: its header, so no title is cut to "…".
+        let mut want = Vec::with_capacity(n);
+        let mut least = Vec::with_capacity(n);
+        for c in 0..n {
+            let h = t.columns.get(c).map_or(0.0, |s| width(&fonts, s, HEAD)) + 2.0 * PAD;
+            let body = t
+                .rows
+                .iter()
+                .take(2000)
+                .map(|r| r.get(c).map_or(0.0, |s| width(&fonts, s, BODY)))
+                .fold(0.0, f32::max)
+                + 2.0 * PAD;
+            let w = h.max(body).clamp(COL_MIN, COL_MAX);
+            want.push(w);
+            least.push(h.clamp(COL_MIN, w));
+        }
         let total: f32 = want.iter().sum();
         let (pw, ph) = if total > 595.0 - 2.0 * MARGIN {
             (842.0, 595.0)
@@ -407,12 +433,7 @@ pub mod pdf {
             (595.0, 842.0)
         };
         let avail = pw - 2.0 * MARGIN;
-        if total > avail {
-            let k = avail / total;
-            for w in &mut want {
-                *w *= k;
-            }
-        }
+        want = fit_columns(&want, &least, avail);
         let top = ph - MARGIN;
         let table_top = top - TITLE - 10.0;
         let bottom = MARGIN + 14.0;
@@ -701,5 +722,20 @@ mod tests {
         assert!(s.contains("/ToUnicode"));
         assert!(s.contains("/Count 3"), "152 rows on 3 pages");
         assert!(pdf::to_pdf(&t, &[b"not a font"], "").is_err());
+    }
+
+    #[test]
+    fn pdf_columns_shrink_long_text_first() {
+        // Two short columns keep their titles; the long one gives way.
+        let w = pdf::fit_columns(&[40.0, 400.0, 50.0], &[40.0, 60.0, 50.0], 300.0);
+        assert_eq!((w[0], w[2]), (40.0, 50.0));
+        assert!((w.iter().sum::<f32>() - 300.0).abs() < 0.01);
+        // Fits already: unchanged. Far too narrow: everything scales.
+        assert_eq!(
+            pdf::fit_columns(&[10.0, 20.0], &[10.0, 20.0], 100.0),
+            vec![10.0, 20.0]
+        );
+        let w = pdf::fit_columns(&[100.0, 100.0], &[80.0, 120.0], 100.0);
+        assert!((w.iter().sum::<f32>() - 100.0).abs() < 0.01 && w[0] < w[1]);
     }
 }

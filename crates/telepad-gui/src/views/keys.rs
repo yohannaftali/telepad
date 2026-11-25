@@ -218,7 +218,7 @@ fn server_keys(
         Col::new("Group"),
         Col::new("Type"),
         Col::new("Comment"),
-        Col::new("Fingerprint").initial(260.0),
+        Col::new("Fingerprint").mono(),
         Col::new("Options"),
         Col::new("Telepad"),
         Col::action(""),
@@ -378,7 +378,7 @@ fn by_key(
         Col::new("Comment").initial(220.0),
         Col::new("Group"),
         Col::new("Servers"),
-        Col::new("Fingerprint").initial(260.0),
+        Col::new("Fingerprint").mono(),
         Col::action(""),
     ];
     let cells: Vec<Vec<String>> = list

@@ -476,7 +476,7 @@ fn disks(
 ) {
     use crate::table::{self, Col, Ev, Spec};
     let cols = [
-        Col::new("Mount"),
+        Col::new("Mount").mono(),
         Col::new("Filesystem"),
         Col::new("Usage").initial(300.0),
         Col::new("Used"),
@@ -540,7 +540,7 @@ fn network(
     let cols = [
         Col::new("Interface"),
         Col::new("Family"),
-        Col::new("Address"),
+        Col::new("Address").mono(),
     ];
     let cells: Vec<Vec<String>> = r
         .addresses

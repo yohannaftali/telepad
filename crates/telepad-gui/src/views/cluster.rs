@@ -293,7 +293,7 @@ fn swarm(
         Col::new("Mode"),
         Col::new("Replicas"),
         Col::new("Image"),
-        Col::new("Ports"),
+        Col::new("Ports").mono(),
         Col::action(""),
     ];
     let cells: Vec<Vec<String>> = sw

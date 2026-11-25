@@ -486,6 +486,7 @@ pub fn table(
     };
     let min_w: f32 = widths.iter().sum::<f32>() + gap * n as f32;
     let spec = Spec::new(("overview", view.salt, lay.key), &title, &tcols)
+        .stable(("overview", view.salt))
         .kind(Kind::Fill)
         .row_h(ROW_HEIGHT)
         .min_width(min_w);

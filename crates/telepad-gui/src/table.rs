@@ -37,6 +37,13 @@ pub struct Col {
     pub filter: bool,
     /// Exports include it (icon / button columns do not).
     pub export: bool,
+    /// Width from its text (title and cells), not from `width`.
+    pub fit: bool,
+    /// Its cells are monospace (addresses, ports): measured that way.
+    pub mono: bool,
+    /// Sized by its content (buttons, icons): the header takes no more room
+    /// than its title, so the column can shrink to its buttons.
+    pub auto: bool,
     /// Header hover text.
     pub tip: Option<String>,
 }
@@ -51,6 +58,9 @@ impl Col {
             sort: true,
             filter: true,
             export: true,
+            fit: true,
+            mono: false,
+            auto: false,
             tip: None,
         }
     }
@@ -61,12 +71,15 @@ impl Col {
             sort: false,
             filter: false,
             export: false,
+            fit: false,
+            auto: true,
             width: Column::auto(),
             ..Self::new(title)
         }
     }
 
     pub fn width(mut self, w: Column) -> Self {
+        self.fit = false;
         self.width = w;
         self
     }
@@ -77,6 +90,11 @@ impl Col {
 
     pub fn remainder(self) -> Self {
         self.width(Column::remainder().at_least(60.0).clip(true))
+    }
+
+    pub fn mono(mut self) -> Self {
+        self.mono = true;
+        self
     }
 
     pub fn no_sort(mut self) -> Self {
@@ -124,6 +142,10 @@ pub enum Kind {
 pub struct Spec<'a> {
     /// Keeps the table's widths and menu apart from other tables.
     pub id: egui::Id,
+    /// Ids of the filter boxes and the menu: stable even when `id` changes
+    /// (the Hosts table renews `id` when its widths are fitted again, which
+    /// must not take the focus out of a box being typed in).
+    pub stable: egui::Id,
     /// Export title (PDF heading, file name).
     pub title: &'a str,
     pub cols: &'a [Col],
@@ -150,7 +172,8 @@ impl<'a> Spec<'a> {
         cols: &'a [Col],
     ) -> Self {
         Self {
-            id: egui::Id::unique("tp-table").with(id),
+            id: egui::Id::unique("tp-table").with(&id),
+            stable: egui::Id::unique("tp-table-stable").with(id),
             title,
             cols,
             kind: Kind::Simple,
@@ -172,6 +195,12 @@ impl<'a> Spec<'a> {
 
     pub fn selected_set(mut self, f: &'a dyn Fn(usize) -> bool) -> Self {
         self.selected_set = Some(f);
+        self
+    }
+
+    /// Keeps filter boxes and the menu across `id` changes.
+    pub fn stable(mut self, id: impl std::hash::Hash + std::fmt::Debug) -> Self {
+        self.stable = egui::Id::unique("tp-table-stable").with(id);
         self
     }
 
@@ -251,6 +280,13 @@ enum Pick {
 }
 
 const HINT: &str = "Filter: text = contains · =x equal · !x not equal · >x / <x (numbers by value) · NULL empty · !NULL has a value";
+
+/// Where the pointer is for a row's click: a right-click reports no
+/// interact position, so the latest pointer position stands in.
+fn pointer(resp: &Response) -> Option<egui::Pos2> {
+    resp.interact_pointer_pos()
+        .or_else(|| resp.ctx.input(|i| i.pointer.latest_pos()))
+}
 
 /// Shortened for the menu label, as wtbapp (30 characters).
 fn short(s: &str) -> String {
@@ -338,10 +374,70 @@ fn own_items(ui: &mut Ui, f: &mut dyn FnMut(&mut Ui, Ev), ev: Ev) {
 /// The title line of a header cell (#151): the title on the left (cut with
 /// "…" when narrow), the sort caret on the right edge, the whole line lit
 /// up under the mouse when it sorts. Returns its click response.
+/// One line of `t` in the body font (strong for titles).
+fn text_width(ui: &Ui, t: &str, strong: bool) -> f32 {
+    measure(ui, t, strong, false)
+}
+
+fn measure(ui: &Ui, t: &str, strong: bool, mono: bool) -> f32 {
+    let mut rt = RichText::new(t);
+    if strong {
+        rt = rt.strong();
+    }
+    if mono {
+        rt = rt.monospace();
+    }
+    egui::WidgetText::from(rt)
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        )
+        .size()
+        .x
+}
+
+/// Widths of the text-fitted columns: the title with room for the sort
+/// caret, or the longest value of the rows on screen (a sample of 300),
+/// whichever is wider, within 40 ..= 420 points.
+fn fit_widths(
+    ui: &Ui,
+    spec: &Spec,
+    rows: &[usize],
+    text: &dyn Fn(usize, usize) -> String,
+) -> Vec<Option<f32>> {
+    let caret = egui::TextStyle::Body.resolve(ui.style()).size + 8.0;
+    spec.cols
+        .iter()
+        .enumerate()
+        .map(|(ci, c)| {
+            if !c.fit {
+                return None;
+            }
+            let head = text_width(ui, &c.title, true) + if c.sort { caret } else { 4.0 };
+            let body = rows
+                .iter()
+                .take(300)
+                .map(|&r| measure(ui, &text(r, ci), false, c.mono))
+                .fold(0.0, f32::max)
+                // Monospace and strong cells run a little wider.
+                * 1.12
+                + 10.0;
+            Some(head.max(body).clamp(40.0, 420.0).round())
+        })
+        .collect()
+}
+
 fn title_line(ui: &mut Ui, c: &Col, dir: Option<Dir>, h: f32, id: egui::Id) -> Response {
     let colors = crate::widgets::pal().head;
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
+    // A content-sized column: claim only the title, so it can shrink.
+    let w = if c.auto {
+        text_width(ui, &c.title, true).min(ui.available_width())
+    } else {
+        ui.available_width()
+    };
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
     let resp = ui.interact(rect, id, egui::Sense::click());
     let lit = c.sort && resp.hovered();
     // The highlight covers the whole cell width, gaps included.
@@ -406,14 +502,25 @@ pub fn controlled(
         .is_some_and(|fs| fs.iter().any(|f| !f.trim().is_empty()));
     let row_h = spec.row_h;
     let head_h = if filter_row { 2.0 * row_h + 6.0 } else { row_h };
-    let target_id = spec.id.with("menu-target");
+    let target_id = spec.stable.with("menu-target");
     let mut pick: Option<Pick> = None;
     let mut scrolled: Option<(f32, f32, f32)> = None;
+    let fits = fit_widths(ui, spec, rows, text);
+    // New text widths start the columns again (egui_extras keeps the
+    // widths of a table id); a drag on a border lasts until then.
+    let fit_key = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::hash::DefaultHasher::new();
+        for w in &fits {
+            w.map(|w| (w / 8.0) as i32).hash(&mut h);
+        }
+        h.finish()
+    };
     let mut draw = |ui: &mut Ui| {
         ui.style_mut().interaction.selectable_labels = false;
         let fill_h = (ui.available_height() - head_h - 4.0).max(row_h * 2.0);
         let mut b = TableBuilder::new(ui)
-            .id_salt(spec.id)
+            .id_salt(spec.id.with(fit_key))
             .striped(true)
             .resizable(spec.resizable)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
@@ -426,8 +533,11 @@ pub fn controlled(
             Kind::Simple => b.vscroll(false).auto_shrink([false, true]),
             Kind::Fill | Kind::Paged => b.auto_shrink([false, false]).max_scroll_height(fill_h),
         };
-        for c in spec.cols {
-            b = b.column(c.width);
+        for (c, fit) in spec.cols.iter().zip(&fits) {
+            b = b.column(match fit {
+                Some(w) => Column::initial(*w).at_least(30.0).clip(true),
+                None => c.width,
+            });
         }
         let table = b.header(head_h, |mut h| {
             for (ci, c) in spec.cols.iter().enumerate() {
@@ -449,6 +559,7 @@ pub fn controlled(
                                     let w = ui.available_width().max(30.0);
                                     let r = ui.add(
                                         egui::TextEdit::singleline(&mut fs[ci])
+                                            .id(spec.stable.with(("filter", ci)))
                                             .hint_text(icons::FUNNEL)
                                             .desired_width(w),
                                     );
@@ -517,13 +628,13 @@ pub fn controlled(
                     .unwrap_or(0)
                 };
                 if resp.clicked() {
-                    out.clicked = Some((src, col_at(resp.interact_pointer_pos())));
+                    out.clicked = Some((src, col_at(pointer(&resp))));
                 }
                 if resp.double_clicked() {
-                    out.double_clicked = Some((src, col_at(resp.interact_pointer_pos())));
+                    out.double_clicked = Some((src, col_at(pointer(&resp))));
                 }
                 if resp.secondary_clicked() {
-                    let c = col_at(resp.interact_pointer_pos());
+                    let c = col_at(pointer(&resp));
                     resp.ctx.data_mut(|d| d.insert_temp(target_id, (src, c)));
                 }
                 resp.context_menu(|ui| {
@@ -548,12 +659,22 @@ pub fn controlled(
             scroll.content_size.y,
         ));
     };
-    if spec.min_width > 0.0 {
+    // Wider than the room: scroll sideways rather than cut the last columns.
+    let gap = ui.spacing().item_spacing.x;
+    let natural: f32 = fits.iter().map(|w| w.unwrap_or(60.0) + gap).sum();
+    let min_width = if spec.min_width > 0.0 {
+        spec.min_width
+    } else if natural > ui.available_width() {
+        natural
+    } else {
+        0.0
+    };
+    if min_width > 0.0 {
         egui::ScrollArea::horizontal()
-            .id_salt(spec.id.with("h"))
+            .id_salt(spec.stable.with("h"))
             .auto_shrink([false, true])
             .show(ui, |ui| {
-                ui.set_min_width(spec.min_width);
+                ui.set_min_width(min_width);
                 draw(ui);
             });
     } else {
@@ -621,7 +742,8 @@ pub fn show(
         st.pager.start_mode(ui.available_width());
     }
     let mut out = if spec.kind == Kind::Paged {
-        let h = (ui.available_height() - crate::widgets::PAGER_H - 6.0).max(120.0);
+        let h = (ui.available_height() - crate::widgets::pager_height(ui.available_width()) - 6.0)
+            .max(120.0);
         let o = ui
             .allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
                 ui.set_min_height(h);

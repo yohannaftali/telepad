@@ -16,7 +16,7 @@ use telepad_core::db::{
 
 use crate::icons::{self, label as il};
 use crate::widgets::{
-    Act, PAGER_H, act_button, act_small, act_text, cell_text, pager_bar, usage_color,
+    Act, act_button, act_small, act_text, cell_text, pager_bar, pager_height, usage_color,
 };
 
 const ROW: f32 = 20.0;
@@ -1048,12 +1048,12 @@ fn table_tab(
             let key = info.row_key().unwrap_or_default();
             let cols = [
                 Col::new("#"),
-                Col::new("Name"),
-                Col::new("Type"),
-                Col::new("Length / set"),
+                Col::new("Name").mono(),
+                Col::new("Type").mono(),
+                Col::new("Length / set").mono(),
                 Col::new("Unsigned"),
                 Col::new("NULL"),
-                Col::new("Default"),
+                Col::new("Default").mono(),
                 Col::new("Extra"),
                 Col::new("Comment"),
             ];
@@ -1653,7 +1653,7 @@ fn data_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg
         return;
     };
     // The grid scrolls above the pager footer, which stays at the bottom (#138).
-    let h = (ui.available_height() - PAGER_H - 6.0).max(120.0);
+    let h = (ui.available_height() - pager_height(ui.available_width()) - 6.0).max(120.0);
     d.pager.start_mode(ui.available_width());
     let (near_bottom, fits) = ui
         .allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
@@ -1909,7 +1909,7 @@ fn data_grid(
     }
     for (_, resp) in &o.rows {
         if resp.secondary_clicked()
-            && let Some(p) = resp.interact_pointer_pos()
+            && let Some(p) = resp.ctx.input(|i| i.pointer.latest_pos())
             && let Some(r) = o
                 .rows
                 .iter()
