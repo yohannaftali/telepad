@@ -335,5 +335,5 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #151 | feat(ui): shared table header component — header background, hover highlight, right-aligned sort icon | closed | 2026-11-25 |
 | #152 | feat(ui): pager footer — record info left, controls right, continuous mode toggle (wtbapp / Senar style) | closed | 2026-11-25 |
 | #153 | feat(ui): table framework — simple and paged tables, sort and filter row everywhere, right-click menu with Filter by, Clear All Filters, export CSV / Excel / PDF, Copy as JSON | closed | 2026-11-25 |
-| #156 | fix(ui): simple tables do not fill the page like Hosts, and header title / filter heights are unbalanced | ready-for-review | 2026-11-25 |
-| #157 | feat(ui): Hosts cards with equal height and whole-card click, sortable Group / Cluster columns instead of By group, shown by default | ready-for-review | 2026-11-25 |
+| #156 | fix(ui): simple tables do not fill the page like Hosts, and header title / filter heights are unbalanced | closed | 2026-11-25 |
+| #157 | feat(ui): Hosts cards with equal height and whole-card click, sortable Group / Cluster columns instead of By group, shown by default | closed | 2026-11-25 |
