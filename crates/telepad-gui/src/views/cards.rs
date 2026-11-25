@@ -28,17 +28,29 @@ pub fn cards(ui: &mut egui::Ui, m: &Model, rows: &[usize], out: &mut Vec<Msg>) {
             ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
             let outer = CARD_WIDTH + 2.0 * CARD_MARGIN + 2.0;
             let per_row = (((ui.available_width() + gap) / (outer + gap)).floor() as usize).max(1);
+            // Every card as tall as the tallest one (#157), measured last frame.
+            let height_id = ui.scope_id().with("card-height");
+            let height: f32 = ui
+                .data(|d| d.get_temp(height_id))
+                .unwrap_or(CARD_MIN_HEIGHT)
+                .max(CARD_MIN_HEIGHT);
+            let mut tallest = CARD_MIN_HEIGHT;
             for chunk in rows.chunks(per_row) {
                 ui.horizontal(|ui| {
                     for &i in chunk {
-                        card(ui, m, i, out);
+                        tallest = tallest.max(card(ui, m, i, height, out));
                     }
                 });
+            }
+            if (tallest - height).abs() > 0.5 {
+                ui.data_mut(|d| d.insert_temp(height_id, tallest));
+                ui.ctx().request_repaint();
             }
         });
 }
 
-fn card(ui: &mut egui::Ui, m: &Model, i: usize, out: &mut Vec<Msg>) {
+/// One card, `height` tall at least; returns the height its content needs.
+fn card(ui: &mut egui::Ui, m: &Model, i: usize, height: f32, out: &mut Vec<Msg>) -> f32 {
     let h = &m.hosts[i];
     // Text must not take the right-click meant for the card's menu (#83).
     ui.style_mut().interaction.selectable_labels = false;
@@ -46,7 +58,7 @@ fn card(ui: &mut egui::Ui, m: &Model, i: usize, out: &mut Vec<Msg>) {
         .inner_margin(egui::Margin::same(CARD_MARGIN as i8))
         .show(ui, |ui| {
             ui.set_width(CARD_WIDTH);
-            ui.set_min_height(CARD_MIN_HEIGHT);
+            let top = ui.min_rect().top();
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     status_dot(ui, h);
@@ -146,9 +158,19 @@ fn card(ui: &mut egui::Ui, m: &Model, i: usize, out: &mut Vec<Msg>) {
                         .small(),
                 );
             });
+            let natural = ui.min_rect().bottom() - top;
+            ui.set_min_height(height);
+            natural
         });
-    // SSH, Files, databases, edit… on right-click (#83).
-    card.response
+    // A click anywhere opens the host (#157); SSH, Files, databases, edit… on
+    // right-click (#83).
+    let resp = card
+        .response
         .interact(egui::Sense::click())
-        .context_menu(|ui| host_menu(ui, m, i, out));
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if resp.clicked() {
+        out.push(Msg::Select(Some(i)));
+    }
+    resp.context_menu(|ui| host_menu(ui, m, i, out));
+    card.inner
 }

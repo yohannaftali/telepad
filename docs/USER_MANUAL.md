@@ -235,6 +235,12 @@ window narrower than 768 points. In a narrow window the footer wraps onto a seco
   apart from the rows. A title that sorts lights up (accent background, white text) under
   the mouse; the sort arrow (▲ ascending, ▼ descending) sits at the **right edge** of the
   title cell, and a long title is cut with "…" before the arrow, never the arrow itself.
+- **Widths** (#156): every table fills its page, as the Hosts table does, and follows each
+  resize. Columns get the width their text needs, spare room goes to the long text columns,
+  and on a narrow page the long columns give way first, down to their titles; after that
+  the table scrolls sideways. Button columns always keep their buttons. If you drag a
+  border, that column keeps its width until you double-click the border or right-click a
+  title ▸ **Auto-fit columns**. The filter box and the title row have the same height.
 - **Sort:** click a column title: ascending, again descending, a third time back to the
   table's own order. Numbers sort by value, also with a unit (`5%` before `40%`, `980 MiB`
   before `1.5 GiB`, `5m ago` before `2h 5m ago`), addresses and names in natural order
@@ -288,10 +294,11 @@ restart. The handles are hidden while the search box has text or a column is sor
 
 Click **Hosts** in the sidebar to see every host at once. The page header has the
 **search box** (filters by host name, address, OS or container name) and the **View** switch:
-**Table** or **Cards**; the choice is remembered. **By group** lists the hosts group by group
-(in the order of the [Groups](#groups-and-clusters) page, ungrouped hosts last; the sort
-applies inside each group) and shows the **Group** column; the **Group** and **Cluster**
-boxes add those columns to the table. They last until Telepad closes.
+**Table** or **Cards**; the choice is remembered. The **Group** and **Cluster** boxes (both on
+by default) show those columns in the table; they last until Telepad closes. To list hosts by
+group or cluster, click the **Group** or **Cluster** column title (A to Z, again Z to A, a
+third time back to inventory order; hosts without one stay last), or pick it under **Sort by**
+in the cards view (#157).
 
 ## Groups and clusters
 
@@ -310,7 +317,7 @@ how many hosts each has, how many are down and how many have flags. The last row
 |---|---|
 | Search box | Filters by name or description |
 | **Add group… / Add cluster…** | Name (one line, up to 64 characters, unique ignoring case; *Ungrouped* / *No cluster* are reserved) and an optional description |
-| **⌃ / ⌄** | Moves it up or down (the order of the list, of **By group** and of the menus) |
+| **⌃ / ⌄** | Moves it up or down (the order of the list and of the menus) |
 | **Edit** | Rename or change the description; its hosts move along, and an open page follows the new name |
 | **Delete** | Asks first; the hosts stay in Telepad without that group / cluster |
 | Click a row | Opens **Hosts - [name]** |
@@ -396,12 +403,13 @@ name, address, OS or container name.
 
 ### Cards
 
-One card per host, wrapping to the window width: status, OS logo, alias (click it for the
-detail page), address and description, its group and cluster (when it has them), OS, CPU / RAM / fullest-disk bars, hottest
+One card per host, wrapping to the window width, every card the same height (#157). Click
+anywhere on a card for the host page, right-click it for the host menu. A card shows status,
+OS logo, alias, address and description, its group and cluster (when it has them), OS, CPU / RAM / fullest-disk bars, hottest
 temperature, Docker summary, how long ago it was checked, and an **SSH** / **RDP** button.
 Unreachable hosts show their error instead of the bars. The search box filters the cards;
-**Sort by** picks the order (the same columns as the table, or inventory order) and the
-arrow button next to it reverses it.
+**Sort by** picks the order (the same columns as the table, including Group and Cluster, or
+inventory order) and the arrow button next to it reverses it.
 
 ### Maintenance flags
 

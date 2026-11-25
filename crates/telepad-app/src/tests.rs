@@ -1146,7 +1146,11 @@ fn overview_card_view_is_saved_and_sort_can_be_picked() {
         "view-only, nothing saved"
     );
     assert_eq!(s.drafts.sort, pick);
-    assert_eq!(SortKey::ALL.len(), 12);
+    assert_eq!(
+        SortKey::ALL.len(),
+        14,
+        "12 columns plus Group and Cluster (#157)"
+    );
     assert!(SortKey::ALL.iter().all(|k| !k.title().is_empty()));
 }
 

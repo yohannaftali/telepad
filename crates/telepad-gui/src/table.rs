@@ -406,7 +406,7 @@ fn fit_widths(
     spec: &Spec,
     rows: &[usize],
     text: &dyn Fn(usize, usize) -> String,
-) -> Vec<Option<f32>> {
+) -> Vec<Option<(f32, f32)>> {
     let caret = egui::TextStyle::Body.resolve(ui.style()).size + 8.0;
     spec.cols
         .iter()
@@ -415,7 +415,7 @@ fn fit_widths(
             if !c.fit {
                 return None;
             }
-            let head = text_width(ui, &c.title, true) + if c.sort { caret } else { 4.0 };
+            let head = text_width(ui, &c.title, true) + if c.sort { caret } else { 4.0 } + 6.0;
             let body = rows
                 .iter()
                 .take(300)
@@ -424,9 +424,72 @@ fn fit_widths(
                 // Monospace and strong cells run a little wider.
                 * 1.12
                 + 10.0;
-            Some(head.max(body).clamp(40.0, 420.0).round())
+            let want = head.max(body).clamp(40.0, 420.0).round();
+            Some((want, head.clamp(30.0, want)))
         })
         .collect()
+}
+
+/// Widths of the text-fitted columns for `room` points (#156, as the Hosts
+/// table #143): each wants its text, a column the user sized keeps that
+/// width; spare room goes to the long text columns (natural width of 100
+/// points or more, else all), in proportion to their text; too little room
+/// shrinks them toward their titles in proportion to the room they have
+/// above them (then the table scrolls sideways).
+pub fn fill_widths(want: &[f32], least: &[f32], manual: &[Option<f32>], room: f32) -> Vec<f32> {
+    let n = want.len();
+    let fixed = |i: usize| manual.get(i).copied().flatten();
+    let mut w: Vec<f32> = (0..n)
+        .map(|i| fixed(i).unwrap_or(want[i]).max(least[i]))
+        .collect();
+    let total: f32 = w.iter().sum();
+    let free: Vec<usize> = (0..n).filter(|&i| fixed(i).is_none()).collect();
+    if total < room {
+        let long: Vec<usize> = free.iter().copied().filter(|&i| want[i] >= 100.0).collect();
+        let grow = if long.is_empty() { free } else { long };
+        let weight: f32 = grow.iter().map(|&i| w[i]).sum();
+        if weight > 0.0 {
+            let spare = room - total;
+            for &i in &grow {
+                w[i] += spare * w[i] / weight;
+            }
+        }
+    } else if total > room {
+        let give: f32 = free.iter().map(|&i| w[i] - least[i]).sum();
+        if give > 0.0 {
+            let k = ((total - room) / give).min(1.0);
+            for &i in &free {
+                w[i] -= (w[i] - least[i]) * k;
+            }
+        }
+    }
+    w
+}
+
+/// Width a column that is not text-fitted needs: what it was drawn at, or
+/// its widest content when that was more (squeezed buttons), 60 at first.
+fn other_width(lay: &Layout, c: usize) -> f32 {
+    let w = lay.seen[c].max(lay.content[c]);
+    if w > 0.0 { w } else { 60.0 }
+}
+
+/// Column layout of a table with text-fitted columns, kept between frames
+/// (the Hosts table's #143 rules for every table, #156).
+#[derive(Clone, Default)]
+struct Layout {
+    /// Widths the user dragged a column to; `None` = automatic.
+    manual: Vec<Option<f32>>,
+    /// Widths given to egui_extras this frame.
+    widths: Vec<f32>,
+    /// Each column's width as last drawn.
+    seen: Vec<f32>,
+    /// Widest cell content of the columns sized by their content (buttons),
+    /// which the page may have squeezed: their real need.
+    content: Vec<f32>,
+    left: Vec<f32>,
+    header: Option<egui::Rect>,
+    pressed: bool,
+    round: u32,
 }
 
 fn title_line(ui: &mut Ui, c: &Col, dir: Option<Dir>, h: f32, id: egui::Id) -> Response {
@@ -501,21 +564,108 @@ pub fn controlled(
         .as_deref()
         .is_some_and(|fs| fs.iter().any(|f| !f.trim().is_empty()));
     let row_h = spec.row_h;
-    let head_h = if filter_row { 2.0 * row_h + 6.0 } else { row_h };
+    // Filter box and title line have the same height (#156).
+    let head_h = if filter_row {
+        2.0 * row_h + ui.spacing().item_spacing.y
+    } else {
+        row_h
+    };
+    let font_h = ui.text_style_height(&egui::TextStyle::Body);
+    let box_margin = ((row_h - font_h) / 2.0 - 1.0).clamp(1.0, 8.0);
     let target_id = spec.stable.with("menu-target");
     let mut pick: Option<Pick> = None;
     let mut scrolled: Option<(f32, f32, f32)> = None;
-    let fits = fit_widths(ui, spec, rows, text);
-    // New text widths start the columns again (egui_extras keeps the
-    // widths of a table id); a drag on a border lasts until then.
+    let mut used = vec![0.0_f32; n];
+    let natural = fit_widths(ui, spec, rows, text);
+    let any_fit = natural.iter().any(Option::is_some);
+    let gap = ui.spacing().item_spacing.x;
+    let layout_id = spec.stable.with(("layout", n));
+    let mut lay: Layout = ui.data(|d| d.get_temp(layout_id)).unwrap_or_default();
+    lay.manual.resize(n, None);
+    lay.seen.resize(n, 0.0);
+    lay.content.resize(n, 0.0);
+    // A press in the header row may be a border drag: the widths stay while
+    // it lasts, and a dragged column keeps its width when it ends.
+    let in_header = |p: egui::Pos2| lay.header.is_some_and(|h| h.expand(6.0).contains(p));
+    let (resizing, released, dbl) = ui.input(|i| {
+        let from_header = i.pointer.press_origin().is_some_and(in_header);
+        let dbl = i
+            .pointer
+            .button_double_clicked(egui::PointerButton::Primary)
+            .then(|| i.pointer.latest_pos())
+            .flatten()
+            .filter(|p| in_header(*p));
+        (
+            i.pointer.primary_down() && from_header,
+            i.pointer.primary_released() && (from_header || lay.pressed),
+            dbl,
+        )
+    });
+    if let Some(p) = dbl {
+        // Double-click on a border: that column goes back to automatic.
+        let near = (0..n.saturating_sub(1))
+            .filter_map(|c| {
+                lay.left
+                    .get(c + 1)
+                    .map(|l| (c, (p.x - (l - gap / 2.0)).abs()))
+            })
+            .filter(|&(_, d)| d <= 10.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((c, _)) = near {
+            lay.manual[c] = None;
+        }
+        lay.round = lay.round.wrapping_add(1);
+    } else if released && lay.widths.len() == n {
+        for (c, nat) in natural.iter().enumerate() {
+            if nat.is_some() && (lay.seen[c] - lay.widths[c]).abs() > 1.5 {
+                lay.manual[c] = Some(lay.seen[c]);
+                lay.round = lay.round.wrapping_add(1);
+            }
+        }
+    }
+    lay.pressed = resizing;
+    let fits: Vec<Option<f32>> = if resizing && lay.widths.len() == n {
+        (0..n).map(|c| natural[c].map(|_| lay.widths[c])).collect()
+    } else {
+        // Room for the fitted columns: the page less the other columns (as
+        // last drawn) and the gaps, and the scroll bar of a scrolling table.
+        let bar = if spec.kind == Kind::Simple { 0.0 } else { 14.0 };
+        let others: f32 = (0..n)
+            .filter(|&c| natural[c].is_none())
+            .map(|c| other_width(&lay, c))
+            .sum();
+        let room = ui.available_width() - gap * n as f32 - others - bar;
+        let idx: Vec<usize> = (0..n).filter(|&c| natural[c].is_some()).collect();
+        let want: Vec<f32> = idx
+            .iter()
+            .map(|&c| natural[c].map_or(0.0, |w| w.0))
+            .collect();
+        let least: Vec<f32> = idx
+            .iter()
+            .map(|&c| natural[c].map_or(0.0, |w| w.1))
+            .collect();
+        let manual: Vec<Option<f32>> = idx.iter().map(|&c| lay.manual[c]).collect();
+        let w = fill_widths(&want, &least, &manual, room);
+        let mut out_w = vec![None; n];
+        for (k, &c) in idx.iter().enumerate() {
+            out_w[c] = Some(w[k].floor());
+        }
+        out_w
+    };
+    lay.widths = (0..n).map(|c| fits[c].unwrap_or(0.0)).collect();
+    // New widths start the columns again (egui_extras keeps the widths of a
+    // table id); a drag on a border lasts until double-click / Auto-fit.
     let fit_key = {
         use std::hash::{Hash, Hasher};
         let mut h = std::hash::DefaultHasher::new();
+        lay.round.hash(&mut h);
         for w in &fits {
-            w.map(|w| (w / 8.0) as i32).hash(&mut h);
+            w.map(|w| w as i32).hash(&mut h);
         }
         h.finish()
     };
+    let last_fit = (0..n).rev().find(|&c| fits[c].is_some());
+    let mut auto_fit = false;
     let mut draw = |ui: &mut Ui| {
         ui.style_mut().interaction.selectable_labels = false;
         let fill_h = (ui.available_height() - head_h - 4.0).max(row_h * 2.0);
@@ -533,9 +683,15 @@ pub fn controlled(
             Kind::Simple => b.vscroll(false).auto_shrink([false, true]),
             Kind::Fill | Kind::Paged => b.auto_shrink([false, false]).max_scroll_height(fill_h),
         };
-        for (c, fit) in spec.cols.iter().zip(&fits) {
+        for (ci, (c, fit)) in spec.cols.iter().zip(&fits).enumerate() {
+            let least = natural[ci].map_or(30.0, |w| w.1.min(30.0));
             b = b.column(match fit {
-                Some(w) => Column::initial(*w).at_least(30.0).clip(true),
+                // The last fitted column takes what is left, so the table
+                // ends at the page edge.
+                Some(_) if Some(ci) == last_fit && ci + 1 == n => {
+                    Column::remainder().at_least(least).clip(true)
+                }
+                Some(w) => Column::initial(*w).at_least(least).clip(true),
                 None => c.width,
             });
         }
@@ -560,6 +716,7 @@ pub fn controlled(
                                     let r = ui.add(
                                         egui::TextEdit::singleline(&mut fs[ci])
                                             .id(spec.stable.with(("filter", ci)))
+                                            .margin(egui::Margin::symmetric(4, box_margin as i8))
                                             .hint_text(icons::FUNNEL)
                                             .desired_width(w),
                                     );
@@ -572,7 +729,7 @@ pub fn controlled(
                                     r.on_hover_text(HINT);
                                 }
                                 _ => {
-                                    ui.add_space(row_h + 2.0);
+                                    ui.add_space(row_h);
                                 }
                             }
                         }
@@ -598,6 +755,10 @@ pub fn controlled(
                         }
                         resp.context_menu(|ui| {
                             own_items(ui, f, Ev::HeaderMenu);
+                            if any_fit && ui.button("Auto-fit columns").clicked() {
+                                auto_fit = true;
+                                ui.close();
+                            }
                             if let Some(p) = default_items(ui, None, filter_row, filtered) {
                                 pick = Some(p);
                             }
@@ -614,8 +775,12 @@ pub fn controlled(
                     spec.selected == Some(src) || spec.selected_set.is_some_and(|f| f(src)),
                 );
                 let mut rects = Vec::with_capacity(n);
-                for ci in 0..n {
-                    let (r, _) = row.col(|ui| f(ui, Ev::Cell { row: src, col: ci }));
+                for (ci, need) in used.iter_mut().enumerate() {
+                    let (r, _) = row.col(|ui| {
+                        let start = ui.cursor().min.x;
+                        f(ui, Ev::Cell { row: src, col: ci });
+                        *need = need.max(ui.min_rect().right() - start);
+                    });
                     rects.push(r);
                 }
                 let resp = row.response();
@@ -660,12 +825,13 @@ pub fn controlled(
         ));
     };
     // Wider than the room: scroll sideways rather than cut the last columns.
-    let gap = ui.spacing().item_spacing.x;
-    let natural: f32 = fits.iter().map(|w| w.unwrap_or(60.0) + gap).sum();
+    let total: f32 = (0..n)
+        .map(|c| fits[c].unwrap_or_else(|| other_width(&lay, c)) + gap)
+        .sum();
     let min_width = if spec.min_width > 0.0 {
         spec.min_width
-    } else if natural > ui.available_width() {
-        natural
+    } else if total > ui.available_width() + 1.0 {
+        total
     } else {
         0.0
     };
@@ -680,6 +846,29 @@ pub fn controlled(
     } else {
         draw(ui);
     }
+    for (c, nat) in natural.iter().enumerate() {
+        if nat.is_none() && used[c] > 0.0 {
+            lay.content[c] = used[c] + 6.0;
+        }
+    }
+    lay.left = out.header.iter().map(|r| r.left()).collect();
+    lay.seen = (0..n)
+        .map(|c| match (out.header.get(c), out.header.get(c + 1)) {
+            (Some(r), Some(next)) => next.left() - r.left() - gap,
+            (Some(r), None) => r.width(),
+            _ => 0.0,
+        })
+        .collect();
+    lay.header = Some(
+        out.header
+            .iter()
+            .fold(egui::Rect::NOTHING, |a, r| a.union(*r)),
+    );
+    if auto_fit {
+        lay.manual = vec![None; n];
+        lay.round = lay.round.wrapping_add(1);
+    }
+    ui.data_mut(|d| d.insert_temp(layout_id, lay));
     // Continuous mode (#152): within 80 points of the bottom loads more
     // (wtbapp); a view the rows do not fill yet is "at the bottom" too.
     if let Some((offset, view, content)) = scrolled {
@@ -868,4 +1057,38 @@ pub fn mono(ui: &mut Ui, t: &str) {
             .truncate()
             .selectable(false),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fill_widths;
+
+    #[test]
+    fn spare_room_goes_to_long_text_columns() {
+        // A long text column (300) and two short ones (50, 60).
+        let w = fill_widths(&[300.0, 50.0, 60.0], &[60.0, 40.0, 40.0], &[None; 3], 610.0);
+        assert_eq!(w, vec![500.0, 50.0, 60.0]);
+        // No long column: all share in proportion.
+        let w = fill_widths(&[50.0, 50.0], &[40.0, 40.0], &[None; 2], 200.0);
+        assert_eq!(w, vec![100.0, 100.0]);
+    }
+
+    #[test]
+    fn too_little_room_shrinks_toward_the_titles() {
+        let want = [300.0, 50.0];
+        let least = [100.0, 40.0];
+        let w = fill_widths(&want, &least, &[None; 2], 290.0);
+        assert!((w.iter().sum::<f32>() - 290.0).abs() < 0.01, "{w:?}");
+        assert!(w[0] < 300.0 && w[0] > 100.0 && w[1] < 50.0 && w[1] >= 40.0);
+        // Far too narrow: every column at its title width (the table scrolls).
+        assert_eq!(fill_widths(&want, &least, &[None; 2], 10.0), least.to_vec());
+    }
+
+    #[test]
+    fn a_column_sized_by_hand_keeps_its_width() {
+        let manual = [Some(120.0), None];
+        let w = fill_widths(&[300.0, 50.0], &[60.0, 40.0], &manual, 1000.0);
+        assert_eq!(w[0], 120.0);
+        assert_eq!(w[1], 880.0);
+    }
 }

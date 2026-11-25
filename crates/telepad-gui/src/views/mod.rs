@@ -101,15 +101,11 @@ fn page(
         Win::Overview => {
             overview_toolbar(ui, d, out);
             // Group / Cluster columns and group order (#144, #145).
-            let mut extra: Vec<telepad_core::config::SetKind> =
+            let extra: Vec<telepad_core::config::SetKind> =
                 d.sets.hosts_columns.iter().copied().collect();
-            if d.sets.hosts_by_group && !extra.contains(&telepad_core::config::SetKind::Group) {
-                extra.insert(0, telepad_core::config::SetKind::Group);
-            }
             let view = overview::TableView {
                 only: None,
                 extra: &extra,
-                by_group: d.sets.hosts_by_group,
                 salt: 0,
             };
             if d.overview_cards {
@@ -176,13 +172,10 @@ fn overview_toolbar(ui: &mut egui::Ui, d: &mut Drafts, out: &mut Vec<Msg>) {
         {
             out.push(Msg::SetOverviewCards(true));
         }
-        // Group by group / Group and Cluster columns (#144, #145).
-        ui.separator();
-        ui.checkbox(&mut d.sets.hosts_by_group, "By group")
-            .on_hover_text(
-                "Hosts in group order, ungrouped hosts last; the sort applies inside each group",
-            );
+        // Group and Cluster columns (#144, #145); a header click sorts by
+        // them (#157).
         if !d.overview_cards {
+            ui.separator();
             for kind in telepad_core::config::SetKind::ALL {
                 let mut on = d.sets.hosts_columns.contains(&kind);
                 if ui

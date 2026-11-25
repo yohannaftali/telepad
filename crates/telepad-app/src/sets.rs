@@ -93,7 +93,7 @@ pub struct AddHosts {
     pub chosen: BTreeSet<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SetsDraft {
     /// Search box of the Groups / Clusters page.
     pub filter: BTreeMap<SetKind, String>,
@@ -104,10 +104,23 @@ pub struct SetsDraft {
     /// Waiting for the delete confirmation.
     pub delete: Option<(SetKind, String)>,
     pub add_hosts: Option<AddHosts>,
-    /// Hosts page: in group order, ungrouped last (shows the Group column).
-    pub hosts_by_group: bool,
-    /// Hosts page: Group / Cluster columns shown.
+    /// Hosts page: Group / Cluster columns shown (both by default, #157);
+    /// a header click sorts by them.
     pub hosts_columns: BTreeSet<SetKind>,
+}
+
+impl Default for SetsDraft {
+    fn default() -> Self {
+        Self {
+            filter: BTreeMap::new(),
+            page_filter: BTreeMap::new(),
+            page_cards: BTreeSet::new(),
+            form: None,
+            delete: None,
+            add_hosts: None,
+            hosts_columns: SetKind::ALL.into_iter().collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

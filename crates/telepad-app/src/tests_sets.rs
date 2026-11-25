@@ -396,3 +396,43 @@ fn group_pages_come_back_with_the_workspace() {
     }
     assert!(s2.model.ws.is_open(Win::Sets(SetKind::Cluster)));
 }
+
+#[test]
+fn group_and_cluster_columns_sort_on_a_header_click_and_show_by_default() {
+    // #157: no "By group" order any more; Group / Cluster sort like any
+    // column, hosts without one last both ways.
+    let now = Instant::now();
+    let mut s = started(now);
+    loaded(&mut s, now);
+    assert_eq!(
+        s.drafts.sets.hosts_columns,
+        SetKind::ALL.into_iter().collect(),
+        "Group and Cluster columns are on by default"
+    );
+    let names = |s: &State| -> Vec<String> {
+        overview_rows(&s.model, "", s.drafts.sort)
+            .into_iter()
+            .map(|i| s.model.hosts[i].entry.alias.clone())
+            .collect()
+    };
+    update(&mut s, Msg::SortBy(SortKey::Group), now);
+    assert_eq!(names(&s), ["web2", "web1", "nas"], "Lab, Office, then none");
+    update(&mut s, Msg::SortBy(SortKey::Group), now);
+    assert_eq!(
+        names(&s),
+        ["web1", "web2", "nas"],
+        "Office, Lab, none still last"
+    );
+    update(&mut s, Msg::SortBy(SortKey::Group), now);
+    assert_eq!(
+        s.drafts.sort,
+        Sort::default(),
+        "third click: inventory order"
+    );
+    update(&mut s, Msg::SortBy(SortKey::Cluster), now);
+    assert_eq!(names(&s), ["web1", "web2", "nas"]);
+    assert!(
+        SortKey::ALL.contains(&SortKey::Cluster),
+        "the cards' Sort by offers it"
+    );
+}

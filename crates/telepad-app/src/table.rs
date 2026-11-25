@@ -26,11 +26,14 @@ pub enum SortKey {
     Updated,
     /// Maintenance flags (end of support, reboot, updates), most urgent first.
     Flags,
+    /// Group / cluster name (#157), A to Z; hosts without one last.
+    Group,
+    Cluster,
 }
 
 impl SortKey {
     /// Every key, in column order (for the card view's picker).
-    pub const ALL: [SortKey; 12] = [
+    pub const ALL: [SortKey; 14] = [
         Self::Status,
         Self::Host,
         Self::Description,
@@ -43,6 +46,8 @@ impl SortKey {
         Self::Docker,
         Self::Updated,
         Self::Flags,
+        Self::Group,
+        Self::Cluster,
     ];
 
     pub fn title(self) -> &'static str {
@@ -59,6 +64,8 @@ impl SortKey {
             Self::Docker => "Docker",
             Self::Updated => "Updated",
             Self::Flags => "Flags",
+            Self::Group => "Group",
+            Self::Cluster => "Cluster",
         }
     }
 
@@ -209,6 +216,8 @@ fn sort_value(h: &HostState, key: SortKey) -> Option<Value> {
         // Most recent first when descending: newer Instants are larger.
         SortKey::Updated => h.updated.map(Value::At),
         SortKey::Flags => r.map(|r| Value::Num(host_urgency(r) as f64)),
+        SortKey::Group => text(&h.entry.group),
+        SortKey::Cluster => text(&h.entry.cluster),
     }
 }
 
