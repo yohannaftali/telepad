@@ -2,6 +2,15 @@
 
 Newest first.
 
+## [2026-11-25] — Tested and merged: #160 (PR #161)
+- Tested on Windows 11 with a release build. The GUI was driven by mouse automation and checked with
+  screenshots.
+- Throwaway inventory: groups dragged in both directions, the order survives a restart, and a column sort hides
+  the handles and shows the hint.
+- Real inventory, view only: the Clusters page shows the handles, and a row click still opens the hosts page.
+- CI passed on Windows, macOS and Linux, plus `db-live` and `files-live`. The issue was closed with a test
+  comment.
+
 ## [2026-11-25] — feat(hosts): reorder groups and clusters by drag and drop (#160)
 - Issue #160 addressed on GitHub (branch `160-sets-drag`)
 - `telepad-app/src/sets.rs`: `StMsg::MoveTo { kind, name, to }`: the set moves to `to` (counted as
