@@ -420,7 +420,6 @@ pub fn set_hosts_page(
     let view = TableView {
         only: Some((kind, &p.name)),
         extra: &other,
-        by_group: false,
         salt: id,
     };
     if cards {

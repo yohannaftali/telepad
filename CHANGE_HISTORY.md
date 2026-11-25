@@ -2,6 +2,22 @@
 
 Newest first.
 
+## [2026-11-25] — feat(ui): Hosts cards — equal height, whole-card click; Group / Cluster sort instead of By group (#157)
+- Issue #157 addressed on GitHub (branch `157-cards-sort`, on top of #156)
+- `telepad-app`:
+  - `table.rs`: `SortKey::Group` / `Cluster` (A to Z, hosts without one last), also in `ALL` for the cards'
+    Sort by picker.
+  - `sets.rs`: `hosts_by_group` removed, and `hosts_columns` defaults to Group and Cluster.
+- `telepad-gui`:
+  - `views/mod.rs`: the "By group" checkbox is gone.
+  - `views/overview.rs`: Group / Cluster columns are sortable, and `TableView::by_group` is removed.
+  - `views/sets.rs`.
+  - `views/cards.rs`: every card is as tall as the tallest (measured each frame), and a click anywhere on a card
+    opens the host.
+- Verified: fmt, clippy, tests (new `group_and_cluster_columns_sort_on_a_header_click_and_show_by_default`); GUI
+  on Windows: Group / Cluster checked by default, Group header sort, cards with equal height and Sort by Group,
+  and a card click opens the host page.
+
 ## [2026-11-25] — fix(ui): every table fills its page; title row and filter box have the same height (#156)
 - Issue #156 addressed on GitHub (branch `156-table-fill`)
 - `telepad-gui/src/table.rs`:

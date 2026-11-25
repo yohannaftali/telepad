@@ -44,16 +44,14 @@ const CELL_PAD: f32 = 12.0;
 type Col = (&'static str, Option<SortKey>, f32, f32);
 
 /// What a hosts table shows (#144, #145): every host (the Hosts page) or
-/// the hosts of one group / cluster, extra Group / Cluster columns, and on
-/// the Hosts page optionally grouped by group.
+/// the hosts of one group / cluster, and extra Group / Cluster columns
+/// (sortable by a header click, #157).
 #[derive(Clone, Copy, Default)]
 pub struct TableView<'a> {
     /// Only the hosts of this group / cluster ("" = the fixed entry).
     pub only: Option<(SetKind, &'a str)>,
     /// Group / Cluster columns, before Updated.
     pub extra: &'a [SetKind],
-    /// Hosts in group order (ungrouped last), the current sort inside.
-    pub by_group: bool,
     /// Keeps each page's column layout apart.
     pub salt: u64,
 }
@@ -63,33 +61,22 @@ pub struct TableView<'a> {
 fn columns(extra: &[SetKind]) -> Vec<Col> {
     let mut c: Vec<Col> = COLUMNS[..COLUMNS.len() - 1].to_vec();
     for k in extra {
-        c.push((k.title(), None, 120.0, 60.0));
+        let key = match k {
+            SetKind::Group => SortKey::Group,
+            SetKind::Cluster => SortKey::Cluster,
+        };
+        c.push((k.title(), Some(key), 120.0, 60.0));
     }
     c.push(COLUMNS[COLUMNS.len() - 1]);
     c
 }
 
 /// Hosts of a view in display order: search and sort as on the Hosts page,
-/// then only the hosts of the group / cluster; with `by_group` the groups
-/// in their order, ungrouped hosts last.
+/// then only the hosts of the group / cluster.
 pub fn view_rows(m: &Model, filter: &str, sort: Sort, view: &TableView) -> Vec<usize> {
     let mut rows = overview_rows(m, filter, sort);
     if let Some((kind, name)) = view.only {
         rows.retain(|&i| m.hosts[i].entry.set(kind).eq_ignore_ascii_case(name));
-    }
-    if view.by_group {
-        let order = telepad_app::sets::list(m, SetKind::Group);
-        let rank = |i: usize| {
-            let g = &m.hosts[i].entry.group;
-            if g.is_empty() {
-                return usize::MAX;
-            }
-            order
-                .iter()
-                .position(|s| s.name.eq_ignore_ascii_case(g))
-                .unwrap_or(usize::MAX - 1)
-        };
-        rows.sort_by_key(|&i| rank(i));
     }
     rows
 }
@@ -372,8 +359,7 @@ pub fn table(
             .unwrap_or_default()
     };
     // Dragging rows changes the inventory order: only on the full list.
-    let reorder =
-        view.only.is_none() && !view.by_group && can_reorder(filter, false, sort) && !st.filtered();
+    let reorder = view.only.is_none() && can_reorder(filter, false, sort) && !st.filtered();
     let accent = ui.visuals().selection.bg_fill;
     let layout_id = egui::Id::unique("overview-layout").with((view.salt, cols.len()));
     let mut lay: Layout = ui.data(|d| d.get_temp(layout_id)).unwrap_or_default();

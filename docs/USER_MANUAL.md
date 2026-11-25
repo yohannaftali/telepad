@@ -294,10 +294,11 @@ restart. The handles are hidden while the search box has text or a column is sor
 
 Click **Hosts** in the sidebar to see every host at once. The page header has the
 **search box** (filters by host name, address, OS or container name) and the **View** switch:
-**Table** or **Cards**; the choice is remembered. **By group** lists the hosts group by group
-(in the order of the [Groups](#groups-and-clusters) page, ungrouped hosts last; the sort
-applies inside each group) and shows the **Group** column; the **Group** and **Cluster**
-boxes add those columns to the table. They last until Telepad closes.
+**Table** or **Cards**; the choice is remembered. The **Group** and **Cluster** boxes (both on
+by default) show those columns in the table; they last until Telepad closes. To list hosts by
+group or cluster, click the **Group** or **Cluster** column title (A to Z, again Z to A, a
+third time back to inventory order; hosts without one stay last), or pick it under **Sort by**
+in the cards view (#157).
 
 ## Groups and clusters
 
@@ -316,7 +317,7 @@ how many hosts each has, how many are down and how many have flags. The last row
 |---|---|
 | Search box | Filters by name or description |
 | **Add group… / Add cluster…** | Name (one line, up to 64 characters, unique ignoring case; *Ungrouped* / *No cluster* are reserved) and an optional description |
-| **⌃ / ⌄** | Moves it up or down (the order of the list, of **By group** and of the menus) |
+| **⌃ / ⌄** | Moves it up or down (the order of the list and of the menus) |
 | **Edit** | Rename or change the description; its hosts move along, and an open page follows the new name |
 | **Delete** | Asks first; the hosts stay in Telepad without that group / cluster |
 | Click a row | Opens **Hosts - [name]** |
@@ -402,12 +403,13 @@ name, address, OS or container name.
 
 ### Cards
 
-One card per host, wrapping to the window width: status, OS logo, alias (click it for the
-detail page), address and description, its group and cluster (when it has them), OS, CPU / RAM / fullest-disk bars, hottest
+One card per host, wrapping to the window width, every card the same height (#157). Click
+anywhere on a card for the host page, right-click it for the host menu. A card shows status,
+OS logo, alias, address and description, its group and cluster (when it has them), OS, CPU / RAM / fullest-disk bars, hottest
 temperature, Docker summary, how long ago it was checked, and an **SSH** / **RDP** button.
 Unreachable hosts show their error instead of the bars. The search box filters the cards;
-**Sort by** picks the order (the same columns as the table, or inventory order) and the
-arrow button next to it reverses it.
+**Sort by** picks the order (the same columns as the table, including Group and Cluster, or
+inventory order) and the arrow button next to it reverses it.
 
 ### Maintenance flags
 

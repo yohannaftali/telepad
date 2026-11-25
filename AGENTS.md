@@ -75,7 +75,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 |---|---|
 | `src/state.rs` | `State { model: Model, drafts: Drafts }` (drafts include the overview `Sort` and the `KeysDraft` of the Authorized keys page (tab, server, open key), model the `KeyRun` results, `auth_keys` (`AkHost` per alias), `key_holders` and the `Workspace` `ws`), `OverviewPage`, `HostState` (+ `scope_at(now, &Strategy)`: which tiers are on and due; `Seen` times that may predate this run; `known` facts from `update.db`; ping result / misses), `StrategyDraft`, `Editor`, `ImportDialog`, `UpdateState`, `matches_filter` |
 | `src/msg.rs` | `Msg` (user intents + results of effects) and `Effect` (work for the runtime) |
-| `src/table.rs` | Overview order: `Sort`/`SortKey`, `overview_rows` (filter + stable sort); `drop_index` / `can_reorder` (drag to reorder); `docker_stacks` (Docker overview by stack); `cluster_rows` (Kubernetes / Swarm pages); host list `host_list_groups`, `worst_usage`; `fullest_disk`, `hottest` |
+| `src/table.rs` | Overview order: `Sort`/`SortKey` (incl. `Group` / `Cluster`, #157), `overview_rows` (filter + stable sort); `drop_index` / `can_reorder` (drag to reorder); `docker_stacks` (Docker overview by stack); `cluster_rows` (Kubernetes / Swarm pages); host list `host_list_groups`, `worst_usage`; `fullest_disk`, `hottest` |
 | `src/update.rs` | `update(&mut State, Msg, now) -> Vec<Effect>` — the only place the model changes |
 | `src/hostsync.rs` | Host Management window: `HostSync` (model: file, pending per side, conflicts, rows, preview), `HostSyncDraft` (filter, selection, `HostForm`), `HsMsg` / `HsEffect`, `update`, `refresh` |
 | `src/tests_hostsync.rs` | Behaviour tests for Host Management |
@@ -100,7 +100,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_logins.rs` | Behaviour tests for #126 |
 | `src/tests_strategy.rs` | Behaviour tests for #122 (pause, Update Strategy page, ping rounds, last known facts) |
 | `src/tests_local.rs` | Behaviour tests for #129 (My Computer page, local reads, local file and database windows) |
-| `src/sets.rs` | Groups (#144) and clusters (#145): `SetPage` ("Hosts - [name]", `""` = Ungrouped / No cluster), `members`, `stats`, `SetForm`, `AddHosts`, `SetsDraft` (incl. Hosts page `hosts_by_group` / `hosts_columns`), `StMsg` / `StEffect`, `update` (restored as `group:<name>` / `cluster:<name>`) |
+| `src/sets.rs` | Groups (#144) and clusters (#145): `SetPage` ("Hosts - [name]", `""` = Ungrouped / No cluster), `members`, `stats`, `SetForm`, `AddHosts`, `SetsDraft` (incl. Hosts page `hosts_columns`, Group and Cluster by default; no "By group" since #157), `StMsg` / `StEffect`, `update` (restored as `group:<name>` / `cluster:<name>`) |
 | `src/tests_sets.rs` | Behaviour tests for #144 / #145 |
 
 ### telepad-gui
@@ -336,4 +336,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #152 | feat(ui): pager footer — record info left, controls right, continuous mode toggle (wtbapp / Senar style) | closed | 2026-11-25 |
 | #153 | feat(ui): table framework — simple and paged tables, sort and filter row everywhere, right-click menu with Filter by, Clear All Filters, export CSV / Excel / PDF, Copy as JSON | closed | 2026-11-25 |
 | #156 | fix(ui): simple tables do not fill the page like Hosts, and header title / filter heights are unbalanced | ready-for-review | 2026-11-25 |
-| #157 | feat(ui): Hosts cards with equal height and whole-card click, sortable Group / Cluster columns instead of By group, shown by default | open | 2026-11-25 |
+| #157 | feat(ui): Hosts cards with equal height and whole-card click, sortable Group / Cluster columns instead of By group, shown by default | ready-for-review | 2026-11-25 |
