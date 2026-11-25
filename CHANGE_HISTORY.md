@@ -2,6 +2,22 @@
 
 Newest first.
 
+## [2026-11-25] — Telepad 0.9.11
+- **Tables fill their page** (#156): every table sizes its columns like the Hosts table. Spare width goes to
+  long text, columns shrink toward their titles on narrow pages, then the table scrolls sideways. A width you
+  drag stays until double-click or **Auto-fit columns**, and button columns keep their buttons.
+- **Header heights** (#156, #164): the filter box, the title row and the data rows are the same height.
+- **Hosts page** (#157): "By group" is gone. The Group and Cluster columns are shown by default and sort on a
+  header click (also in the cards' Sort by). Cards are all the same height, and a click anywhere on a card opens
+  the host page.
+- **Groups and clusters by drag and drop** (#160): drag a group or cluster by its ⋮⋮ handle to reorder it. The
+  order is saved at once, and Ungrouped / No cluster stays last.
+
+## [2026-11-25] — Tested and merged: #164 (PR #165)
+- Tested on Windows 11 with a release build against the real inventory (view only), using pixel scans of
+  screenshots. At 2× zoom: filter box 51 px, title band 51 px, row 52 px. CI passed on Windows, macOS and Linux.
+  The issue was closed with a test comment.
+
 ## [2026-11-25] — fix(ui): table filter box is as tall as the title and data rows (#164)
 - Issue #164 addressed on GitHub (branch `164-filter-height`)
 - `telepad-gui/src/table.rs`:
