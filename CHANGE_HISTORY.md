@@ -2,6 +2,15 @@
 
 Newest first.
 
+## [2026-11-25] — Tested and merged: #156, #157 (PR #158)
+- Tested on Windows 11 with a release build against the real inventory (read-only). The GUI was driven by mouse
+  and keyboard automation and checked with screenshots.
+- Pages checked: Groups, the dockerho and My Computer Docker tables, Ports in use (wide and narrow), the Log info
+  header, Hosts with Group / Cluster on by default and the Group sort, and the cards (equal height, a click opens
+  the host).
+- CI passed on Windows, macOS and Linux, plus `db-live` and `files-live`. Both issues were closed with test
+  comments.
+
 ## [2026-11-25] — feat(ui): Hosts cards — equal height, whole-card click; Group / Cluster sort instead of By group (#157)
 - Issue #157 addressed on GitHub (branch `157-cards-sort`, on top of #156)
 - `telepad-app`:
