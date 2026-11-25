@@ -332,6 +332,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #143 | fix(ui): Hosts table fills the page width, auto-resizes columns, Flags not clipped and readable | closed | 2026-11-24 |
 | #144 | feat(hosts): optional host groups — Groups page, Ungrouped, Hosts - [Group] page, group on cards | closed | 2026-11-24 |
 | #145 | feat(hosts): user-defined clusters separate from groups — Clusters page, Hosts - [Cluster] page, cluster on cards | closed | 2026-11-24 |
-| #151 | feat(ui): shared table header component — header background, hover highlight, right-aligned sort icon | ready-for-review | 2026-11-25 |
-| #152 | feat(ui): pager footer — record info left, controls right, continuous mode toggle (wtbapp / Senar style) | ready-for-review | 2026-11-25 |
-| #153 | feat(ui): table framework — simple and paged tables, sort and filter row everywhere, right-click menu with Filter by, Clear All Filters, export CSV / Excel / PDF, Copy as JSON | ready-for-review | 2026-11-25 |
+| #151 | feat(ui): shared table header component — header background, hover highlight, right-aligned sort icon | closed | 2026-11-25 |
+| #152 | feat(ui): pager footer — record info left, controls right, continuous mode toggle (wtbapp / Senar style) | closed | 2026-11-25 |
+| #153 | feat(ui): table framework — simple and paged tables, sort and filter row everywhere, right-click menu with Filter by, Clear All Filters, export CSV / Excel / PDF, Copy as JSON | closed | 2026-11-25 |

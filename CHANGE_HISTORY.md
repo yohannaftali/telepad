@@ -2,6 +2,34 @@
 
 Newest first.
 
+## [2026-11-25] — Telepad 0.9.10
+- **Tables** (#153): every table is built from one component, simple or paged. Every table sorts on a header
+  click and has a filter row above the titles (contains, `=x`, `!x`, `>x` / `<x` with units such as `>50` for
+  `75%`, `NULL`, `!NULL`). The right-click menu shows the table's own commands first, then **Filter by**,
+  **Clear All Filters**, **Export as CSV / Excel (.xlsx) / PDF** and **Copy as JSON**. These cover every
+  filtered and sorted row on every page. A PDF with more than 5000 rows asks first. Columns fit their text, and
+  wide tables scroll sideways.
+- **Table headers** (#151): headers have their own colour band with a line under it. Sortable titles light up
+  on hover, and the sort arrow sits at the right edge of the title.
+- **Pager** (#152): the record info is on the left; Rows per page, « ‹ Page › » and a **continuous mode**
+  toggle are on the right. In continuous mode, rows load as you scroll; the database grid fetches the next
+  server page, and unsaved edits stay. The footer wraps in narrow windows.
+
+## [2026-11-25] — Tested and merged: #153, #151, #152 (PR #154)
+- Tested on Windows 11 with a release build against the real inventory (read-only). The GUI was driven by
+  mouse and keyboard automation and checked with screenshots.
+- Pages checked: Hosts, the dockerho host page, the file window, Authorized keys, Log info, and the database
+  grid (tire-mariadb, nothing posted), in dark and light themes. Exports were opened and checked: CSV with BOM
+  (57 lines), xlsx (57 rows, autofilter), PDF (2 pages, landscape).
+- CI passed on Windows, macOS and Linux (check and package builds), plus `db-live` and `files-live`. All three
+  issues were closed with test comments.
+- Fixed while testing (`b4eca1d`):
+  - Hosts filter boxes lost focus after one character.
+  - Right-click Filter by took the first column instead of the clicked one.
+  - Simple-table columns stayed squeezed.
+  - PDF column titles were cut short.
+  - The pager's right-hand controls wrapped out of sight.
+
 ## [2026-11-25] — feat(ui): pager footer — record info left, controls right, continuous mode (#152)
 - Issue #152 addressed on GitHub (branch `152-pager-continuous`, on top of #151)
 - `telepad-app/src/pager.rs`: continuous mode (`toggle`, `start_mode` < 768 pt, `more`, `wants_more` with the
