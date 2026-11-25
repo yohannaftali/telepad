@@ -1246,3 +1246,109 @@ fn import_is_refused_on_read_only_connections_and_without_a_map() {
             .contains("map at least one column")
     );
 }
+
+/// Rows `from..from + n` of the items table.
+fn rows(from: usize, n: usize) -> Grid {
+    Grid {
+        columns: vec!["id".into(), "name".into()],
+        rows: (from..from + n)
+            .map(|i| vec![Cell::Text(i.to_string()), Cell::Text(format!("item {i}"))])
+            .collect(),
+        truncated: false,
+    }
+}
+
+#[test]
+fn continuous_mode_adds_the_next_rows_one_request_at_a_time() {
+    // #152: scrolled to the bottom, the next page is added after the rows
+    // shown; edits keep their rows; the mode switch starts again.
+    let mut s = state();
+    let id = open_items(&mut s, true);
+    draft(&mut s).pager.per_page_text = "20".into();
+    draft(&mut s).pager.apply_per_page();
+    send(&mut s, DbMsg::DataGo(id));
+    send(
+        &mut s,
+        DbMsg::PageLoaded {
+            id,
+            table: items(),
+            offset: 0,
+            result: Ok(rows(0, 20)),
+            total: Some(45),
+        },
+    );
+    draft(&mut s).pager.toggle();
+    assert!(
+        send(&mut s, DbMsg::DataGo(id)).is_empty(),
+        "same first page"
+    );
+    // An unsaved edit on row 3 survives the added rows.
+    send(
+        &mut s,
+        DbMsg::SetCell {
+            id,
+            row: RowRef::Existing(3),
+            col: 1,
+            value: Some("changed".into()),
+        },
+    );
+    let fx = send(&mut s, DbMsg::DataMore(id));
+    assert!(matches!(
+        jobs(&fx).as_slice(),
+        [DbJob::Page {
+            offset: 20,
+            limit: 20,
+            ..
+        }]
+    ));
+    assert!(
+        send(&mut s, DbMsg::DataMore(id)).is_empty(),
+        "one request at a time"
+    );
+    send(
+        &mut s,
+        DbMsg::PageLoaded {
+            id,
+            table: items(),
+            offset: 20,
+            result: Ok(rows(20, 20)),
+            total: Some(45),
+        },
+    );
+    let g = session(&s).data.grid.as_ref().unwrap();
+    assert_eq!(g.rows.len(), 40);
+    assert_eq!(g.rows[39][0], Cell::Text("39".into()));
+    assert_eq!(session(&s).data.offset, 0, "the grid still starts at row 1");
+    assert_eq!(draft(&mut s).pager.loaded, 40);
+    assert!(session(&s).data.edits.changed.contains_key(&(3, 1)));
+    // The last page comes back short: nothing more to ask for.
+    send(&mut s, DbMsg::Discard(id));
+    send(&mut s, DbMsg::DataMore(id));
+    send(
+        &mut s,
+        DbMsg::PageLoaded {
+            id,
+            table: items(),
+            offset: 40,
+            result: Ok(rows(40, 5)),
+            total: Some(45),
+        },
+    );
+    assert_eq!(session(&s).data.grid.as_ref().unwrap().rows.len(), 45);
+    assert!(
+        send(&mut s, DbMsg::DataMore(id)).is_empty(),
+        "all rows shown"
+    );
+    // Back to pages: the grid reloads its first page.
+    draft(&mut s).pager.toggle();
+    let fx = send(&mut s, DbMsg::DataGo(id));
+    assert!(matches!(
+        jobs(&fx).as_slice(),
+        [DbJob::Page {
+            offset: 0,
+            limit: 20,
+            ..
+        }]
+    ));
+    assert!(!draft(&mut s).pager.continuous);
+}

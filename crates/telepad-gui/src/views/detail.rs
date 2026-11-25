@@ -19,7 +19,7 @@ pub fn detail(
     i: usize,
     cluster_shown_by: Option<&str>,
     paused: bool,
-    nginx_only: &mut bool,
+    d: &mut telepad_app::Drafts,
     out: &mut Vec<Msg>,
 ) {
     // Two wrapping rows: on a narrow window the buttons move to the next line
@@ -240,13 +240,18 @@ pub fn detail(
         }
         return;
     };
-    report_body(ui, h, r, Some(i), cluster_shown_by, nginx_only, out);
+    report_body(ui, h, r, Some(i), cluster_shown_by, d, out);
 }
 
 /// My Computer (#129): the host page of this computer, read without SSH.
 /// No Copy ssh command, Edit, Clone, Delete, Log info or Remote Desktop:
 /// it is not in the inventory.
-pub fn local_page(ui: &mut egui::Ui, h: &HostState, nginx_only: &mut bool, out: &mut Vec<Msg>) {
+pub fn local_page(
+    ui: &mut egui::Ui,
+    h: &HostState,
+    d: &mut telepad_app::Drafts,
+    out: &mut Vec<Msg>,
+) {
     ui.horizontal_wrapped(|ui| {
         status_dot(ui, h);
         icons::os_logo(ui, host_os(h), 26.0);
@@ -332,7 +337,7 @@ pub fn local_page(ui: &mut egui::Ui, h: &HostState, nginx_only: &mut bool, out: 
         }
         return;
     };
-    report_body(ui, h, r, None, None, nginx_only, out);
+    report_body(ui, h, r, None, None, d, out);
 }
 
 /// Everything below the header: system, maintenance, usage, disks, network,
@@ -344,9 +349,10 @@ fn report_body(
     r: &telepad_core::model::HostReport,
     host: Option<usize>,
     cluster_shown_by: Option<&str>,
-    nginx_only: &mut bool,
+    d: &mut telepad_app::Drafts,
     out: &mut Vec<Msg>,
 ) {
+    let alias = h.entry.alias.as_str();
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -424,48 +430,13 @@ fn report_body(
             if r.disks.is_empty() {
                 ui.label(RichText::new("No disk data").weak());
             }
-            egui::Grid::new("disks")
-                .striped(true)
-                .spacing([16.0, 6.0])
-                .show(ui, |ui| {
-                    for t in ["Mount", "Filesystem", "Usage", "Free"] {
-                        ui.label(RichText::new(t).strong());
-                    }
-                    ui.end_row();
-                    for d in &r.disks {
-                        ui.label(RichText::new(&d.mount).monospace());
-                        ui.label(RichText::new(&d.filesystem).weak());
-                        bar(
-                            ui,
-                            d.used_pct(),
-                            format!(
-                                "{} / {} ({:.1}%)",
-                                human_kb(d.used_kb),
-                                human_kb(d.total_kb),
-                                d.used_pct()
-                            ),
-                            300.0,
-                        );
-                        ui.label(human_kb(d.available_kb));
-                        ui.end_row();
-                    }
-                });
+            disks(ui, r, alias, d, out);
 
             section(ui, &il(icons::NETWORK, "Network"));
-            egui::Grid::new("net")
-                .striped(true)
-                .spacing([16.0, 4.0])
-                .show(ui, |ui| {
-                    for a in &r.addresses {
-                        ui.label(RichText::new(&a.interface).strong());
-                        ui.label(&a.family);
-                        ui.label(RichText::new(&a.address).monospace());
-                        ui.end_row();
-                    }
-                });
+            network(ui, r, alias, d, out);
 
             section(ui, &il(icons::THERMOMETER, "Sensors"));
-            sensors(ui, r, host, out);
+            sensors(ui, r, host, alias, d, out);
 
             section(ui, &il(icons::CONTAINER, "Docker"));
             match &r.docker.unavailable {
@@ -477,7 +448,7 @@ fn report_body(
                     if r.docker.containers.is_empty() {
                         ui.label(RichText::new("No containers").weak());
                     } else {
-                        docker_stacks(ui, r, host, &h.entry.alias, host_address(&h.entry), out);
+                        docker_stacks(ui, r, host, &h.entry.alias, host_address(&h.entry), d, out);
                     }
                 }
             }
@@ -486,13 +457,119 @@ fn report_body(
                 && super::cluster::has_cluster(r)
             {
                 section(ui, &il(icons::STACK, "Cluster"));
-                super::cluster::cluster(ui, r, i, cluster_shown_by, out);
+                super::cluster::cluster(ui, r, i, alias, cluster_shown_by, d, out);
             }
 
             section(ui, &il(icons::PLUGS, "Ports in use"));
-            ports_in_use(ui, r, nginx_only);
+            ports_in_use(ui, r, alias, d, out);
             ui.add_space(20.0);
         });
+}
+
+/// The disks of a host (#153: sort, filter, menu).
+fn disks(
+    ui: &mut egui::Ui,
+    r: &telepad_core::model::HostReport,
+    alias: &str,
+    d: &mut telepad_app::Drafts,
+    out: &mut Vec<Msg>,
+) {
+    use crate::table::{self, Col, Ev, Spec};
+    let cols = [
+        Col::new("Mount").mono(),
+        Col::new("Filesystem"),
+        Col::new("Usage").initial(300.0),
+        Col::new("Used"),
+        Col::new("Size"),
+        Col::new("Free"),
+    ];
+    let cells: Vec<Vec<String>> = r
+        .disks
+        .iter()
+        .map(|d| {
+            vec![
+                d.mount.clone(),
+                d.filesystem.clone(),
+                format!("{:.1}%", d.used_pct()),
+                human_kb(d.used_kb),
+                human_kb(d.total_kb),
+                human_kb(d.available_kb),
+            ]
+        })
+        .collect();
+    let title = format!("Disks of {alias}");
+    let st = table::state(d, format!("disks:{alias}"));
+    let o = table::show(
+        ui,
+        &Spec::new(("disks", alias), &title, &cols),
+        st,
+        &cells,
+        |ui, ev| {
+            if let Ev::Cell { row, col } = ev {
+                let dk = &r.disks[row];
+                match col {
+                    0 => {
+                        ui.label(RichText::new(&dk.mount).monospace());
+                    }
+                    1 => {
+                        ui.label(RichText::new(&dk.filesystem).weak());
+                    }
+                    2 => bar(
+                        ui,
+                        dk.used_pct(),
+                        format!("{:.1}%", dk.used_pct()),
+                        ui.available_width().min(300.0),
+                    ),
+                    c => table::text(ui, &cells[row][c]),
+                }
+            }
+        },
+    );
+    out.extend(o.msgs);
+}
+
+/// The addresses of a host.
+fn network(
+    ui: &mut egui::Ui,
+    r: &telepad_core::model::HostReport,
+    alias: &str,
+    d: &mut telepad_app::Drafts,
+    out: &mut Vec<Msg>,
+) {
+    use crate::table::{self, Col, Ev, Spec};
+    let cols = [
+        Col::new("Interface"),
+        Col::new("Family"),
+        Col::new("Address").mono(),
+    ];
+    let cells: Vec<Vec<String>> = r
+        .addresses
+        .iter()
+        .map(|a| vec![a.interface.clone(), a.family.clone(), a.address.clone()])
+        .collect();
+    let title = format!("Network of {alias}");
+    let st = table::state(d, format!("net:{alias}"));
+    let o = table::show(
+        ui,
+        &Spec::new(("net", alias), &title, &cols),
+        st,
+        &cells,
+        |ui, ev| {
+            if let Ev::Cell { row, col } = ev {
+                let t = &cells[row][col];
+                match col {
+                    0 => {
+                        ui.label(RichText::new(t).strong());
+                    }
+                    2 => {
+                        ui.label(RichText::new(t).monospace());
+                    }
+                    _ => table::text(ui, t),
+                }
+            }
+        },
+    );
+    out.extend(o.msgs);
 }
 
 /// Reboot, pending updates and end of vendor support, with what to do.

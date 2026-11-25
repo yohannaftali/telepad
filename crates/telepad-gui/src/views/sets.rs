@@ -3,7 +3,7 @@
 //! page of one group / cluster (same table / cards as the Hosts page).
 
 use eframe::egui::{self, RichText};
-use egui_extras::{Column, TableBuilder};
+use egui_extras::Column;
 use telepad_app::sets::{SetPageId, StMsg, list, shown_name, stats};
 use telepad_app::{Drafts, Model, Msg, matches_query};
 use telepad_core::config::SetKind;
@@ -63,71 +63,84 @@ pub fn sets_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, kind: SetKind, ou
         })
         .collect();
     let none_shown = matches_query(kind.none_name(), &query);
-    let rows = shown.len() + usize::from(none_shown);
-    ui.style_mut().interaction.selectable_labels = false;
-    TableBuilder::new(ui)
-        .id_salt(("sets", kind.as_str()))
-        .striped(true)
-        .sense(egui::Sense::click())
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::initial(200.0).at_least(100.0).clip(true))
-        .column(Column::remainder().at_least(120.0).clip(true))
-        .column(Column::exact(60.0))
-        .column(Column::exact(60.0))
-        .column(Column::exact(60.0))
-        .column(Column::exact(250.0))
-        .auto_shrink([false, false])
-        .header(24.0, |mut h| {
-            for t in [kind.title(), "Description", "Hosts", "Down", "Flags", ""] {
-                h.col(|ui| {
-                    cell_text(ui, RichText::new(t).strong());
-                });
-            }
+    // Source rows: the sets shown, then the fixed entry ("Ungrouped" / "No cluster").
+    let names: Vec<(String, String, bool)> = shown
+        .iter()
+        .map(|&i| (sets[i].name.clone(), sets[i].description.clone(), false))
+        .chain(none_shown.then(|| (String::new(), String::new(), true)))
+        .collect();
+    let stats_of: Vec<_> = names
+        .iter()
+        .map(|(n, _, _)| stats(&m.hosts, kind, n))
+        .collect();
+    let cells: Vec<Vec<String>> = names
+        .iter()
+        .zip(&stats_of)
+        .map(|((n, desc, _), s)| {
+            vec![
+                shown_name(kind, n).to_string(),
+                desc.clone(),
+                s.hosts.to_string(),
+                s.down.to_string(),
+                s.flagged.to_string(),
+                String::new(),
+            ]
         })
-        .body(|body| {
-            body.rows(26.0, rows, |mut row| {
-                let at = row.index();
-                // The fixed entry ("Ungrouped" / "No cluster") is always last.
-                let (name, description, fixed) = match shown.get(at) {
-                    Some(&i) => (sets[i].name.clone(), sets[i].description.clone(), false),
-                    None => (String::new(), String::new(), true),
-                };
-                let s = stats(&m.hosts, kind, &name);
-                row.col(|ui| {
-                    let text = RichText::new(il(icon(kind), shown_name(kind, &name))).strong();
-                    ui.label(if fixed { text.italics() } else { text });
-                });
-                row.col(|ui| {
-                    ui.add(egui::Label::new(RichText::new(&description).weak()).truncate());
-                });
-                row.col(|ui| {
-                    ui.label(s.hosts.to_string());
-                });
-                row.col(|ui| {
+        .collect();
+    use crate::table::{self, Col, Ev, Kind, Spec};
+    let cols = [
+        Col::new(kind.title()).initial(200.0),
+        Col::new("Description").remainder(),
+        Col::new("Hosts").width(Column::exact(60.0)),
+        Col::new("Down").width(Column::exact(60.0)),
+        Col::new("Flags").width(Column::exact(60.0)),
+        Col::action("").width(Column::exact(250.0)),
+    ];
+    let key = format!("sets:{}", kind.as_str());
+    let state = d.tables.entry(key).or_default();
+    // Moving up / down follows the saved order: only while the list is not
+    // searched, filtered or sorted.
+    let can_move = query.is_empty() && state.sort.is_none() && !state.filtered();
+    let title = format!("{}s", kind.title());
+    let spec = Spec::new(("sets", kind.as_str()), &title, &cols)
+        .kind(Kind::Fill)
+        .row_h(26.0);
+    let mut button = false;
+    let o = table::show(ui, &spec, state, &cells, |ui, ev| match ev {
+        Ev::Cell { row, col } => {
+            let (name, _, fixed) = &names[row];
+            let s = &stats_of[row];
+            match col {
+                0 => {
+                    let text = RichText::new(il(icon(kind), shown_name(kind, name))).strong();
+                    ui.label(if *fixed { text.italics() } else { text });
+                }
+                1 => table::weak(ui, &cells[row][1]),
+                2 => table::text(ui, &cells[row][2]),
+                3 => {
                     if s.down > 0 {
                         ui.colored_label(usage_color(95.0), s.down.to_string());
                     } else {
-                        ui.label(RichText::new("0").weak());
+                        table::weak(ui, "0");
                     }
-                });
-                row.col(|ui| {
+                }
+                4 => {
                     if s.flagged > 0 {
                         ui.colored_label(usage_color(75.0), s.flagged.to_string());
                     } else {
-                        ui.label(RichText::new("0").weak());
+                        table::weak(ui, "0");
                     }
-                });
-                let mut button = false;
-                row.col(|ui| {
-                    if fixed {
+                }
+                _ => {
+                    if *fixed {
                         ui.label(RichText::new("fixed").weak().small())
                             .on_hover_text("Hosts without one; cannot be renamed or deleted");
                         return;
                     }
-                    let pos = shown[at];
+                    let pos = shown[row];
                     if ui
                         .add_enabled(
-                            pos > 0 && query.is_empty(),
+                            pos > 0 && can_move,
                             egui::Button::new(icons::CARET_UP).small(),
                         )
                         .on_hover_text("Move up")
@@ -145,7 +158,7 @@ pub fn sets_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, kind: SetKind, ou
                     }
                     if ui
                         .add_enabled(
-                            pos + 1 < sets.len() && query.is_empty(),
+                            pos + 1 < sets.len() && can_move,
                             egui::Button::new(icons::CARET_DOWN).small(),
                         )
                         .on_hover_text("Move down")
@@ -181,20 +194,76 @@ pub fn sets_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, kind: SetKind, ou
                             },
                         );
                     }
-                });
-                let resp = row.response();
-                if resp.clicked() && !button {
+                }
+            }
+        }
+        Ev::Menu { row, .. } => {
+            let (name, _, fixed) = &names[row];
+            if ui
+                .button(il(
+                    icons::DESKTOP,
+                    &format!("Open Hosts - {}", shown_name(kind, name)),
+                ))
+                .clicked()
+            {
+                st(
+                    out,
+                    StMsg::OpenHosts {
+                        kind,
+                        name: name.clone(),
+                    },
+                );
+                ui.close();
+            }
+            if !*fixed {
+                if ui
+                    .button(act_text(Act::Edit, &il(icons::EDIT, "Edit…")))
+                    .clicked()
+                {
                     st(
                         out,
-                        StMsg::OpenHosts {
+                        StMsg::Edit {
                             kind,
                             name: name.clone(),
                         },
                     );
+                    ui.close();
                 }
-                resp.on_hover_text(format!("Click to open Hosts - {}", shown_name(kind, &name)));
-            });
-        });
+                if ui
+                    .button(act_text(Act::Danger, &il(icons::TRASH, "Delete…")))
+                    .clicked()
+                {
+                    st(
+                        out,
+                        StMsg::Delete {
+                            kind,
+                            name: name.clone(),
+                        },
+                    );
+                    ui.close();
+                }
+            }
+        }
+        Ev::HeaderMenu => {}
+    });
+    if let Some((r, _)) = o.clicked
+        && !button
+    {
+        st(
+            out,
+            StMsg::OpenHosts {
+                kind,
+                name: names[r].0.clone(),
+            },
+        );
+    }
+    for (r, resp) in &o.rows {
+        resp.clone().on_hover_text(format!(
+            "Click to open Hosts - {}",
+            shown_name(kind, &names[*r].0)
+        ));
+    }
+    out.extend(o.msgs);
     // Each dialog only on its own page: with Groups and Clusters both open
     // it would otherwise be drawn (and typed into) twice.
     form_dialog(ui, d, kind, out);
@@ -359,7 +428,7 @@ pub fn set_hosts_page(
         let rows = overview::view_rows(m, &filter, d.sort, &view);
         cards::cards(ui, m, &rows, out);
     } else {
-        overview::table(ui, m, &filter, d.sort, &view, out);
+        overview::table(ui, m, &filter, d.sort, &view, &mut d.tables, out);
     }
     if d.sets.add_hosts.as_ref().is_some_and(|a| a.page == id) {
         add_hosts_dialog(ui, m, d, out);

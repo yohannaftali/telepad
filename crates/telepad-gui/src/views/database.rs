@@ -4,7 +4,9 @@
 //! workspace (#77).
 
 use eframe::egui::{self, Color32, RichText};
-use egui_extras::{Column as TCol, TableBuilder};
+use egui_extras::Column as TCol;
+
+use crate::table::{self, Col, Controlled, Ev, Kind, Spec};
 use telepad_app::db::{DbConfirm, DbDraft, DbId, DbMsg, DbSession, DbStatus, DbTab, RowRef};
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::db::ddl::{FkEdit, IndexEdit, TableEdit};
@@ -14,7 +16,7 @@ use telepad_core::db::{
 
 use crate::icons::{self, label as il};
 use crate::widgets::{
-    Act, PAGER_H, act_button, act_small, act_text, cell_click, cell_text, pager_bar, usage_color,
+    Act, act_button, act_small, act_text, cell_text, pager_bar, pager_height, usage_color,
 };
 
 const ROW: f32 = 20.0;
@@ -42,7 +44,7 @@ pub fn db_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, id: DbId, out: &mut
         return;
     };
     if s.status == DbStatus::Ready {
-        browser(ui, s, dr, out);
+        browser(ui, s, dr, &mut d.tables, out);
     } else {
         egui::CentralPanel::default().show(ui, |ui| login(ui, s, dr, out));
     }
@@ -407,7 +409,13 @@ fn login(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) 
     });
 }
 
-fn browser(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) {
+fn browser(
+    ui: &mut egui::Ui,
+    s: &DbSession,
+    d: &mut DbDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     let id = s.id;
     egui::Panel::top(("db-top", id)).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -498,11 +506,11 @@ fn browser(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>
         });
         ui.separator();
         match s.tab {
-            DbTab::Host => host_tab(ui, s, out),
-            DbTab::Database => database_tab(ui, s, out),
-            DbTab::Table => table_tab(ui, s, d, out),
+            DbTab::Host => host_tab(ui, s, tables, out),
+            DbTab::Database => database_tab(ui, s, tables, out),
+            DbTab::Table => table_tab(ui, s, d, tables, out),
             DbTab::Data => data_tab(ui, s, d, out),
-            DbTab::Query => query_tab(ui, s, d, out),
+            DbTab::Query => query_tab(ui, s, d, tables, out),
         }
     });
 }
@@ -766,46 +774,67 @@ fn table_menu(ui: &mut egui::Ui, s: &DbSession, t: &TableRef, kind: TableKind, o
     }
 }
 
-fn host_tab(ui: &mut egui::Ui, s: &DbSession, out: &mut Vec<Msg>) {
+fn host_tab(
+    ui: &mut egui::Ui,
+    s: &DbSession,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     ui.label(RichText::new(format!("{} · {}", s.target.engine.title(), s.version)).strong());
     ui.label(RichText::new(format!("{} database(s)", s.databases.len())).weak());
     ui.add_space(6.0);
     let id = s.id;
-    TableBuilder::new(ui)
-        .id_salt(("db-host", id))
-        .striped(true)
-        .column(TCol::initial(320.0).at_least(120.0).clip(true))
-        .column(TCol::remainder())
-        .header(ROW + 2.0, |mut h| {
-            h.col(|ui| {
-                ui.strong("Database");
-            });
-            h.col(|ui| {
-                ui.strong("Size");
-            });
+    let cols = [
+        Col::new("Database").initial(320.0),
+        Col::new("Size").remainder(),
+    ];
+    let cells: Vec<Vec<String>> = s
+        .databases
+        .iter()
+        .map(|n| {
+            vec![
+                n.info.name.clone(),
+                n.info.size.map(human_size).unwrap_or_default(),
+            ]
         })
-        .body(|body| {
-            body.rows(ROW, s.databases.len(), |mut row| {
-                let n = &s.databases[row.index()];
-                row.col(|ui| {
-                    if ui.link(&n.info.name).clicked() {
-                        send(
-                            out,
-                            DbMsg::SelectDatabase {
-                                id,
-                                database: n.info.name.clone(),
-                            },
-                        );
+        .collect();
+    let title = format!("Databases of {}", s.target.address);
+    let spec = Spec::new(("db-host", id), &title, &cols)
+        .kind(Kind::Fill)
+        .row_h(ROW);
+    let o = table::show(
+        ui,
+        &spec,
+        table::state_in(tables, format!("db-host:{id}")),
+        &cells,
+        |ui, ev| {
+            if let Ev::Cell { row, col } = ev {
+                match col {
+                    0 => {
+                        if ui.link(&cells[row][0]).clicked() {
+                            send(
+                                out,
+                                DbMsg::SelectDatabase {
+                                    id,
+                                    database: cells[row][0].clone(),
+                                },
+                            );
+                        }
                     }
-                });
-                row.col(|ui| {
-                    ui.label(n.info.size.map(human_size).unwrap_or_default());
-                });
-            });
-        });
+                    _ => table::text(ui, &cells[row][1]),
+                }
+            }
+        },
+    );
+    out.extend(o.msgs);
 }
 
-fn database_tab(ui: &mut egui::Ui, s: &DbSession, out: &mut Vec<Msg>) {
+fn database_tab(
+    ui: &mut egui::Ui,
+    s: &DbSession,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     let id = s.id;
     let Some((db, schema)) = &s.current else {
         ui.label(RichText::new("Choose a database on the left").weak());
@@ -836,62 +865,75 @@ fn database_tab(ui: &mut egui::Ui, s: &DbSession, out: &mut Vec<Msg>) {
         ui.spinner();
         return;
     };
-    TableBuilder::new(ui)
-        .id_salt(("db-tables", id))
-        .striped(true)
-        .resizable(true)
-        .column(TCol::initial(240.0).at_least(80.0).clip(true))
-        .column(TCol::initial(90.0))
-        .column(TCol::initial(90.0))
-        .column(TCol::initial(130.0).clip(true))
-        .column(TCol::remainder().clip(true))
-        .header(ROW + 2.0, |mut h| {
-            for t in ["Name", "Rows (est.)", "Size", "Engine / kind", "Comment"] {
-                h.col(|ui| {
-                    ui.strong(t);
-                });
-            }
+    let cols = [
+        Col::new("Name").initial(240.0),
+        Col::new("Rows (est.)").initial(90.0),
+        Col::new("Size").initial(90.0),
+        Col::new("Engine / kind").initial(130.0),
+        Col::new("Comment").remainder(),
+    ];
+    let cells: Vec<Vec<String>> = list
+        .iter()
+        .map(|t| {
+            vec![
+                t.name.clone(),
+                t.rows.map(|n| n.to_string()).unwrap_or_default(),
+                t.size.map(human_size).unwrap_or_default(),
+                t.engine.clone(),
+                t.comment.clone(),
+            ]
         })
-        .body(|body| {
-            body.rows(ROW, list.len(), |mut row| {
-                let t = &list[row.index()];
-                let table = TableRef {
-                    database: db.clone(),
-                    schema: schema.clone(),
-                    table: t.name.clone(),
-                };
-                row.col(|ui| {
-                    let icon = if t.kind == TableKind::View {
-                        icons::EYE
-                    } else {
-                        icons::TABLE
-                    };
-                    let resp = ui.link(format!("{icon} {}", t.name));
-                    if resp.clicked() {
-                        send(
-                            out,
-                            DbMsg::SelectTable {
-                                id,
-                                table: table.clone(),
-                            },
-                        );
+        .collect();
+    let refs: Vec<TableRef> = list
+        .iter()
+        .map(|t| TableRef {
+            database: db.clone(),
+            schema: schema.clone(),
+            table: t.name.clone(),
+        })
+        .collect();
+    let title = if schema.is_empty() {
+        format!("Tables of {db}")
+    } else {
+        format!("Tables of {db}.{schema}")
+    };
+    let spec = Spec::new(("db-tables", id), &title, &cols)
+        .kind(Kind::Fill)
+        .row_h(ROW);
+    let o = table::show(
+        ui,
+        &spec,
+        table::state_in(tables, format!("db-tables:{id}")),
+        &cells,
+        |ui, ev| match ev {
+            Ev::Cell { row, col } => {
+                let t = &list[row];
+                match col {
+                    0 => {
+                        let icon = if t.kind == TableKind::View {
+                            icons::EYE
+                        } else {
+                            icons::TABLE
+                        };
+                        if ui.link(format!("{icon} {}", t.name)).clicked() {
+                            send(
+                                out,
+                                DbMsg::SelectTable {
+                                    id,
+                                    table: refs[row].clone(),
+                                },
+                            );
+                        }
                     }
-                    resp.context_menu(|ui| table_menu(ui, s, &table, t.kind, out));
-                });
-                row.col(|ui| {
-                    ui.label(t.rows.map(|n| n.to_string()).unwrap_or_default());
-                });
-                row.col(|ui| {
-                    ui.label(t.size.map(human_size).unwrap_or_default());
-                });
-                row.col(|ui| {
-                    ui.label(&t.engine);
-                });
-                row.col(|ui| {
-                    ui.label(RichText::new(&t.comment).weak());
-                });
-            });
-        });
+                    4 => table::weak(ui, &t.comment),
+                    c => table::text(ui, &cells[row][c]),
+                }
+            }
+            Ev::Menu { row, .. } => table_menu(ui, s, &refs[row], list[row].kind, out),
+            Ev::HeaderMenu => {}
+        },
+    );
+    out.extend(o.msgs);
 }
 
 fn default_text(d: &ColumnDefault) -> String {
@@ -903,7 +945,13 @@ fn default_text(d: &ColumnDefault) -> String {
     }
 }
 
-fn table_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) {
+fn table_tab(
+    ui: &mut egui::Ui,
+    s: &DbSession,
+    d: &mut DbDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     let id = s.id;
     if d.new_table.is_some() {
         new_table(ui, s, d, out);
@@ -997,47 +1045,71 @@ fn table_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Ms
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.strong("Columns");
-            egui::Grid::new(("db-cols", id))
-                .striped(true)
-                .num_columns(9)
-                .spacing([14.0, 4.0])
-                .show(ui, |ui| {
-                    for h in [
-                        "#",
-                        "Name",
-                        "Type",
-                        "Length / set",
-                        "Unsigned",
-                        "NULL",
-                        "Default",
-                        "Extra",
-                        "Comment",
-                    ] {
-                        ui.strong(h);
-                    }
-                    ui.end_row();
-                    let key = info.row_key().unwrap_or_default();
-                    for (i, c) in info.columns.iter().enumerate() {
-                        ui.label(RichText::new((i + 1).to_string()).weak());
-                        let mut name = RichText::new(&c.name).monospace();
-                        if key.contains(&c.name) {
-                            name = name.strong();
-                        }
-                        ui.label(name);
-                        ui.label(RichText::new(&c.type_name).monospace());
-                        ui.label(RichText::new(&c.length).monospace());
-                        ui.label(if c.unsigned { icons::CHECK } else { "" });
-                        ui.label(if c.nullable { icons::CHECK } else { "" });
-                        ui.label(RichText::new(default_text(&c.default)).monospace());
-                        ui.label(if c.auto_increment {
+            let key = info.row_key().unwrap_or_default();
+            let cols = [
+                Col::new("#"),
+                Col::new("Name").mono(),
+                Col::new("Type").mono(),
+                Col::new("Length / set").mono(),
+                Col::new("Unsigned"),
+                Col::new("NULL"),
+                Col::new("Default").mono(),
+                Col::new("Extra"),
+                Col::new("Comment"),
+            ];
+            let yes = |b: bool| if b { "yes" } else { "" }.to_string();
+            let cells: Vec<Vec<String>> = info
+                .columns
+                .iter()
+                .enumerate()
+                .map(|(i, c)| {
+                    vec![
+                        (i + 1).to_string(),
+                        c.name.clone(),
+                        c.type_name.clone(),
+                        c.length.clone(),
+                        yes(c.unsigned),
+                        yes(c.nullable),
+                        default_text(&c.default),
+                        if c.auto_increment {
                             "auto increment"
                         } else {
                             ""
-                        });
-                        ui.label(RichText::new(&c.comment).weak());
-                        ui.end_row();
+                        }
+                        .to_string(),
+                        c.comment.clone(),
+                    ]
+                })
+                .collect();
+            let title = format!("Columns of {}", t.table);
+            let spec = Spec::new(("db-cols", id), &title, &cols).row_h(ROW);
+            let o = table::show(
+                ui,
+                &spec,
+                table::state_in(tables, format!("db-cols:{id}")),
+                &cells,
+                |ui, ev| {
+                    if let Ev::Cell { row, col } = ev {
+                        let c = &info.columns[row];
+                        let v = &cells[row][col];
+                        match col {
+                            0 => table::weak(ui, v),
+                            1 => {
+                                let mut name = RichText::new(&c.name).monospace();
+                                if key.contains(&c.name) {
+                                    name = name.strong();
+                                }
+                                ui.add(egui::Label::new(name).truncate().selectable(false));
+                            }
+                            2 | 3 | 6 => table::mono(ui, v),
+                            4 | 5 => table::text(ui, if v.is_empty() { "" } else { icons::CHECK }),
+                            8 => table::weak(ui, v),
+                            _ => table::text(ui, v),
+                        }
                     }
-                });
+                },
+            );
+            out.extend(o.msgs);
             ui.add_space(8.0);
             ui.strong("Indexes");
             for i in &info.indexes {
@@ -1463,7 +1535,7 @@ fn data_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg
                     .desired_width(280.0),
             )
             .on_hover_text(
-                "Your own SQL condition, applied together with the filter boxes under the headers",
+                "Your own SQL condition, applied together with the filter boxes above the column titles",
             );
         if f.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             send(out, DbMsg::DataApplyFilter(id));
@@ -1581,11 +1653,20 @@ fn data_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg
         return;
     };
     // The grid scrolls above the pager footer, which stays at the bottom (#138).
-    let h = (ui.available_height() - PAGER_H - 6.0).max(120.0);
-    ui.allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
-        ui.set_min_height(h);
-        data_grid(ui, s, d, grid, blocked.is_none(), h, out);
-    });
+    let h = (ui.available_height() - pager_height(ui.available_width()) - 6.0).max(120.0);
+    d.pager.start_mode(ui.available_width());
+    let (near_bottom, fits) = ui
+        .allocate_ui(egui::vec2(ui.available_width(), h), |ui| {
+            ui.set_min_height(h);
+            data_grid(ui, s, d, grid, blocked.is_none(), h, out)
+        })
+        .inner;
+    // Continuous mode (#152): the next rows from the server at the bottom.
+    let total = s.data.total.map_or(usize::MAX / 2, |t| t as usize);
+    d.pager.loaded = grid.rows.len();
+    if !s.data.exhausted && d.pager.wants_more(total, near_bottom, fits) {
+        send(out, DbMsg::DataMore(s.id));
+    }
     ui.separator();
     if pager_bar(
         ui,
@@ -1669,120 +1750,204 @@ fn data_grid(
     d: &mut DbDraft,
     grid: &Grid,
     editable: bool,
-    h: f32,
+    _h: f32,
     out: &mut Vec<Msg>,
-) {
+) -> (bool, bool) {
     let id = s.id;
     let existing = grid.rows.len();
     let total = existing + s.data.edits.inserted.len();
     let changed_fill = ui.visuals().selection.bg_fill.gamma_multiply(0.45);
-    let deleted_color = red();
     // Hidden columns (#138) are left out; cells keep their real index.
     let vis: Vec<usize> = (0..grid.columns.len())
         .filter(|&c| !s.data.hidden.contains(&grid.columns[c]))
         .collect();
-    let ncols = vis.len();
-    let mut apply = false;
-    egui::ScrollArea::horizontal()
-        .id_salt(("db-grid-h", id))
-        .show(ui, |ui| {
-            TableBuilder::new(ui)
-                .id_salt((
-                    "db-grid",
-                    id,
-                    s.data.table.as_ref().map(|t| t.table.clone()),
-                ))
-                .striped(true)
-                .resizable(true)
-                .auto_shrink([false, false])
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .max_scroll_height((h - 2.0 * ROW - 16.0).max(60.0))
-                .column(TCol::exact(52.0))
-                .columns(TCol::initial(140.0).at_least(40.0).clip(true), ncols)
-                .header(2.0 * ROW + 8.0, |mut hd| {
-                    hd.col(|ui| {
-                        ui.label(RichText::new("#").weak());
-                    });
-                    for &ci in &vis {
-                        let c = &grid.columns[ci];
-                        hd.col(|ui| {
-                            ui.vertical(|ui| {
-                            let arrow = match &s.data.sort {
-                                Some((n, false)) if n == c => format!(" {}", icons::CARET_UP),
-                                Some((n, true)) if n == c => format!(" {}", icons::CARET_DOWN),
-                                _ => String::new(),
-                            };
-                            let line = ui
-                                .horizontal(|ui| {
-                                    cell_text(ui, RichText::new(format!("{c}{arrow}")).strong());
-                                    ui.add_space(ui.available_width());
-                                })
-                                .response;
-                            // The filter box of this column (#138): Enter applies.
-                            let fb = ui.add(
-                                egui::TextEdit::singleline(d.col_filters.entry(c.clone()).or_default())
-                                    .hint_text(icons::FUNNEL)
-                                    .desired_width(f32::INFINITY),
-                            );
-                            if fb.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                apply = true;
-                            }
-                            fb.on_hover_text(
-                                "Filter: text = contains · =x equal · !x not equal · >x / <x · NULL empty · !NULL has a value (Enter)",
-                            );
-                            let resp = ui
-                                .interact(line.rect, ui.scope_id().with(("sort", c)), egui::Sense::click())
-                                .on_hover_text("Sort: ascending → descending → off");
-                            if resp.clicked() {
-                                send(
-                                    out,
-                                    DbMsg::DataSort {
-                                        id,
-                                        column: c.clone(),
-                                    },
-                                );
-                            }
-                            });
-                        });
-                    }
-                })
-                .body(|body| {
-                    body.rows(ROW, total, |mut row| {
-                        let i = row.index();
-                        let r = if i < existing {
-                            RowRef::Existing(i)
-                        } else {
-                            RowRef::New(i - existing)
-                        };
-                        let deleted =
-                            matches!(r, RowRef::Existing(x) if s.data.edits.deleted.contains(&x));
-                        let selected = d.selected_row == Some(r);
-                        row.set_selected(selected);
-                        row.col(|ui| {
-                            let label = match r {
-                                RowRef::Existing(x) => (s.data.offset + x as u64 + 1).to_string(),
-                                RowRef::New(_) => format!("{} new", icons::PLUS),
-                            };
-                            let mut t = RichText::new(label).weak();
-                            if deleted {
-                                t = t.strikethrough().color(deleted_color);
-                            }
-                            cell_text(ui, t);
-                            if cell_click(ui, "rownum").clicked() {
-                                d.selected_row = Some(r);
-                            }
-                        });
-                        for &c in &vis {
-                            row.col(|ui| {
-                                cell(ui, s, d, r, c, deleted, editable, changed_fill, out);
-                            });
-                        }
-                    });
-                });
-        });
-    if apply {
+    let mut cols = vec![Col::action("#").width(TCol::exact(52.0))];
+    cols.extend(vis.iter().map(|&c| {
+        Col::new(grid.columns[c].clone()).width(TCol::initial(140.0).at_least(40.0).clip(true))
+    }));
+    let sort = s.data.sort.as_ref().and_then(|(n, desc)| {
+        vis.iter().position(|&c| &grid.columns[c] == n).map(|i| {
+            (
+                i + 1,
+                if *desc {
+                    telepad_app::grid::Dir::Desc
+                } else {
+                    telepad_app::grid::Dir::Asc
+                },
+            )
+        })
+    });
+    let rref = |i: usize| {
+        if i < existing {
+            RowRef::Existing(i)
+        } else {
+            RowRef::New(i - existing)
+        }
+    };
+    let value_text =
+        |r: RowRef, c: usize| s.cell_value(r, c).map(|v| shown(&v).0).unwrap_or_default();
+    let rows: Vec<usize> = (0..total).collect();
+    let text = |r: usize, c: usize| {
+        if c == 0 {
+            String::new()
+        } else {
+            value_text(rref(r), vis[c - 1])
+        }
+    };
+    let mut filters: Vec<String> = std::iter::once(String::new())
+        .chain(vis.iter().map(|&c| {
+            d.col_filters
+                .get(&grid.columns[c])
+                .cloned()
+                .unwrap_or_default()
+        }))
+        .collect();
+    let title = s
+        .data
+        .table
+        .as_ref()
+        .map(|t| t.table.clone())
+        .unwrap_or_else(|| "Data".into());
+    let selected = d.selected_row.map(|r| match r {
+        RowRef::Existing(x) => x,
+        RowRef::New(x) => existing + x,
+    });
+    let spec = Spec::new(
+        (
+            "db-grid",
+            id,
+            s.data.table.as_ref().map(|t| t.table.clone()),
+        ),
+        &title,
+        &cols,
+    )
+    .kind(Kind::Fill)
+    .row_h(ROW)
+    .selected(selected)
+    .min_width(52.0 + 140.0 * vis.len() as f32);
+    let o = table::controlled(
+        ui,
+        &spec,
+        Controlled {
+            sort,
+            filters: Some(&mut filters[..]),
+            rows: &rows,
+            text: &text,
+        },
+        &mut |ui, ev| match ev {
+            Ev::Cell { row, col: 0 } => {
+                let r = rref(row);
+                let deleted = matches!(r, RowRef::Existing(x) if s.data.edits.deleted.contains(&x));
+                let label = match r {
+                    RowRef::Existing(x) => (s.data.offset + x as u64 + 1).to_string(),
+                    RowRef::New(_) => format!("{} new", icons::PLUS),
+                };
+                let mut t = RichText::new(label).weak();
+                if deleted {
+                    t = t.strikethrough().color(red());
+                }
+                cell_text(ui, t);
+            }
+            Ev::Cell { row, col } => {
+                let r = rref(row);
+                let deleted = matches!(r, RowRef::Existing(x) if s.data.edits.deleted.contains(&x));
+                cell(ui, s, d, r, vis[col - 1], deleted, changed_fill, out);
+            }
+            Ev::Menu { row, col } if col > 0 => {
+                let r = rref(row);
+                let deleted = matches!(r, RowRef::Existing(x) if s.data.edits.deleted.contains(&x));
+                cell_menu(ui, s, d, r, vis[col - 1], deleted, editable, out);
+            }
+            _ => {}
+        },
+    );
+    // The filter boxes (#138) stay in the draft by column name; Enter applies.
+    for (i, &c) in vis.iter().enumerate() {
+        let f = &filters[i + 1];
+        let name = &grid.columns[c];
+        if f.is_empty() {
+            d.col_filters.remove(name);
+        } else {
+            d.col_filters.insert(name.clone(), f.clone());
+        }
+    }
+    if o.cleared {
+        d.data_filter.clear();
+    }
+    if o.filter_enter {
         send(out, DbMsg::DataApplyFilter(id));
     }
+    if let Some(c) = o.sort
+        && c > 0
+    {
+        send(
+            out,
+            DbMsg::DataSort {
+                id,
+                column: grid.columns[vis[c - 1]].clone(),
+            },
+        );
+    }
+    if let Some((r, _)) = o.clicked {
+        d.selected_row = Some(rref(r));
+    }
+    if let Some((r, c)) = o.double_clicked
+        && c > 0
+    {
+        let r = rref(r);
+        let c = vis[c - 1];
+        let deleted = matches!(r, RowRef::Existing(x) if s.data.edits.deleted.contains(&x));
+        let value = s.cell_value(r, c);
+        if can_edit(s, &value, c, deleted, editable) {
+            let text = value
+                .as_ref()
+                .and_then(|v| v.as_value())
+                .unwrap_or("")
+                .to_string();
+            d.cell = Some((r, c, text, false));
+        }
+    }
+    for (_, resp) in &o.rows {
+        if resp.secondary_clicked()
+            && let Some(p) = resp.ctx.input(|i| i.pointer.latest_pos())
+            && let Some(r) = o
+                .rows
+                .iter()
+                .find(|(_, x)| x.rect.contains(p))
+                .map(|(r, _)| *r)
+        {
+            d.selected_row = Some(rref(r));
+        }
+    }
+    match o.export {
+        // CSV / Excel: the whole filtered result from the server (#139).
+        Some(f @ (telepad_app::grid::Format::Csv | telepad_app::grid::Format::Xlsx)) => {
+            d.export = Some(telepad_app::db::ExportForm {
+                format: if f == telepad_app::grid::Format::Csv {
+                    telepad_core::db::io::Format::Csv
+                } else {
+                    telepad_core::db::io::Format::Xlsx
+                },
+                scope: telepad_core::db::io::Scope::Filtered,
+                ..Default::default()
+            });
+        }
+        // PDF / JSON: the rows loaded in the grid (this page).
+        Some(f) => {
+            let cells: Vec<Vec<String>> = rows
+                .iter()
+                .map(|&r| (0..cols.len()).map(|c| text(r, c)).collect())
+                .collect();
+            out.push(table::export_rows(&title, &cols, cells, f));
+        }
+        None => {}
+    }
+    out.extend(o.msgs);
+    (o.near_bottom, o.fits)
+}
+
+fn can_edit(s: &DbSession, value: &Option<Cell>, c: usize, deleted: bool, editable: bool) -> bool {
+    editable && !deleted && s.column_editable(c) && value.as_ref().is_none_or(Cell::editable)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1793,7 +1958,6 @@ fn cell(
     r: RowRef,
     c: usize,
     deleted: bool,
-    editable: bool,
     changed_fill: Color32,
     out: &mut Vec<Msg>,
 ) {
@@ -1856,85 +2020,86 @@ fn cell(
         rt = rt.strikethrough().color(red());
     }
     cell_text(ui, rt);
-    let resp = cell_click(ui, ("cell", c));
-    if resp.clicked() {
-        d.selected_row = Some(r);
+}
+
+/// The grid cell's own items of the right-click menu (#53).
+#[allow(clippy::too_many_arguments)]
+fn cell_menu(
+    ui: &mut egui::Ui,
+    s: &DbSession,
+    d: &mut DbDraft,
+    r: RowRef,
+    c: usize,
+    deleted: bool,
+    editable: bool,
+    out: &mut Vec<Msg>,
+) {
+    let id = s.id;
+    let value = s.cell_value(r, c);
+    let can_edit = can_edit(s, &value, c, deleted, editable);
+    let full = value
+        .as_ref()
+        .and_then(|v| v.as_value())
+        .map(str::to_string);
+    if ui
+        .add_enabled(
+            can_edit,
+            egui::Button::new(act_text(Act::Edit, &il(icons::EDIT, "Edit"))),
+        )
+        .clicked()
+    {
+        d.cell = Some((r, c, full.clone().unwrap_or_default(), false));
+        ui.close();
     }
-    let can_edit =
-        editable && !deleted && s.column_editable(c) && value.as_ref().is_none_or(Cell::editable);
-    if resp.double_clicked() && can_edit {
-        let text = value
-            .as_ref()
-            .and_then(|v| v.as_value())
-            .unwrap_or("")
-            .to_string();
-        d.cell = Some((r, c, text, false));
+    if ui
+        .add_enabled(can_edit, egui::Button::new("Set NULL"))
+        .clicked()
+    {
+        send(
+            out,
+            DbMsg::SetCell {
+                id,
+                row: r,
+                col: c,
+                value: None,
+            },
+        );
+        ui.close();
     }
-    resp.context_menu(|ui| {
-        let full = value
+    if ui
+        .add_enabled(
+            full.is_some(),
+            egui::Button::new(il(icons::COPY, "Copy value")),
+        )
+        .clicked()
+    {
+        ui.ctx().copy_text(full.clone().unwrap_or_default());
+        ui.close();
+    }
+    if ui
+        .add_enabled(
+            full.is_some(),
+            egui::Button::new(il(icons::EYE, "View value…")),
+        )
+        .clicked()
+    {
+        let col = s
+            .data
+            .grid
             .as_ref()
-            .and_then(|v| v.as_value())
-            .map(str::to_string);
-        if ui
-            .add_enabled(
-                can_edit,
-                egui::Button::new(act_text(Act::Edit, &il(icons::EDIT, "Edit"))),
-            )
-            .clicked()
-        {
-            d.cell = Some((r, c, full.clone().unwrap_or_default(), false));
-            ui.close();
+            .and_then(|g| g.columns.get(c))
+            .cloned()
+            .unwrap_or_default();
+        let mut text = full.unwrap_or_default();
+        if let Some(Cell::Long(_, n) | Cell::Bytes(_, n)) = &value {
+            text.push_str(&format!(
+                "\n\n… cut: the value has {} in total",
+                human_size(*n as u64)
+            ));
         }
-        if ui
-            .add_enabled(can_edit, egui::Button::new("Set NULL"))
-            .clicked()
-        {
-            send(
-                out,
-                DbMsg::SetCell {
-                    id,
-                    row: r,
-                    col: c,
-                    value: None,
-                },
-            );
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                full.is_some(),
-                egui::Button::new(il(icons::COPY, "Copy value")),
-            )
-            .clicked()
-        {
-            ui.ctx().copy_text(full.clone().unwrap_or_default());
-            ui.close();
-        }
-        if ui
-            .add_enabled(
-                full.is_some(),
-                egui::Button::new(il(icons::EYE, "View value…")),
-            )
-            .clicked()
-        {
-            let col = s
-                .data
-                .grid
-                .as_ref()
-                .and_then(|g| g.columns.get(c))
-                .cloned()
-                .unwrap_or_default();
-            let mut text = full.unwrap_or_default();
-            if let Some(Cell::Long(_, n) | Cell::Bytes(_, n)) = &value {
-                text.push_str(&format!(
-                    "\n\n… cut: the value has {} in total",
-                    human_size(*n as u64)
-                ));
-            }
-            d.viewer = Some((col, text));
-            ui.close();
-        }
-    });
+        d.viewer = Some((col, text));
+        ui.close();
+    }
 }
 
 fn viewer(ui: &mut egui::Ui, d: &mut DbDraft) {
@@ -1965,7 +2130,13 @@ fn byte_at(s: &str, chars: usize) -> usize {
     s.char_indices().nth(chars).map_or(s.len(), |(b, _)| b)
 }
 
-fn query_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Msg>) {
+fn query_tab(
+    ui: &mut egui::Ui,
+    s: &DbSession,
+    d: &mut DbDraft,
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+    out: &mut Vec<Msg>,
+) {
     let id = s.id;
     while d.queries.len() < s.queries.len() {
         d.queries.push(String::new());
@@ -2143,66 +2314,73 @@ fn query_tab(ui: &mut egui::Ui, s: &DbSession, d: &mut DbDraft, out: &mut Vec<Ms
                 }
             });
         });
-        result_grid(ui, ("db-result", id, tab, q.shown), g, d);
+        let key = format!("db-result:{id}:{tab}:{}", q.shown);
+        out.extend(result_grid(
+            ui,
+            ("db-result", id, tab, q.shown),
+            &key,
+            g,
+            d,
+            tables,
+        ));
     }
 }
 
 fn result_grid(
     ui: &mut egui::Ui,
     salt: impl std::hash::Hash + std::fmt::Debug,
+    key: &str,
     g: &Grid,
     d: &mut DbDraft,
-) {
-    let n = g.columns.len();
-    egui::ScrollArea::horizontal()
-        .id_salt(("h", &salt))
-        .show(ui, |ui| {
-            TableBuilder::new(ui)
-                .id_salt(salt)
-                .striped(true)
-                .resizable(true)
-                .auto_shrink([false, false])
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .columns(TCol::initial(140.0).at_least(40.0).clip(true), n)
-                .header(ROW + 2.0, |mut h| {
-                    for c in &g.columns {
-                        h.col(|ui| {
-                            ui.strong(c);
-                        });
+    tables: &mut std::collections::BTreeMap<String, telepad_app::grid::TableState>,
+) -> Vec<Msg> {
+    let cols: Vec<Col> = g
+        .columns
+        .iter()
+        .map(|c| Col::new(c.clone()).width(TCol::initial(140.0).at_least(40.0).clip(true)))
+        .collect();
+    let cells: Vec<Vec<String>> = g
+        .rows
+        .iter()
+        .map(|r| r.iter().map(|c| shown(c).0).collect())
+        .collect();
+    let spec = Spec::new(salt, "Query result", &cols)
+        .kind(Kind::Fill)
+        .row_h(ROW)
+        .min_width(140.0 * cols.len() as f32);
+    let o = table::show(
+        ui,
+        &spec,
+        table::state_in(tables, key),
+        &cells,
+        |ui, ev| match ev {
+            Ev::Cell { row, col } => {
+                let (t, null) = shown(&g.rows[row][col]);
+                let mut rt = RichText::new(t).monospace();
+                if null {
+                    rt = rt.weak().italics();
+                }
+                cell_text(ui, rt);
+            }
+            Ev::Menu { row, col } => {
+                if let Some(v) = g.rows[row].get(col).and_then(|c| c.as_value()) {
+                    if ui.button(il(icons::COPY, "Copy value")).clicked() {
+                        ui.ctx().copy_text(v.to_string());
+                        ui.close();
                     }
-                })
-                .body(|body| {
-                    body.rows(ROW, g.rows.len(), |mut row| {
-                        let cells = &g.rows[row.index()];
-                        for (ci, c) in cells.iter().enumerate() {
-                            row.col(|ui| {
-                                let (t, null) = shown(c);
-                                let mut rt = RichText::new(t).monospace();
-                                if null {
-                                    rt = rt.weak().italics();
-                                }
-                                cell_text(ui, rt);
-                                let resp = cell_click(ui, ("q", ci));
-                                resp.context_menu(|ui| {
-                                    if let Some(v) = c.as_value() {
-                                        if ui.button(il(icons::COPY, "Copy value")).clicked() {
-                                            ui.ctx().copy_text(v.to_string());
-                                            ui.close();
-                                        }
-                                        if ui.button(il(icons::EYE, "View value…")).clicked() {
-                                            d.viewer = Some((
-                                                g.columns.get(ci).cloned().unwrap_or_default(),
-                                                v.to_string(),
-                                            ));
-                                            ui.close();
-                                        }
-                                    }
-                                });
-                            });
-                        }
-                    });
-                });
-        });
+                    if ui.button(il(icons::EYE, "View value…")).clicked() {
+                        d.viewer = Some((
+                            g.columns.get(col).cloned().unwrap_or_default(),
+                            v.to_string(),
+                        ));
+                        ui.close();
+                    }
+                }
+            }
+            Ev::HeaderMenu => {}
+        },
+    );
+    o.msgs
 }
 
 /// The confirmation shown before anything changes: exact SQL, Run / Cancel.

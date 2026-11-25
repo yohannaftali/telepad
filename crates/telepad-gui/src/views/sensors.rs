@@ -9,7 +9,15 @@ use telepad_core::model::{HostReport, SensorKind};
 
 /// Fans (BMC) first, then temperatures; explains why BMC data is missing when it is.
 /// `host`: inventory index (`None` for My Computer, #129).
-pub fn sensors(ui: &mut egui::Ui, r: &HostReport, host: Option<usize>, out: &mut Vec<Msg>) {
+pub fn sensors(
+    ui: &mut egui::Ui,
+    r: &HostReport,
+    host: Option<usize>,
+    alias: &str,
+    d: &mut telepad_app::Drafts,
+    out: &mut Vec<Msg>,
+) {
+    use crate::table::{self, Col, Ev, Spec};
     if let Some(e) = &r.bmc_error
         && let Some(i) = host
     {
@@ -57,23 +65,51 @@ pub fn sensors(ui: &mut egui::Ui, r: &HostReport, host: Option<usize>, out: &mut
     if !fans.is_empty() {
         let max = fans.iter().map(|s| s.value).fold(1.0_f32, f32::max);
         ui.label(RichText::new(il(icons::FAN, "Fans")).strong());
-        egui::Grid::new("fans")
-            .striped(true)
-            .spacing([16.0, 4.0])
-            .show(ui, |ui| {
-                for s in &fans {
-                    spinning_fan(ui, 18.0, (s.value / max).clamp(0.0, 1.0));
-                    ui.label(&s.chip);
-                    ui.label(&s.label);
-                    ui.add(
-                        egui::ProgressBar::new((s.value / max).clamp(0.0, 1.0))
-                            .desired_width(220.0)
-                            .fill(crate::widgets::info_fill())
-                            .text(format!("{:.0} RPM", s.value)),
-                    );
-                    ui.end_row();
+        let cols = [
+            Col::action(""),
+            Col::new("Chip"),
+            Col::new("Sensor"),
+            Col::new("Speed").initial(230.0),
+        ];
+        let cells: Vec<Vec<String>> = fans
+            .iter()
+            .map(|s| {
+                vec![
+                    String::new(),
+                    s.chip.clone(),
+                    s.label.clone(),
+                    format!("{:.0} RPM", s.value),
+                ]
+            })
+            .collect();
+        let title = format!("Fans of {alias}");
+        let st = table::state(d, format!("fans:{alias}"));
+        let o = table::show(
+            ui,
+            &Spec::new(("fans", alias), &title, &cols),
+            st,
+            &cells,
+            |ui, ev| {
+                if let Ev::Cell { row, col } = ev {
+                    let s = fans[row];
+                    match col {
+                        0 => {
+                            spinning_fan(ui, 18.0, (s.value / max).clamp(0.0, 1.0));
+                        }
+                        3 => {
+                            ui.add(
+                                egui::ProgressBar::new((s.value / max).clamp(0.0, 1.0))
+                                    .desired_width(ui.available_width().min(220.0))
+                                    .fill(crate::widgets::info_fill())
+                                    .text(&cells[row][3]),
+                            );
+                        }
+                        c => table::text(ui, &cells[row][c]),
+                    }
                 }
-            });
+            },
+        );
+        out.extend(o.msgs);
         ui.add_space(6.0);
     }
     let temps: Vec<_> = r
@@ -83,22 +119,50 @@ pub fn sensors(ui: &mut egui::Ui, r: &HostReport, host: Option<usize>, out: &mut
         .collect();
     if !temps.is_empty() {
         ui.label(RichText::new(il(icons::THERMOMETER, "Temperatures")).strong());
-        egui::Grid::new("temps")
-            .striped(true)
-            .spacing([16.0, 4.0])
-            .show(ui, |ui| {
-                for s in temps {
-                    ui.label(
-                        RichText::new(icons::THERMOMETER)
-                            .size(16.0)
-                            .color(temp_color(s.value)),
-                    )
-                    .on_hover_text(temp_level(s.value));
-                    ui.label(&s.chip);
-                    ui.label(&s.label);
-                    ui.colored_label(temp_color(s.value), format!("{:.1} °C", s.value));
-                    ui.end_row();
+        let cols = [
+            Col::action(""),
+            Col::new("Chip"),
+            Col::new("Sensor"),
+            Col::new("Temperature"),
+        ];
+        let cells: Vec<Vec<String>> = temps
+            .iter()
+            .map(|s| {
+                vec![
+                    String::new(),
+                    s.chip.clone(),
+                    s.label.clone(),
+                    format!("{:.1} °C", s.value),
+                ]
+            })
+            .collect();
+        let title = format!("Temperatures of {alias}");
+        let st = table::state(d, format!("temps:{alias}"));
+        let o = table::show(
+            ui,
+            &Spec::new(("temps", alias), &title, &cols),
+            st,
+            &cells,
+            |ui, ev| {
+                if let Ev::Cell { row, col } = ev {
+                    let s = temps[row];
+                    match col {
+                        0 => {
+                            ui.label(
+                                RichText::new(icons::THERMOMETER)
+                                    .size(16.0)
+                                    .color(temp_color(s.value)),
+                            )
+                            .on_hover_text(temp_level(s.value));
+                        }
+                        3 => {
+                            ui.colored_label(temp_color(s.value), &cells[row][3]);
+                        }
+                        c => table::text(ui, &cells[row][c]),
+                    }
                 }
-            });
+            },
+        );
+        out.extend(o.msgs);
     }
 }

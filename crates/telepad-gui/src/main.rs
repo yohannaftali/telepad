@@ -7,6 +7,7 @@
 mod app;
 mod icons;
 mod runtime;
+mod table;
 mod views;
 mod widgets;
 

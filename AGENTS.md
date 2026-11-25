@@ -66,6 +66,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/strategy.rs` | `update.db` (#122): `Strategy` (paused, `Every` on / seconds for ping, live, slow, static; SSH retry), `Check` (title, allowed `range`), `validate`, `human_secs`; `StaticFacts` / `SlowFacts` (`of` / `apply`, also used by `collector::Scope::carry_over`), `Facts`, `SavedFacts` (with age); `UpdateDb` (`open`, `load(now)` → `Loaded`, `load_strategy` / `save_strategy`, `save_facts` / `load_facts(now)`, `set_host_paused` / `paused_hosts`, `prune`), `strategy_path`, `PRAGMA user_version` |
 | `src/login_log.rs` | Log info (#126): read-only `script` (identity, `$SSH_CLIENT`, ancestor pids, journal access probe, `journalctl -t sshd -t sshd-session --since -30d` `Accepted` lines capped at `LIMIT`, plus `authorized_keys::list_script`), `parse` / `parse_line` (short-iso times incl. `+07:00`, publickey / password / keyboard-interactive / certificates, IPv6) → `LoginLog` (`JournalAccess`, `this_session`: the key sshd accepted for this read, `own` keys), `read`, `register_script` / `unregister_script` / `terminal_args` (exact sudo command after Enter) |
 | `src/local.rs` | My Computer (#129): `collect` this computer without SSH (Windows: `sysinfo`, `netstat -ano` → `parse_netstat`, `reg query` reboot pending, `docker` / `podman` CLI in the remote script's formats → `parse::parse_docker`; Linux / macOS: `script.sh` via local `sh -s`), `db_targets` (127.0.0.1 only), `open_terminal` (`platform::open_local_shell`) |
+| `src/table_export.rs` | Table exports (#153): `TableData` (title, columns, rows as text), `Format` (CSV / Excel / PDF / JSON), `to_csv` (BOM, formulas defused as #111), `to_json` (objects in column order, repeated names numbered), `to_xlsx` (`rust_xlsxwriter`: bold frozen header, autofilter, plain numbers only), `pdf::to_pdf` (`pdf-writer` + `ttf-parser`: A4 / landscape, header per page, embedded TrueType fonts with ToUnicode, per-character font fallback), `render`, `write` (via `.telepad-part`), `file_name`, `PDF_ASK_ABOVE` |
 | `src/prefs.rs` | `preference.db` (#94): named workspaces (`WorkspacePrefs`: `<own>` layout, custom (label, layout), `Current`), `check_label`, `prefs_path`, one-time `import_legacy` of `ui_workspace`, `PRAGMA user_version` |
 
 ### telepad-app (Model–View–Update)
@@ -92,7 +93,9 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_keys.rs` | Behaviour tests for the Authorized keys page |
 | `src/mykeys.rs` | My keys tab (#101): `MyKeys` (model), `MyKeysDraft` (selection, `GenForm`, `ConvertForm`; passphrases as `Secret`), `MkMsg` / `MkEffect`, `update`, `used_by` / `authorized_on` |
 | `src/tests_mykeys.rs` | Behaviour tests for the My keys tab |
-| `src/pager.rs` | Table pager (#138, #140, Senar / wtbapp style): `Pager` (page, typed rows per page — empty = 100, above 100 asks — `go(Go)`, `apply_page`, `record_info` "Record [a - b] of n"); drawn by `widgets::pager_bar` |
+| `src/grid.rs` | Table state of the table component (#153): `TableState` (sort `(col, Dir)`, filter boxes, `Pager`; `click`, `filter_by`, `clear_filters`), `filter_match` (wtbapp rules, numbers with units via `value`), `natural` / `compare` (units, empty last), `view` (filter + stable sort), `data` (export rows), `TableMsg` (Export / Answer / Exported) |
+| `src/tests_grid.rs` | Behaviour tests for #153 |
+| `src/pager.rs` | Table pager (#138, #140, Senar / wtbapp style): `Pager` (page, typed rows per page — empty = 100, above 100 asks — `go(Go)`, `apply_page`, `record_info` "Record [a - b] of n"; continuous mode #152: `continuous`, `loaded`, `toggle`, `start_mode` (narrower than `NARROW` starts continuous), `more`, `wants_more` (auto-fill up to `FILL_MAX`), `size_label`); drawn by `widgets::pager_bar` (record info left, Rows per page / page buttons / ∞ toggle right); database grid appends via `DbMsg::DataMore` (`DataView::appending` / `exhausted`) |
 | `src/logins.rs` | Log info pages (#126): `LoginSession` (model), `LoginDraft` (sort asc / desc / newest first, per-column filters, page, typed rows per page, show this PC's logins), `rows` (key names from `authorized_keys` / own keys / My keys, `Who`), `filter_match` (wtbapp rules), `page_range`, `LgMsg` / `LgEffect` (handled in `update.rs` `logins`, restored as `logins:<alias>`) |
 | `src/tests_logins.rs` | Behaviour tests for #126 |
 | `src/tests_strategy.rs` | Behaviour tests for #122 (pause, Update Strategy page, ping rounds, last known facts) |
@@ -108,6 +111,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/app.rs` | eframe app: each frame `runtime.frame()`, `views::draw()`, dispatch the returned `Msg`s |
 | `src/runtime.rs` | Executes `Effect`s (database, ssh, collector, update threads, dialogs, clipboard read/write via `arboard`, OS) and feeds results back as `Msg`s |
 | `src/views/` | One module per screen: `panels` (top bar, status bar), `detail` (host page and `local_page`, My Computer #129), `workspace` (page sidebar, inner windows: title bar, tabs, move / resize / minimize / maximize, minimized strip), `overview` (`TableView`: one group / cluster, extra Group / Cluster columns, by group; `fit_widths` auto column widths #143), `sets` (Groups / Clusters pages and "Hosts - [name]", #144 / #145), `detail`, `sensors`, `docker`, `docker_overview`, `ports`, `editor`, `import`, `keys`, `strategy` (Update Strategy page, #122), `logins` (Log info page, #126), `database` (one inner window per connection), `files` (one inner window per host), `text_editor` (its editor window: tabs, gutter, colours, find bar), `host_sync`, `confirm`, `update_window`. Only the main OS window exists; pages and dialogs are drawn inside it |
+| `src/table.rs` | The table component (#153) every table uses: `Col` (title, width, sort / filter / export, `named` for icon columns), `Spec` (`Kind::Simple` / `Fill` / `Paged`, row height, selection, drag, min width), `show` (in memory: `TableState` in `Drafts::tables`) and `controlled` (the view keeps the order: Hosts, file panes, database grid, Log info) → `Output`; header band and hover highlight (`Palette::head`, #151), title left / sort caret right-aligned, filter row above the titles, header click sort, right-click menu = `Ev::Menu` own items + Filter by / Clear All Filters / Export CSV, Excel, PDF / Copy as JSON (`export_msg`, `export_rows`) |
 | `src/widgets.rs` | Shared drawing helpers and colours (bars, status dot, fan, thresholds, action buttons `Act`: red danger / yellow edit / green add / amber caution, `host_menu` (right-click host menu), `light_visuals`) |
 | `src/icons.rs` | Phosphor icon font glyphs and OS logo detection; `assets/` holds the font and logos |
 | `assets/icon/` | App icon (`telepad.png` window icon, `.ico` exe/installer, `.icns` macOS app), generated by `scripts/make-icon.py` |
@@ -130,6 +134,10 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
   read by `Effect::CollectLocal` while the page is open (`update.rs` `local_due`). File and database
   windows find it through `update.rs` `host_of`; its file window is `files::Mode::Local` (both panes
   this computer, `FileSession::local_side`, transfers through `transfer::Remote` = `ThisComputer`).
+- **Tables** (#153): build every new table with `crate::table` (`show` for rows in memory, `controlled`
+  when the view keeps its own sort / filter state) — never a bare `TableBuilder` / `egui::Grid` with a
+  header row. Sort, filter boxes and page live in `Drafts::tables` (key per table); exports go through
+  `Msg::Table` → `Effect::ExportTable` / `Effect::CopyText`.
 - **Views** read `&Model`, may edit `&mut Drafts` (form text, search filter, toggles —
   never I/O), and return `Msg`s. They never call core I/O, `platform`, `rfd` or threads.
 - **`update()`** is the only code that changes the `Model`. It does no I/O, takes the time
@@ -324,3 +332,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #143 | fix(ui): Hosts table fills the page width, auto-resizes columns, Flags not clipped and readable | closed | 2026-11-24 |
 | #144 | feat(hosts): optional host groups — Groups page, Ungrouped, Hosts - [Group] page, group on cards | closed | 2026-11-24 |
 | #145 | feat(hosts): user-defined clusters separate from groups — Clusters page, Hosts - [Cluster] page, cluster on cards | closed | 2026-11-24 |
+| #151 | feat(ui): shared table header component — header background, hover highlight, right-aligned sort icon | ready-for-review | 2026-11-25 |
+| #152 | feat(ui): pager footer — record info left, controls right, continuous mode toggle (wtbapp / Senar style) | ready-for-review | 2026-11-25 |
+| #153 | feat(ui): table framework — simple and paged tables, sort and filter row everywhere, right-click menu with Filter by, Clear All Filters, export CSV / Excel / PDF, Copy as JSON | ready-for-review | 2026-11-25 |

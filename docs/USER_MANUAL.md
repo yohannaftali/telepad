@@ -210,6 +210,62 @@ and in menus the same meaning shows as red / yellow / green text.
 queries, the file window's path bars, the editor) works with the system clipboard:
 Ctrl+C / Ctrl+X / Ctrl+V (Cmd on macOS), in every window.
 
+### Tables
+
+Every table in Telepad works the same way (#153). There are two kinds: a **simple table**
+shows all its rows (Disks, Network, Ports in use, sensors, Docker containers, cluster
+tables, Groups / Clusters, Host Management, Authorized keys, My keys, the database lists);
+a **paged table** has the pager footer under it (the database Data grid, Log info).
+
+**Pager footer** (#152): **Record [1 - 20] of 970** on the left; on the right **Rows per
+page [20]**, then **« ‹ Page [n] of N › »** (type a page and press Enter), then the
+**mode button**:
+
+- **∞ (Switch to continuous)**: the page buttons go away, *Rows per page* becomes **Rows
+  per load**, and scrolling to the bottom of the table adds the next rows (*Record [1 - 60]
+  of 970*). While the rows do not fill the view, more load by themselves (up to 500 rows).
+  The database grid asks the server for one more page at a time; unsaved grid edits stay.
+- **Numbered list (Switch to pages)**: back to pages, from page 1.
+
+Switching, a new filter, sort or Rows per page starts again from the first row. Each table
+has its own mode (not saved); tables open with pages, or continuous when first shown in a
+window narrower than 768 points. In a narrow window the footer wraps onto a second line.
+
+- **Header:** the title row has its own colour band with a line under it, so it stands
+  apart from the rows. A title that sorts lights up (accent background, white text) under
+  the mouse; the sort arrow (▲ ascending, ▼ descending) sits at the **right edge** of the
+  title cell, and a long title is cut with "…" before the arrow, never the arrow itself.
+- **Sort:** click a column title: ascending, again descending, a third time back to the
+  table's own order. Numbers sort by value, also with a unit (`5%` before `40%`, `980 MiB`
+  before `1.5 GiB`, `5m ago` before `2h 5m ago`), addresses and names in natural order
+  (`192.0.2.9` before `192.0.2.10`), empty cells always last.
+- **Filter row:** a box above each column title. Text = contains (any case), `=x` equal,
+  `!x` not equal, `>x` / `<x` greater / less (numbers by value, units understood: `>50`
+  finds `75%`, `>1 GiB` finds `1.5 GiB`; dates as text, `>2026-11-20`), `NULL` empty,
+  `!NULL` has a value. Hover a box for the rules. The database grid applies its boxes on
+  Enter (on the server); the other tables filter while you type.
+- **Right-click a row** for its menu: first the table's own commands (e.g. the host menu
+  on the Hosts table, Edit / Set NULL / Copy value on the database grid, container actions
+  on Docker tables, Revoke on Authorized keys), then for every table:
+  - **Filter by *column*: *value*** puts the value of the cell you clicked into that
+    column's box (long values are shortened in the menu; disabled on an empty cell);
+  - **Clear All Filters** empties every box;
+  - **Export as CSV…**, **Export as Excel (.xlsx)…**, **Export as PDF…** save the table
+    to a file you choose (named `<table>-<date>-<time>.<ext>`, UTC);
+  - **Copy as JSON** puts the rows on the clipboard as a JSON array (one object per row,
+    keys = column titles).
+
+  Exports take **every row the filters let through, in the shown order, from all pages**,
+  not only the page on screen; columns that hold only buttons or icons are left out. CSV is
+  UTF-8 with a BOM (Excel shows accents and symbols) and cells that look like a formula get
+  a leading `'`; Excel files have a bold, frozen header with an autofilter and keep text as
+  text (never a formula); the PDF is A4 (landscape when the table is wide) with the header
+  on every page and page numbers. A PDF of more than 5000 rows asks first. The result (or
+  the error) shows in the status bar. Right-clicking a column title offers Clear All
+  Filters and the exports too.
+- In the **database Data grid**, Export as CSV / Excel opens the Export dialog (all
+  filtered rows from the server, #139); PDF and JSON take the rows loaded in the grid.
+
 ## Theme
 
 **☰ → Settings → Theme** switches between **System** (follows the Windows / macOS / desktop
@@ -330,6 +386,10 @@ search box has text, the handles are hidden and a hint above the table says what
   cursor; a click right on a border never sorts.
 - The header row stays in place while you scroll; when the columns are wider than the
   window, scroll sideways.
+- **Filter row and menu:** the boxes above the titles narrow the hosts by column (e.g.
+  `>80%` under CPU, `down` under the status column); the right-click menu ends with
+  Filter by, Clear All Filters, Export (CSV / Excel / PDF) and Copy as JSON — see
+  [Tables](#tables). Rows cannot be dragged while a box has text.
 
 The search box (in the Hosts and Docker / Podman page headers) filters both pages by host
 name, address, OS or container name.
@@ -447,13 +507,14 @@ The table (made-up example):
   *unknown key* (a key in another user's file, or one removed since).
 - **Newest first** by default. Click a header to sort ascending, again for descending, a
   third time for newest first again; empty cells stay last.
-- One **filter** box under each header: text = contains (any case), `=x` equal, `!x` not
+- One **filter** box above each column title: text = contains (any case), `=x` equal, `!x` not
   equal, `>x` / `<x` (numbers by value, times as text, e.g. `>2026-11-20`), `NULL` empty,
   `!NULL` not empty. **Clear filters** empties them all.
 - **Pager** (footer under the table, it stays visible while the rows scroll): *Record [21 - 40]
-  of 279*, then first / previous, **Page [n] of N** (type a page number and press Enter),
-  next / last, and **Rows per page** (type a number and press Enter; 20 by default, empty
-  = 100; more than 100 asks first because a long page is slow).
+  of 279* on the left; on the right **Rows per page** (type a number and press Enter; 20 by
+  default, empty = 100; more than 100 asks first because a long page is slow), first /
+  previous, **Page [n] of N** (type a page number and press Enter), next / last, and the
+  continuous-mode button ([Tables](#tables)).
 - **Show this PC's logins** (off by default): logins from this PC's address with a key
   Telepad logs in with. Telepad does not reuse connections, so every refresh round is one
   login (about 1 440 a day per host at the default 60 s, see [Update Strategy](#update-strategy));
@@ -1317,7 +1378,7 @@ cannot reach the database address, the dialog says so.
 
 **Data tab**
 
-- **Filter boxes** under every column header (as in the Senar / wtbapp tables): text =
+- **Filter boxes** above every column title (as in the Senar / wtbapp tables): text =
   contains (any case), `=x` equal, `!x` not equal, `>x` / `<x` greater / less (numbers by
   value), `NULL` empty, `!NULL` has a value; Enter applies. Values are sent as quoted
   literals, never as SQL.
@@ -1327,9 +1388,11 @@ cannot reach the database address, the dialog says so.
 - **Columns ▾**: search the columns and tick the ones to show; **Show all** / **Hide all**.
   Kept for this table of this connection.
 - **Pager** (footer under the grid, it stays visible while the rows scroll): *Record [1 -
-  100] of 2 345* (*of many* when the count is not available), first / previous,
-  **Page [n] of N** (type a page and press Enter), next / last, **Rows per page** (100 by
-  default; type a number and press Enter, empty = 100, more than 100 asks first).
+  100] of 2 345* (*of many* when the count is not available) on the left; on the right
+  **Rows per page** (100 by default; type a number and press Enter, empty = 100, more than
+  100 asks first), first / previous, **Page [n] of N** (type a page and press Enter), next /
+  last, and the continuous-mode button: in continuous mode scrolling to the bottom adds the
+  next page of rows from the server ([Tables](#tables)).
   **↻** reloads. Click a column title (anywhere in it) to sort: ascending, descending, off;
   a new sort or filter goes back to page 1. Click anywhere in a cell to select its row.
 - NULL is shown as a grey *NULL*. Long values and binary data are cut (the full length is

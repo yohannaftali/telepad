@@ -4,9 +4,17 @@ use eframe::egui::{self, RichText};
 
 use telepad_core::model::HostReport;
 
+use crate::table::{self, Col, Ev, Spec};
 use crate::widgets::nginx_color;
 
-pub fn ports_in_use(ui: &mut egui::Ui, r: &HostReport, nginx_only: &mut bool) {
+pub fn ports_in_use(
+    ui: &mut egui::Ui,
+    r: &HostReport,
+    alias: &str,
+    d: &mut telepad_app::Drafts,
+    out: &mut Vec<telepad_app::Msg>,
+) {
+    let nginx_only = &mut d.ports_nginx_only;
     let usage = r.port_usage();
     if usage.is_empty() {
         ui.label(RichText::new("No listening ports reported (ss/netstat not available)").weak());
@@ -55,36 +63,53 @@ pub fn ports_in_use(ui: &mut egui::Ui, r: &HostReport, nginx_only: &mut bool) {
             .weak(),
         );
     }
-    egui::Grid::new("ports")
-        .striped(true)
-        .spacing([16.0, 4.0])
-        .show(ui, |ui| {
-            for t in ["Port", "Proto", "Bind", "Used by", "Stack", "→ Container"] {
-                ui.label(RichText::new(t).strong());
-            }
-            ui.end_row();
-            for u in usage.iter().filter(|u| !*nginx_only || u.nginx) {
-                let color = u.nginx.then_some(nginx_color());
-                let txt = |t: String| {
-                    let rt = RichText::new(t).monospace();
-                    match color {
-                        Some(c) => rt.color(c),
-                        None => rt,
-                    }
-                };
-                ui.label(txt(u.port.to_string()).strong());
-                ui.label(txt(u.proto.clone()));
-                ui.label(txt(u.addresses.join(", ")));
-                ui.label(txt(if u.owner.is_empty() {
-                    "—".into()
+    let shown: Vec<_> = usage.iter().filter(|u| !*nginx_only || u.nginx).collect();
+    let cols = [
+        Col::new("Port").mono(),
+        Col::new("Proto").mono(),
+        Col::new("Bind").mono(),
+        Col::new("Used by").mono(),
+        Col::new("Stack").mono(),
+        Col::new("→ Container").mono(),
+    ];
+    let cells: Vec<Vec<String>> = shown
+        .iter()
+        .map(|u| {
+            vec![
+                u.port.to_string(),
+                u.proto.clone(),
+                u.addresses.join(", "),
+                u.owner.clone(),
+                u.stack.clone(),
+                u.container_port.map_or(String::new(), |p| p.to_string()),
+            ]
+        })
+        .collect();
+    let title = format!("Ports in use on {alias}");
+    let st = table::state(d, format!("ports:{alias}"));
+    let o = table::show(
+        ui,
+        &Spec::new(("ports", alias), &title, &cols),
+        st,
+        &cells,
+        |ui, ev| {
+            if let Ev::Cell { row, col } = ev {
+                let u = shown[row];
+                let t = if col == 3 && u.owner.is_empty() {
+                    "—"
                 } else {
-                    u.owner.clone()
-                }));
-                ui.label(txt(u.stack.clone()));
-                ui.label(txt(u
-                    .container_port
-                    .map_or(String::new(), |p| p.to_string())));
-                ui.end_row();
+                    cells[row][col].as_str()
+                };
+                let mut rt = RichText::new(t).monospace();
+                if u.nginx {
+                    rt = rt.color(nginx_color());
+                }
+                if col == 0 {
+                    rt = rt.strong();
+                }
+                ui.add(egui::Label::new(rt).truncate().selectable(false));
             }
-        });
+        },
+    );
+    out.extend(o.msgs);
 }

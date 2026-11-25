@@ -3943,6 +3943,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-writer"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5e456864a7a304047bff84977dc6fb162bd956475d40ba50b2dcecaada7f753"
+dependencies = [
+ "bitflags 2.13.2",
+ "itoa",
+ "memchr",
+ "ryu",
+]
+
+[[package]]
 name = "pem"
 version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5650,10 +5662,12 @@ dependencies = [
  "ed25519-dalek",
  "hmac 0.12.1",
  "keyring",
+ "miniz_oxide 0.8.9",
  "mysql",
  "p12-keystore",
  "p256",
  "p384",
+ "pdf-writer",
  "pgp",
  "pkcs8 0.10.2",
  "postgres",
@@ -5673,6 +5687,7 @@ dependencies = [
  "ssh-key",
  "sysinfo",
  "thiserror 2.0.21",
+ "ttf-parser",
  "ureq",
  "windows-sys 0.61.2",
  "zeroize",
@@ -5978,6 +5993,12 @@ dependencies = [
  "nom 8.0.0",
  "petgraph",
 ]
+
+[[package]]
+name = "ttf-parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "twofish"

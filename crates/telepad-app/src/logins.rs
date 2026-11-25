@@ -61,7 +61,7 @@ impl Col {
         }
     }
 
-    fn index(self) -> usize {
+    pub fn index(self) -> usize {
         Col::ALL.iter().position(|&c| c == self).unwrap_or(0)
     }
 }
@@ -291,69 +291,8 @@ pub fn page_range(total: usize, d: &LoginDraft) -> (usize, usize, usize) {
     d.pager.range(total)
 }
 
-/// One filter box against one cell, as in the wtbapp tables: contains (any
-/// case), `=x` equal, `>x` / `<x` (numbers by value, else text order, so
-/// `>2026-11-20` works on times), `!x` not equal, `NULL` empty, `!NULL` not
-/// empty.
-pub fn filter_match(cell: &str, crit: &str) -> bool {
-    let c = cell.trim().to_lowercase();
-    let d = crit.trim().to_lowercase();
-    match d.as_str() {
-        "null" => return c.is_empty(),
-        "!null" => return !c.is_empty(),
-        _ => {}
-    }
-    let cmp = |v: &str| match (c.parse::<f64>(), v.trim().parse::<f64>()) {
-        (Ok(a), Ok(b)) => a.partial_cmp(&b),
-        _ => Some(c.as_str().cmp(v.trim())),
-    };
-    if let Some(v) = d.strip_prefix('=') {
-        c == v.trim()
-    } else if let Some(v) = d.strip_prefix('>') {
-        cmp(v) == Some(Ordering::Greater)
-    } else if let Some(v) = d.strip_prefix('<') {
-        cmp(v) == Some(Ordering::Less)
-    } else if let Some(v) = d.strip_prefix('!') {
-        c != v.trim()
-    } else {
-        c.contains(&d)
-    }
-}
-
-/// Text order with digit runs by value (`192.0.2.9` before `192.0.2.10`).
-fn natural(a: &str, b: &str) -> Ordering {
-    let (mut x, mut y) = (a.chars().peekable(), b.chars().peekable());
-    loop {
-        match (x.peek().copied(), y.peek().copied()) {
-            (None, None) => return Ordering::Equal,
-            (None, _) => return Ordering::Less,
-            (_, None) => return Ordering::Greater,
-            (Some(p), Some(q)) if p.is_ascii_digit() && q.is_ascii_digit() => {
-                let take = |it: &mut std::iter::Peekable<std::str::Chars>| {
-                    let mut s = String::new();
-                    while let Some(&c) = it.peek().filter(|c| c.is_ascii_digit()) {
-                        s.push(c);
-                        it.next();
-                    }
-                    s
-                };
-                let (n, m) = (take(&mut x), take(&mut y));
-                let (n, m) = (n.trim_start_matches('0'), m.trim_start_matches('0'));
-                let o = n.len().cmp(&m.len()).then_with(|| n.cmp(m));
-                if o != Ordering::Equal {
-                    return o;
-                }
-            }
-            (Some(p), Some(q)) => {
-                if p != q {
-                    return p.cmp(&q);
-                }
-                x.next();
-                y.next();
-            }
-        }
-    }
-}
+pub use crate::grid::filter_match;
+use crate::grid::natural;
 
 /// Messages of the Log info pages.
 #[derive(Debug, Clone)]

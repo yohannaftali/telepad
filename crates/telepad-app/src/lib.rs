@@ -12,6 +12,7 @@
 pub mod db;
 pub mod editor;
 pub mod files;
+pub mod grid;
 pub mod hostsync;
 pub mod logins;
 mod msg;
@@ -46,6 +47,8 @@ mod tests_db;
 mod tests_editor;
 #[cfg(test)]
 mod tests_files;
+#[cfg(test)]
+mod tests_grid;
 #[cfg(test)]
 mod tests_history;
 #[cfg(test)]

@@ -119,6 +119,11 @@ pub struct DataView {
     pub loading: bool,
     pub error: Option<String>,
     pub edits: Edits,
+    /// Continuous mode (#152): the offset of the rows being added to the
+    /// grid, one request at a time.
+    pub appending: Option<u64>,
+    /// The last page came back short: no more rows to add.
+    pub exhausted: bool,
 }
 
 /// Rows per Data page of a new table (#138, as in the wtbapp tables).
@@ -139,6 +144,8 @@ impl Default for DataView {
             loading: false,
             error: None,
             edits: Edits::default(),
+            appending: None,
+            exhausted: false,
         }
     }
 }
@@ -647,6 +654,9 @@ pub enum DbMsg {
     },
     /// The pager footer changed (page or rows per page, from the draft; #138).
     DataGo(DbId),
+    /// Continuous mode (#152): the grid was scrolled to its bottom; add the
+    /// next rows from the server.
+    DataMore(DbId),
     /// The column chooser (#138): these columns are hidden.
     SetHidden {
         id: DbId,
@@ -815,12 +825,16 @@ pub fn import_statements(
     telepad_core::db::io::import_statements(engine, t, &info.columns, map, &v.file.rows)
 }
 
-/// The pager of the shown page (back to the model after a refused change).
-fn pager_of(v: &DataView) -> crate::pager::Pager {
+/// The pager of the shown page (back to the model after a refused change);
+/// the mode stays as it was (#152).
+fn pager_of(v: &DataView, was: &crate::pager::Pager) -> crate::pager::Pager {
     let per = v.limit.max(1);
     let mut p = crate::pager::Pager::new(per as usize);
     p.page = (v.offset / per) as usize;
     p.page_text = (p.page + 1).to_string();
+    p.continuous = was.continuous;
+    p.mode_set = was.mode_set;
+    p.loaded = v.grid.as_ref().map_or(per as usize, |g| g.rows.len());
     p
 }
 
@@ -850,6 +864,8 @@ fn reload_page(s: &mut DbSession, fx: &mut Vec<DbEffect>) {
     if let Some(j) = page_job(s) {
         s.data.loading = true;
         s.data.error = None;
+        s.data.appending = None;
+        s.data.exhausted = false;
         job(fx, s.id, j);
     }
 }
@@ -1333,7 +1349,7 @@ pub fn update(
             s.info = None;
             d.data_filter.clear();
             d.col_filters.clear();
-            d.pager = pager_of(&s.data);
+            d.pager = pager_of(&s.data, &d.pager);
             fx.push(DbEffect::LoadHidden {
                 id,
                 key: hidden_key(&s.target, &table),
@@ -1418,7 +1434,10 @@ pub fn update(
             if s.data.edits.is_empty() && limit > 0 {
                 s.data.limit = limit;
                 s.data.offset = 0;
-                d.pager = crate::pager::Pager::new(limit as usize);
+                let mut p = crate::pager::Pager::new(limit as usize);
+                p.continuous = d.pager.continuous;
+                p.mode_set = d.pager.mode_set;
+                d.pager = p;
                 reload_page(s, &mut fx);
             }
         }
@@ -1635,15 +1654,55 @@ pub fn update(
         DbMsg::DataGo(_) => {
             if !s.data.edits.is_empty() {
                 s.error = Some("Post or discard the changes first".into());
-                d.pager = pager_of(&s.data);
+                d.pager = pager_of(&s.data, &d.pager);
                 return fx;
             }
             let per = d.pager.per_page.max(1) as u64;
             let offset = d.pager.page as u64 * per;
-            if per != s.data.limit || offset != s.data.offset {
+            // Rows added in continuous mode (#152) go when the mode or the
+            // size changes: the grid starts again from its first page.
+            let grown = s
+                .data
+                .grid
+                .as_ref()
+                .is_some_and(|g| g.rows.len() as u64 > per);
+            if per != s.data.limit || offset != s.data.offset || grown {
                 s.data.limit = per;
                 s.data.offset = offset;
                 reload_page(s, &mut fx);
+            }
+        }
+        DbMsg::DataMore(_) => {
+            let Some(g) = &s.data.grid else {
+                return fx;
+            };
+            let next = s.data.offset + g.rows.len() as u64;
+            let done = s.data.exhausted || s.data.total.is_some_and(|t| next >= t);
+            if s.data.loading || s.data.appending.is_some() || done {
+                return fx;
+            }
+            if let Some(DbJob::Page {
+                table,
+                filter,
+                cols,
+                sort,
+                limit,
+                ..
+            }) = page_job(s)
+            {
+                s.data.appending = Some(next);
+                job(
+                    &mut fx,
+                    s.id,
+                    DbJob::Page {
+                        table,
+                        filter,
+                        cols,
+                        sort,
+                        offset: next,
+                        limit,
+                    },
+                );
             }
         }
         DbMsg::SetHidden { hidden, .. } => {
@@ -1669,11 +1728,34 @@ pub fn update(
             total,
             ..
         } => {
-            if s.data.table.as_ref() == Some(&table) && s.data.offset == offset {
+            if s.data.table.as_ref() != Some(&table) {
+                return fx;
+            }
+            if s.data.appending == Some(offset) {
+                // Continuous mode (#152): the rows go after the ones shown;
+                // edits keep their row numbers.
+                s.data.appending = None;
+                match result {
+                    Ok(more) => {
+                        s.data.exhausted = (more.rows.len() as u64) < s.data.limit;
+                        if total.is_some() {
+                            s.data.total = total;
+                        }
+                        match &mut s.data.grid {
+                            Some(g) if g.columns == more.columns => g.rows.extend(more.rows),
+                            _ => s.data.exhausted = true,
+                        }
+                        d.pager.loaded = s.data.grid.as_ref().map_or(0, |g| g.rows.len());
+                    }
+                    Err(e) => s.data.error = Some(e),
+                }
+            } else if s.data.offset == offset && s.data.appending.is_none() {
                 s.data.loading = false;
                 s.data.total = total;
                 match result {
                     Ok(g) => {
+                        s.data.exhausted = (g.rows.len() as u64) < s.data.limit;
+                        d.pager.loaded = g.rows.len();
                         s.data.grid = Some(g);
                         s.data.error = None;
                     }
@@ -2278,6 +2360,7 @@ fn msg_id(msg: &DbMsg) -> DbId {
         | Tab(id, _)
         | DataReload(id)
         | DataGo(id)
+        | DataMore(id)
         | ExportOpen(id)
         | ExportClose(id)
         | ExportRun(id)

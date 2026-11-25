@@ -2,6 +2,62 @@
 
 Newest first.
 
+## [2026-11-25] — feat(ui): pager footer — record info left, controls right, continuous mode (#152)
+- Issue #152 addressed on GitHub (branch `152-pager-continuous`, on top of #151)
+- `telepad-app/src/pager.rs`: continuous mode (`toggle`, `start_mode` < 768 pt, `more`, `wants_more` with the
+  500-row auto-fill cap, `size_label` "Rows per load"), `reset` also resets the loaded rows; `db.rs`:
+  `DbMsg::DataMore` adds the next server page (one request at a time, `appending` / `exhausted`), edits keep their
+  rows, the mode switch reloads the first page; `widgets::pager_bar`: record info left, Rows per page | « ‹ Page ›
+  » | ∞ / numbered-list toggle right-aligned (wraps when narrow); `table.rs` reports `near_bottom` / `fits`
+  (within 80 pt of the bottom, as wtbapp); Log info and in-memory paged tables load more on scroll
+- Verified: fmt, clippy, tests (pager continuous / narrow start, database append test). Not verified on screen
+  (session locked)
+- Docs: manual (Tables ▸ Pager footer, Log info and Data tab pager), AGENTS.md (`pager.rs` row)
+
+## [2026-11-25] — feat(ui): table headers stand out — header band, hover highlight, right-aligned sort icon (#151)
+- Issue #151 addressed on GitHub (branch `151-table-header`, on top of #153)
+- `telepad-gui/src/table.rs` `title_line`: header band colour + line under it, sortable titles light up on hover
+  (background and text), title cut with "…" left, sort caret right-aligned; `widgets.rs` `Palette::head`
+  (`HeadColors`, dark and light); Hosts auto-fit always reserves the caret width (`overview.rs` `header_text`)
+- Every table gets it through the #153 component (no per-view code)
+- Verified: fmt, clippy, tests (new `table_header_colours_are_readable_and_stand_out`: WCAG contrast of header /
+  hover text, band vs rows, both themes). Not verified on screen (session locked)
+
+## [2026-11-25] — feat(ui): table framework — simple and paged tables, filter row, right-click menu, exports (#153)
+- Issue #153 addressed on GitHub (branch `153-table-framework`)
+- New: `telepad-gui/src/table.rs` (component: `show` / `controlled`, `Kind::Simple` / `Fill` / `Paged`, filter row
+  above the titles, header sort, right-click = own items + Filter by / Clear All Filters / Export CSV, Excel, PDF /
+  Copy as JSON), `telepad-app/src/grid.rs` (`TableState`, wtbapp filter rules with units, natural / unit sort,
+  `TableMsg`), `telepad-core/src/table_export.rs` (CSV with BOM, JSON, `.xlsx`, PDF via `pdf-writer` 0.15.0 +
+  `ttf-parser` 0.25.1 with embedded UI fonts, `.telepad-part` writes); `Effect::ExportTable` / `Effect::CopyText`,
+  PDF above 5000 rows asks first
+- Converted: Hosts (all host pages), Groups / Clusters, disks, network, ports, fans, temperatures, Docker containers
+  (host page and Docker overview), Swarm / Kubernetes tables, file panes and History, database lists / structure
+  columns / query results / Data grid (server sort and filter kept; CSV / Excel open the #139 Export dialog),
+  Host Management, Authorized keys (by server / by key), My keys, Log info, Update Strategy hosts
+- Not converted (forms / logs, not data tables): key-value grids (System, Usage, Maintenance, forms), structure
+  editor, import mapping / preview, key run results, SQL log
+- Verified: `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace` (new: 7 core export tests, 7 app
+  behaviour tests, GUI PDF font test); sample PDF rendered with PyMuPDF (header, stripes, `→`, `°C`, copyable text).
+  Not verified: the GUI on screen (Windows session locked, screenshots black) — tester checklist
+- Docs: `docs/USER_MANUAL.md` (new "Tables" section, filter boxes above titles), AGENTS.md (modules, table rule)
+
+## [2026-11-25] — feat(ui): table framework — simple and paged tables, sort and filter row everywhere, right-click menu with Filter by, Clear All Filters, export CSV / Excel / PDF, Copy as JSON
+- Issue #153 created on GitHub
+- Scope: telepad-gui (table component, every table view), telepad-app (table state, Msg / Effect), telepad-core (table export: CSV / xlsx / PDF / JSON), runtime
+- Labels: enhancement
+- Owner decision: new issue (not part of #151); sort + filter row on every table, simple and paged
+
+## [2026-11-25] — feat(ui): pager footer — record info left, controls right, continuous mode toggle (wtbapp / Senar style)
+- Issue #152 created on GitHub
+- Scope: telepad-app (pager.rs, db.rs, logins.rs), telepad-gui (widgets::pager_bar, database / logins views)
+- Labels: enhancement
+
+## [2026-11-25] — feat(ui): shared table header component — header background, hover highlight, right-aligned sort icon
+- Issue #151 created on GitHub
+- Scope: telepad-gui (shared table header module, all TableBuilder / Grid tables)
+- Labels: enhancement
+
 ## [2026-11-24] — Telepad 0.9.9
 - **Groups and Clusters** (#144, #145): optional, independent labels for hosts. New Groups /
   Clusters pages (sidebar under My Computer) with a fixed Ungrouped / No cluster entry; add,
