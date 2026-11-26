@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::config::{self, Access, HostEntry, HostSet, Inventory, SetKind};
 use crate::update::UpdateConfig;
 
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
 const JSON_FORMAT: &str = "telepad/hosts";
 
 #[derive(Debug, thiserror::Error)]
@@ -142,6 +142,18 @@ const HOST_SETS: &str = "CREATE TABLE IF NOT EXISTS host_sets (
     PRIMARY KEY (kind, name)
 );";
 
+/// Registered Portainer servers (#171): reached through the tunnel of
+/// `alias`, so they follow the host's alias and go with the host. The API
+/// token is in the OS password store, never here.
+const PORTAINERS: &str = "CREATE TABLE IF NOT EXISTS portainers (
+    name        TEXT    NOT NULL PRIMARY KEY COLLATE NOCASE,
+    alias       TEXT    NOT NULL REFERENCES hosts(alias) ON UPDATE CASCADE ON DELETE CASCADE,
+    port        INTEGER NOT NULL,
+    https       INTEGER NOT NULL DEFAULT 1,
+    fingerprint TEXT    NOT NULL DEFAULT '',
+    position    INTEGER NOT NULL DEFAULT 0
+);";
+
 /// The `hosts` column holding a host's name of `kind`.
 fn set_column(kind: SetKind) -> &'static str {
     match kind {
@@ -242,11 +254,22 @@ COMMIT;"
 PRAGMA user_version = 5;
 COMMIT;"
             ))?;
+            v = 5;
+        }
+        if v == 5 {
+            // v6: registered Portainer servers (#171).
+            conn.execute_batch(&format!(
+                "BEGIN;
+{PORTAINERS}
+PRAGMA user_version = 6;
+COMMIT;"
+            ))?;
         } else if v == 0 {
             conn.execute_batch(&format!(
                 "{DB_CONNECTIONS}
 {RDP_SETTINGS}
 {HOST_SETS}
+{PORTAINERS}
 PRAGMA user_version = {SCHEMA_VERSION};"
             ))?;
         } else if v > SCHEMA_VERSION {
@@ -468,7 +491,91 @@ PRAGMA user_version = {SCHEMA_VERSION};"
                 .iter()
                 .map(|&k| Ok((k, self.sets(k)?)))
                 .collect::<Result<_, StoreError>>()?,
+            portainers: self.portainers()?,
         })
+    }
+
+    /// Registered Portainer servers (#171), in display order.
+    pub fn portainers(&self) -> Result<Vec<crate::portainer::Portainer>, StoreError> {
+        let mut st = self.conn.prepare(
+            "SELECT name, alias, port, https, fingerprint FROM portainers ORDER BY position, name",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(crate::portainer::Portainer {
+                name: r.get(0)?,
+                alias: r.get(1)?,
+                port: r.get::<_, i64>(2)?.clamp(1, 65535) as u16,
+                https: r.get::<_, i64>(3)? != 0,
+                fingerprint: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Add a Portainer (`old` = None, last in the list) or change one
+    /// (rename too); the fingerprint is kept unless the address changed.
+    pub fn save_portainer(
+        &mut self,
+        old: Option<&str>,
+        p: &crate::portainer::Portainer,
+    ) -> Result<(), StoreError> {
+        crate::portainer::check_name(&p.name).map_err(StoreError::Invalid)?;
+        if p.port == 0 {
+            return Err(StoreError::Invalid("A port is needed".into()));
+        }
+        let name = p.name.trim();
+        let tx = self.conn.transaction()?;
+        let taken: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM portainers WHERE name = ?1 AND (?2 IS NULL OR name <> ?2)",
+            params![name, old],
+            |r| r.get(0),
+        )?;
+        if taken > 0 {
+            return Err(StoreError::Invalid(format!(
+                "There is already a Portainer named '{name}'"
+            )));
+        }
+        match old {
+            Some(o) => {
+                let n = tx.execute(
+                    "UPDATE portainers SET name = ?1, alias = ?2, port = ?3, https = ?4,
+                       fingerprint = CASE WHEN alias = ?2 AND port = ?3 AND https = ?4
+                                     THEN fingerprint ELSE '' END
+                     WHERE name = ?5",
+                    params![name, p.alias, p.port, p.https, o],
+                )?;
+                if n == 0 {
+                    return Err(StoreError::Invalid(format!(
+                        "Portainer '{o}' no longer exists"
+                    )));
+                }
+            }
+            None => {
+                tx.execute(
+                    "INSERT INTO portainers(name, alias, port, https, fingerprint, position)
+                     VALUES(?1, ?2, ?3, ?4, ?5,
+                       (SELECT COALESCE(MAX(position), 0) + 1 FROM portainers))",
+                    params![name, p.alias, p.port, p.https, p.fingerprint],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_portainer(&mut self, name: &str) -> Result<(), StoreError> {
+        self.conn
+            .execute("DELETE FROM portainers WHERE name = ?1", params![name])?;
+        Ok(())
+    }
+
+    /// Pin the certificate seen on the first read, or the one accepted.
+    pub fn pin_portainer(&mut self, name: &str, fingerprint: &str) -> Result<(), StoreError> {
+        self.conn.execute(
+            "UPDATE portainers SET fingerprint = ?2 WHERE name = ?1",
+            params![name, fingerprint],
+        )?;
+        Ok(())
     }
 
     /// Saved Remote Desktop settings of every host (#102), by alias. A row
@@ -931,6 +1038,22 @@ PRAGMA user_version = {SCHEMA_VERSION};"
                 )?;
             }
         }
+        // Portainers of imported hosts (#171; never a token).
+        for p in &inv.portainers {
+            if crate::portainer::check_name(&p.name).is_err()
+                || p.port == 0
+                || !inv.hosts.iter().any(|h| h.alias == p.alias)
+            {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO portainers(name, alias, port, https, fingerprint, position)
+                 VALUES(?1, ?2, ?3, ?4, ?5, (SELECT COALESCE(MAX(position), 0) + 1 FROM portainers))
+                 ON CONFLICT(name) DO UPDATE SET alias = excluded.alias, port = excluded.port,
+                   https = excluded.https, fingerprint = excluded.fingerprint",
+                params![p.name.trim(), p.alias, p.port, p.https, p.fingerprint],
+            )?;
+        }
         tx.commit()?;
         Ok(summary)
     }
@@ -1113,11 +1236,20 @@ fn parse_json_import(t: &str) -> Result<Inventory, StoreError> {
             .unwrap_or_default(),
         _ => Default::default(),
     };
+    // ... and the registered Portainers (#171).
+    let portainers = match &v {
+        serde_json::Value::Object(o) => o
+            .get("portainers")
+            .and_then(|r| serde_json::from_value(r.clone()).ok())
+            .unwrap_or_default(),
+        _ => Default::default(),
+    };
     Ok(Inventory {
         hosts,
         global,
         rdp,
         sets,
+        portainers,
     })
 }
 
@@ -1470,9 +1602,13 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, SCHEMA_VERSION, "v1 -> v2 -> v3 -> v4 -> v5");
+        assert_eq!(v, SCHEMA_VERSION, "v1 -> v2 -> v3 -> v4 -> v5 -> v6");
         assert_eq!(s.hosts().unwrap()[0].group, "", "old hosts are ungrouped");
         assert!(s.rdp_all().unwrap().is_empty(), "rdp_settings exists");
+        assert!(
+            s.portainers().unwrap().is_empty(),
+            "portainers exists (v6, #171)"
+        );
         assert_eq!(s.db_profile("x").unwrap(), None, "db_connections exists");
         drop(s);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1798,5 +1934,89 @@ mod tests {
         assert_eq!(s.hosts().unwrap().len(), 1);
         drop(s);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn portainers_follow_their_host_and_travel_in_json_without_a_token() {
+        // #171
+        use crate::portainer::Portainer;
+        let mut s = mem();
+        s.import(&sample(), ImportMode::Merge).unwrap();
+        let p = Portainer {
+            name: "Main".into(),
+            alias: "web".into(),
+            port: 9443,
+            https: true,
+            fingerprint: String::new(),
+        };
+        s.save_portainer(None, &p).unwrap();
+        let other = Portainer {
+            name: "Lab".into(),
+            alias: "mail".into(),
+            port: 9000,
+            https: false,
+            ..Default::default()
+        };
+        s.save_portainer(None, &other).unwrap();
+        let names = |s: &Store| -> Vec<String> {
+            s.portainers()
+                .unwrap()
+                .into_iter()
+                .map(|p| p.name)
+                .collect()
+        };
+        assert_eq!(names(&s), ["Main", "Lab"], "added last");
+        // Unique ignoring case.
+        let dup = Portainer {
+            name: "main".into(),
+            ..other.clone()
+        };
+        assert!(s.save_portainer(None, &dup).is_err());
+        // Pinned; kept on a rename, dropped when the address changes.
+        s.pin_portainer("Main", "AB:CD").unwrap();
+        let renamed = Portainer {
+            name: "Prod".into(),
+            ..p.clone()
+        };
+        s.save_portainer(Some("Main"), &renamed).unwrap();
+        assert_eq!(s.portainers().unwrap()[0].fingerprint, "AB:CD");
+        let moved = Portainer {
+            port: 9444,
+            ..renamed.clone()
+        };
+        s.save_portainer(Some("Prod"), &moved).unwrap();
+        assert_eq!(s.portainers().unwrap()[0].fingerprint, "");
+        // Follows a host rename.
+        let mut web = s
+            .hosts()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.alias == "web")
+            .unwrap();
+        web.alias = "web1".into();
+        s.save_host(&web).unwrap();
+        assert_eq!(s.portainers().unwrap()[0].alias, "web1");
+        // JSON export / import: no token field, ever.
+        let json = export_json(&s.inventory().unwrap()).unwrap();
+        assert!(json.contains("\"portainers\""), "{json}");
+        assert!(!json.to_lowercase().contains("token"), "{json}");
+        let back = parse_import(&json).unwrap();
+        assert_eq!(back.portainers.len(), 2);
+        let mut other_db = mem();
+        other_db.import(&back, ImportMode::Merge).unwrap();
+        assert_eq!(names(&other_db), ["Prod", "Lab"]);
+        // Deleting a host deletes its Portainers.
+        s.delete_portainer("Lab").unwrap();
+        assert_eq!(names(&s), ["Prod"]);
+        let id = s
+            .hosts()
+            .unwrap()
+            .into_iter()
+            .find(|h| h.alias == "web1")
+            .unwrap()
+            .id
+            .unwrap();
+        s.delete_host(id).unwrap();
+        assert!(s.portainers().unwrap().is_empty());
     }
 }

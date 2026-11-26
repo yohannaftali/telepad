@@ -64,6 +64,8 @@ impl TelepadApp {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         cc.egui_ctx
             .set_visuals_of(egui::Theme::Light, crate::widgets::light_visuals());
+        cc.egui_ctx
+            .set_visuals_of(egui::Theme::Dark, crate::widgets::dark_visuals());
         let mut state = State::default();
         let runtime = Runtime::start(
             cc.egui_ctx.clone(),

@@ -21,6 +21,9 @@ pub struct SetPage {
     pub id: SetPageId,
     pub kind: SetKind,
     pub name: String,
+    /// The page it was opened from (#169): Groups / Clusters, Hosts or
+    /// another "Hosts - [name]" page; its title's Back goes there.
+    pub parent: Win,
 }
 
 impl SetPage {
@@ -28,6 +31,16 @@ impl SetPage {
     pub fn title(&self) -> String {
         format!("Hosts - {}", shown_name(self.kind, &self.name))
     }
+}
+
+/// Where Back on page `id` goes (#169): the page it was opened from, or
+/// Groups / Clusters when that page is gone.
+pub fn back_target(m: &Model, id: SetPageId) -> Option<Win> {
+    let p = m.set_pages.iter().find(|p| p.id == id)?;
+    Some(match p.parent {
+        Win::SetHosts(o) if o == id || !m.set_pages.iter().any(|q| q.id == o) => Win::Sets(p.kind),
+        w => w,
+    })
 }
 
 /// A set's name as shown: the fixed entry's name for "".
@@ -135,6 +148,8 @@ pub enum StMsg {
         name: String,
     },
     ClosePage(SetPageId),
+    /// Back from a "Hosts - [name]" page (#169): raise (or open) its parent.
+    Back(SetPageId),
     Add(SetKind),
     Edit {
         kind: SetKind,
@@ -227,10 +242,34 @@ pub(crate) fn update(
                 return fx;
             }
             // Its window opens (or comes to the front) with the workspace sync.
-            if !m.set_pages.iter().any(|p| p.kind == kind && p.name == name) {
-                m.set_pages_next += 1;
-                let id = m.set_pages_next;
-                m.set_pages.push(SetPage { id, kind, name });
+            // Opened from the Hosts page, a set list or another set page:
+            // Back returns there; otherwise to Groups / Clusters.
+            let from = |own: Option<SetPageId>| match m.ws.focused {
+                Some(w @ (Win::Overview | Win::Sets(_))) => Some(w),
+                Some(Win::SetHosts(o)) if Some(o) != own => Some(Win::SetHosts(o)),
+                _ => None,
+            };
+            match m
+                .set_pages
+                .iter()
+                .position(|p| p.kind == kind && p.name == name)
+            {
+                Some(at) => {
+                    if let Some(w) = from(Some(m.set_pages[at].id)) {
+                        m.set_pages[at].parent = w;
+                    }
+                }
+                None => {
+                    let parent = from(None).unwrap_or(Win::Sets(kind));
+                    m.set_pages_next += 1;
+                    let id = m.set_pages_next;
+                    m.set_pages.push(SetPage {
+                        id,
+                        kind,
+                        name,
+                        parent,
+                    });
+                }
             }
         }
         StMsg::ClosePage(id) => {
@@ -239,6 +278,11 @@ pub(crate) fn update(
             d.page_cards.remove(&id);
             if d.add_hosts.as_ref().is_some_and(|a| a.page == id) {
                 d.add_hosts = None;
+            }
+        }
+        StMsg::Back(id) => {
+            if let Some(w) = back_target(m, id) {
+                m.ws.open(w);
             }
         }
         StMsg::Add(kind) => {

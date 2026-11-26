@@ -273,6 +273,8 @@ pub enum Msg {
     Logins(crate::logins::LgMsg),
     /// Groups / clusters (#144, #145).
     Sets(crate::sets::StMsg),
+    /// Portainers (#171).
+    Portainer(crate::portainer::PtMsg),
     /// Table menu exports (#153).
     Table(crate::grid::TableMsg),
 }
@@ -404,6 +406,8 @@ pub enum Effect {
     Logins(crate::logins::LgEffect),
     /// Change groups / clusters in `telepad.db` → [`crate::sets::StMsg::Saved`].
     Sets(crate::sets::StEffect),
+    /// Portainers (#171): store changes, tokens, reads through a tunnel.
+    Portainer(crate::portainer::PtEffect),
     /// Read this computer (#129, background) → [`Msg::LocalCollected`].
     CollectLocal,
     /// Errors come back as [`Msg::Notice`].

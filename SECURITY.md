@@ -52,6 +52,13 @@ Only the latest release is supported.
   The editor saves a file only on Save (Ctrl+S, or Save in the unsaved-changes question),
   via `<name>.telepad-part` and a rename, keeping the file's mode; it refuses to write over
   a file that changed since it was loaded unless the user clicks Overwrite.
+- **Portainers** (#171) are read only through `ssh -N -L` to the host that runs Portainer
+  (`127.0.0.1:<port>` there; no direct network call) and only with `GET` requests: Telepad
+  never changes anything in Portainer. The API access token is kept only in the OS password
+  store (service "Telepad Portainer"), never in `telepad.db`, the JSON export or a log, and is
+  sent only as `X-API-Key` through the tunnel. Portainer's HTTPS certificate is trusted on
+  first use and its SHA-256 fingerprint pinned in `telepad.db`; a different certificate is
+  refused until the user accepts it. Stack environment variables are not read.
 - New host keys are accepted on first connect (`StrictHostKeyChecking=accept-new`);
   a **changed** host key is rejected, as with plain ssh.
 - Host fields are validated before they are saved, because the database is rendered

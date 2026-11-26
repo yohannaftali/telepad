@@ -7,7 +7,9 @@
 use std::time::Instant;
 
 use eframe::egui::{self, Id, LayerId, Order, Rect, RichText, Sense, Vec2};
-use telepad_app::workspace::{Group, Win, WsMsg};
+use telepad_app::workspace::{
+    Group, SNAP_LAYOUTS, Win, WsMsg, ZONE_MAX, Zone, edge_zone, zone_rect,
+};
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::config::SetKind;
 
@@ -70,6 +72,14 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
             };
             (icon, p.map_or("Hosts".into(), |p| p.title()))
         }
+        Win::Portainers => (super::portainer::ICON, "Portainers".into()),
+        Win::Portainer(id) => (
+            super::portainer::ICON,
+            m.pt_pages
+                .iter()
+                .find(|p| p.id == id)
+                .map_or("Portainer".into(), |p| p.title()),
+        ),
     }
 }
 
@@ -84,7 +94,9 @@ fn close_msg(w: Win) -> Msg {
         | Win::Kube
         | Win::Swarm
         | Win::Strategy
-        | Win::Sets(_) => Msg::Ws(WsMsg::Close(w)),
+        | Win::Sets(_)
+        | Win::Portainers => Msg::Ws(WsMsg::Close(w)),
+        Win::Portainer(id) => Msg::Portainer(telepad_app::portainer::PtMsg::ClosePage(id)),
         Win::SetHosts(id) => Msg::Sets(telepad_app::sets::StMsg::ClosePage(id)),
         Win::Host => Msg::Select(None),
         Win::HostSync => Msg::HostSync(telepad_app::hostsync::HsMsg::Close),
@@ -115,6 +127,8 @@ fn default_size(w: Win) -> Vec2 {
         Win::Logins(_) => egui::vec2(1200.0, 640.0),
         Win::Sets(_) => egui::vec2(820.0, 520.0),
         Win::SetHosts(_) => egui::vec2(1000.0, 600.0),
+        Win::Portainers => egui::vec2(1000.0, 480.0),
+        Win::Portainer(_) => egui::vec2(1100.0, 700.0),
     }
 }
 
@@ -202,6 +216,18 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
         }
         ui.add_space(3.0);
     }
+    if nav_button(
+        ui,
+        shown(Win::Portainers),
+        super::portainer::ICON,
+        text("Portainers"),
+    )
+    .on_hover_text("Portainers: your Portainer servers, their environments and stacks (read-only)")
+    .clicked()
+    {
+        out.push(Msg::Portainer(telepad_app::portainer::PtMsg::OpenList));
+    }
+    ui.add_space(3.0);
     if nav_button(ui, shown(Win::Keys), icons::KEY, text("Authorized keys"))
         .on_hover_text(
             "Authorized keys: the keys on each server, by server or by key; add or revoke",
@@ -378,6 +404,8 @@ pub fn workspace(
         }
         // After a move or resize: report it once the mouse is released (a
         // window never moved keeps its cascade place and is not saved).
+        // Read again: a snap on release (#168) has just placed it.
+        let live: Option<Rect> = ctx.data(|mem| mem.get_temp(live_id));
         if let Some(l) = live
             && !g.maximized
             && !ctx.input(|i| i.pointer.any_down())
@@ -399,6 +427,177 @@ pub fn workspace(
             }
         }
     }
+}
+
+/// One tile of the snap picker (#168): its rectangle and its zones'.
+fn layout_tiles(origin: egui::Pos2) -> Vec<(Rect, Vec<(Rect, Zone)>)> {
+    const TILE: egui::Vec2 = egui::vec2(84.0, 54.0);
+    const PAD: f32 = 8.0;
+    SNAP_LAYOUTS
+        .iter()
+        .enumerate()
+        .map(|(k, zones)| {
+            let tile = Rect::from_min_size(
+                origin + egui::vec2(PAD + k as f32 * (TILE.x + PAD), PAD),
+                TILE,
+            );
+            let inner = tile.shrink(4.0);
+            let parts = zones
+                .iter()
+                .map(|z| {
+                    let r = Rect::from_min_size(
+                        inner.min + egui::vec2(z[0] * inner.width(), z[1] * inner.height()),
+                        egui::vec2(z[2] * inner.width(), z[3] * inner.height()),
+                    )
+                    .shrink(1.5);
+                    (r, *z)
+                })
+                .collect();
+            (tile, parts)
+        })
+        .collect()
+}
+
+/// Size of the picker holding every layout tile.
+fn picker_size() -> egui::Vec2 {
+    let n = SNAP_LAYOUTS.len() as f32;
+    egui::vec2(8.0 + n * (84.0 + 8.0), 54.0 + 16.0)
+}
+
+/// Draws the layout tiles at `origin`; returns the zone under `pointer`.
+fn paint_tiles(
+    painter: &egui::Painter,
+    v: &egui::Visuals,
+    origin: egui::Pos2,
+    pointer: Option<egui::Pos2>,
+) -> Option<Zone> {
+    let mut hit = None;
+    for (tile, parts) in layout_tiles(origin) {
+        painter.rect_filled(tile, 4.0, v.extreme_bg_color);
+        painter.rect_stroke(
+            tile,
+            4.0,
+            v.widgets.noninteractive.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        for (r, z) in parts {
+            let over = pointer.is_some_and(|p| r.contains(p));
+            if over {
+                hit = Some(z);
+            }
+            let fill = if over {
+                v.selection.bg_fill
+            } else {
+                v.widgets.inactive.weak_bg_fill
+            };
+            painter.rect_filled(r, 2.0, fill);
+            painter.rect_stroke(
+                r,
+                2.0,
+                v.widgets.inactive.bg_stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    hit
+}
+
+/// While a window is dragged (#168): the layout picker at the top centre
+/// of the workspace once the pointer comes near the top, else the edge
+/// zones. Returns the zone the window would snap to.
+fn drag_zone(ctx: &egui::Context, id: Id, area: Rect, p: egui::Pos2) -> Option<Zone> {
+    let size = picker_size();
+    let origin = egui::pos2(area.center().x - size.x / 2.0, area.top() + 6.0);
+    let picker = Rect::from_min_size(origin, size);
+    let near_top =
+        p.y - area.top() <= 140.0 && p.x >= picker.left() - 60.0 && p.x <= picker.right() + 60.0;
+    let mut hit = None;
+    if near_top {
+        egui::Area::new(id.with("snap-picker"))
+            .order(Order::Tooltip)
+            .fixed_pos(origin)
+            .interactable(false)
+            .show(ctx, |ui| {
+                let v = ui.visuals().clone();
+                let painter = ui.painter();
+                painter.rect_filled(picker, 8.0, v.window_fill);
+                painter.rect_stroke(picker, 8.0, v.window_stroke, egui::StrokeKind::Inside);
+                hit = paint_tiles(painter, &v, origin, Some(p));
+                ui.allocate_rect(picker, Sense::hover());
+            });
+    }
+    hit.or_else(|| {
+        if picker.contains(p) {
+            return None;
+        }
+        let r = p - area.min;
+        edge_zone(r.x, r.y, area.width(), area.height())
+    })
+}
+
+/// The translucent rectangle where the dragged window will land (#168).
+fn snap_preview(ctx: &egui::Context, area: Rect, z: Zone) {
+    let r = zone_rect(z, area.width(), area.height());
+    let rect = Rect::from_min_size(area.min + egui::vec2(r[0], r[1]), egui::vec2(r[2], r[3]));
+    let v = ctx.global_style().visuals.clone();
+    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::unique("snap-preview")));
+    painter.rect_filled(
+        rect.shrink(2.0),
+        8.0,
+        v.selection.bg_fill.gamma_multiply(0.35),
+    );
+    painter.rect_stroke(
+        rect.shrink(2.0),
+        8.0,
+        egui::Stroke::new(2.0, v.selection.bg_fill),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// The snap layouts under the maximize button (#168): shown while the
+/// pointer is on the button or on them; a click on a zone picks it.
+fn layout_flyout(ctx: &egui::Context, id: Id, button: &egui::Response) -> Option<Zone> {
+    let open_id = id.with("flyout");
+    let open = ctx
+        .data(|mem| mem.get_temp::<bool>(open_id))
+        .unwrap_or(false);
+    if !open && !button.hovered() {
+        return None;
+    }
+    let size = picker_size();
+    let origin = egui::pos2(button.rect.right() - size.x, button.rect.bottom() + 2.0);
+    let rect = Rect::from_min_size(origin, size);
+    let pointer = ctx.pointer_latest_pos();
+    let keep = pointer.is_some_and(|p| rect.expand(4.0).contains(p) || button.rect.expand(4.0).contains(p))
+        // Room between the button and the flyout.
+        || pointer.is_some_and(|p| Rect::from_min_max(egui::pos2(rect.left(), button.rect.top()), rect.min + egui::vec2(size.x, 0.0)).contains(p));
+    if !keep {
+        ctx.data_mut(|mem| mem.remove::<bool>(open_id));
+        return None;
+    }
+    ctx.data_mut(|mem| mem.insert_temp(open_id, true));
+    let mut picked = None;
+    egui::Area::new(id.with("flyout-area"))
+        .order(Order::Tooltip)
+        .fixed_pos(origin)
+        .show(ctx, |ui| {
+            let v = ui.visuals().clone();
+            let resp = ui.allocate_rect(rect, Sense::click());
+            let painter = ui.painter();
+            painter.rect_filled(rect, 8.0, v.window_fill);
+            painter.rect_stroke(rect, 8.0, v.window_stroke, egui::StrokeKind::Inside);
+            let hit = paint_tiles(painter, &v, origin, pointer);
+            if hit.is_some() {
+                ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if resp.clicked() {
+                picked = hit;
+            }
+        });
+    if picked.is_some() {
+        ctx.data_mut(|mem| mem.remove::<bool>(open_id));
+    }
+    picked
 }
 
 /// Window rectangle relative to the workspace, as the model keeps it.
@@ -512,26 +711,83 @@ fn title_bar(
     let active = g.active_win();
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), TITLE_H), Sense::hover());
-    let bg = if focused {
-        ui.visuals().selection.bg_fill.gamma_multiply(0.35)
-    } else {
-        ui.visuals().faint_bg_color
-    };
+    let [on, off] = crate::widgets::pal().title;
+    let bg = if focused { on } else { off };
     ui.painter().rect_filled(rect, 4.0, bg);
     // Drag anywhere on the bar that is not a tab or button; double-click maximizes.
     let handle = ui.interact(rect, live_id.with("handle"), Sense::click_and_drag());
+    let ctx = ui.ctx().clone();
+    let snap_id = live_id.with("snap");
+    let cancel_id = live_id.with("snap-cancel");
     if handle.double_clicked() {
         ws(out, WsMsg::ToggleMaximize(active));
     } else if !g.maximized && handle.dragged() {
-        let base: Rect = ui
-            .ctx()
-            .data(|mem| mem.get_temp(live_id))
-            .unwrap_or(win_rect);
+        let live: Option<Rect> = ctx.data(|mem| mem.get_temp(live_id));
+        let base = match (live, g.unsnap, ctx.pointer_latest_pos()) {
+            // A snapped window dragged out of its zone gets its old size
+            // back, under the pointer at the same place across (#168).
+            (None, Some([_, _, w, h]), Some(p)) => {
+                let across = ((p.x - win_rect.left()) / win_rect.width()).clamp(0.0, 1.0);
+                Rect::from_min_size(
+                    egui::pos2(p.x - across * w, win_rect.top()),
+                    egui::vec2(w, h),
+                )
+            }
+            _ => live.unwrap_or(win_rect),
+        };
         let next = fit(base.translate(handle.drag_delta()), area);
-        ui.ctx().data_mut(|mem| mem.insert_temp(live_id, next));
+        ctx.data_mut(|mem| mem.insert_temp(live_id, next));
+        // Snap layouts (#168): a zone under the pointer, Esc cancels.
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            ctx.data_mut(|mem| mem.insert_temp(cancel_id, true));
+        }
+        let cancelled = ctx
+            .data(|mem| mem.get_temp::<bool>(cancel_id))
+            .unwrap_or(false);
+        let zone = match ctx.pointer_latest_pos() {
+            Some(p) if !cancelled => drag_zone(&ctx, live_id, area, p),
+            _ => None,
+        };
+        ctx.data_mut(|mem| match zone {
+            Some(z) => {
+                mem.insert_temp(snap_id, z);
+            }
+            None => mem.remove::<Zone>(snap_id),
+        });
+        if let Some(z) = zone {
+            snap_preview(&ctx, area, z);
+        }
     }
     if handle.drag_started() {
         ws(out, WsMsg::Focus(active));
+    }
+    if handle.drag_stopped() {
+        let zone: Option<Zone> = ctx.data(|mem| mem.get_temp(snap_id));
+        ctx.data_mut(|mem| {
+            mem.remove::<Zone>(snap_id);
+            mem.remove::<bool>(cancel_id);
+        });
+        if let Some(z) = zone {
+            let from = g.rect.unwrap_or_else(|| rel(win_rect, area));
+            if z == ZONE_MAX {
+                ctx.data_mut(|mem| mem.remove::<Rect>(live_id));
+                ws(out, WsMsg::ToggleMaximize(active));
+            } else {
+                let r = zone_rect(z, area.width(), area.height());
+                // The release report then finds the window already there.
+                let abs =
+                    Rect::from_min_size(area.min + egui::vec2(r[0], r[1]), egui::vec2(r[2], r[3]));
+                ctx.data_mut(|mem| mem.insert_temp(live_id, abs));
+                ws(
+                    out,
+                    WsMsg::Snap {
+                        win: active,
+                        rect: r,
+                        from,
+                    },
+                );
+            }
+        }
     }
 
     let mut bar = ui.new_child(
@@ -547,16 +803,27 @@ fn title_bar(
     {
         out.push(close_msg(active));
     }
-    let (max_icon, max_tip) = if g.maximized {
-        (icons::CORNERS_IN, "Restore size")
+    let max_icon = if g.maximized {
+        icons::CORNERS_IN
     } else {
-        (icons::CORNERS_OUT, "Maximize")
+        icons::CORNERS_OUT
     };
-    if ui
-        .add(egui::Button::new(max_icon).frame(false))
-        .on_hover_text(max_tip)
-        .clicked()
-    {
+    // No tooltip: the snap layouts show under it on hover (#168).
+    let max = ui.add(egui::Button::new(max_icon).frame(false));
+    // Snap layouts on the maximize button (#168, Windows 11 style).
+    if let Some(z) = layout_flyout(&ctx, live_id, &max) {
+        let from = g.rect.unwrap_or_else(|| rel(win_rect, area));
+        let r = zone_rect(z, area.width(), area.height());
+        ws(
+            out,
+            WsMsg::Snap {
+                win: active,
+                rect: r,
+                from,
+            },
+        );
+    }
+    if max.clicked() {
         ws(out, WsMsg::ToggleMaximize(active));
     }
     if ui
@@ -601,6 +868,37 @@ fn title_bar(
     }
     ui.add_space(6.0);
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        // "Hosts - [name]": ← and the title go back to its parent page (#169).
+        let back = match active {
+            Win::SetHosts(id) => telepad_app::sets::back_target(m, id).map(|w| (id, w)),
+            _ => None,
+        };
+        if let Some((id, parent)) = back {
+            let tip = format!("Back to {}", title(m, parent).1);
+            if ui
+                .add(egui::Button::new(icons::ARROW_LEFT).frame(false))
+                .on_hover_text(&tip)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                out.push(Msg::Sets(telepad_app::sets::StMsg::Back(id)));
+            }
+            if g.tabs.len() == 1 {
+                let (icon, name) = title(m, active);
+                if ui
+                    .add(
+                        egui::Label::new(RichText::new(il(icon, &name)).strong())
+                            .sense(Sense::click()),
+                    )
+                    .on_hover_text(&tip)
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    out.push(Msg::Sets(telepad_app::sets::StMsg::Back(id)));
+                }
+                return;
+            }
+        }
         if g.tabs.len() == 1 {
             let (icon, name) = title(m, active);
             ui.label(RichText::new(il(icon, &name)).strong());

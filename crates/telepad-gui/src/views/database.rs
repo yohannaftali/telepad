@@ -1833,6 +1833,7 @@ fn data_grid(
             filters: Some(&mut filters[..]),
             rows: &rows,
             text: &text,
+            all: None,
         },
         &mut |ui, ev| match ev {
             Ev::Cell { row, col: 0 } => {

@@ -5676,6 +5676,7 @@ dependencies = [
  "rsa",
  "rusqlite",
  "rust_xlsxwriter",
+ "rustls",
  "sec1",
  "self-replace",
  "semver",

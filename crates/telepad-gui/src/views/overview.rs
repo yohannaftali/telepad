@@ -486,6 +486,7 @@ pub fn table(
             filters: Some(&mut filters[..]),
             rows: &rows,
             text: &text_of,
+            all: Some(&all),
         },
         &mut |ui, ev| match ev {
             Ev::Cell { row: i, col } => {
@@ -507,8 +508,18 @@ pub fn table(
     {
         out.push(Msg::SortBy(key));
     }
-    if let Some((i, _)) = o.clicked {
-        out.push(Msg::Select(Some(i)));
+    if let Some((i, c)) = o.clicked {
+        // A host's group / cluster opens its hosts page (#163); an empty
+        // cell, like every other cell, opens the host.
+        match set_col(c, view.extra).map(|k| (k, m.hosts[i].entry.set(k))) {
+            Some((kind, name)) if !name.is_empty() => {
+                out.push(Msg::Sets(telepad_app::sets::StMsg::OpenHosts {
+                    kind,
+                    name: name.to_string(),
+                }))
+            }
+            _ => out.push(Msg::Select(Some(i))),
+        }
     }
     if reorder {
         for (i, resp) in &o.rows {
@@ -565,8 +576,12 @@ fn host_cell(ui: &mut egui::Ui, m: &Model, i: usize, grip: bool, extra: &[SetKin
         1 => {
             ui.label(RichText::new(&h.entry.alias).strong());
         }
-        2 => clipped(ui, RichText::new(&h.entry.note).italics()),
-        3 => clipped(ui, RichText::new(&h.entry.hostname)),
+        2 => {
+            clipped(ui, RichText::new(&h.entry.note).italics());
+        }
+        3 => {
+            clipped(ui, RichText::new(&h.entry.hostname));
+        }
         c if c == last => {
             if paused {
                 ui.label(
@@ -579,8 +594,8 @@ fn host_cell(ui: &mut egui::Ui, m: &Model, i: usize, grip: bool, extra: &[SetKin
             }
         }
         c if c >= COLUMNS.len() - 1 => {
-            if let Some(kind) = extra.get(c - (COLUMNS.len() - 1)) {
-                clipped(ui, RichText::new(h.entry.set(*kind)));
+            if let Some(kind) = set_col(c, extra) {
+                set_link(ui, h.entry.set(kind));
             }
         }
         c => match &h.report {
@@ -665,7 +680,9 @@ fn report_cell(ui: &mut egui::Ui, h: &HostState, r: &HostReport, col: usize) {
             };
         }
         10 => match docker_text(r) {
-            Some(t) => clipped(ui, RichText::new(t)),
+            Some(t) => {
+                clipped(ui, RichText::new(t));
+            }
             None => dash(ui),
         },
         _ => {}
@@ -702,7 +719,7 @@ pub fn docker_text(r: &HostReport) -> Option<String> {
 /// One line, cut with "…" at the cell edge; the full text shows on hover.
 /// The cell still reports the text's natural width, so a double-click on the
 /// column border fits the column to its longest value (#83).
-fn clipped(ui: &mut egui::Ui, text: RichText) {
+fn clipped(ui: &mut egui::Ui, text: RichText) -> egui::Response {
     let natural = egui::WidgetText::from(text.clone())
         .into_galley(
             ui,
@@ -713,7 +730,7 @@ fn clipped(ui: &mut egui::Ui, text: RichText) {
         .size()
         .x;
     let start = ui.cursor().min.x;
-    ui.add(egui::Label::new(text).truncate());
+    let resp = ui.add(egui::Label::new(text).truncate());
     let used = ui.min_rect().max.x - start;
     if natural > used {
         let r = egui::Rect::from_min_size(
@@ -721,6 +738,33 @@ fn clipped(ui: &mut egui::Ui, text: RichText) {
             egui::vec2(natural + (start - ui.min_rect().min.x), 1.0),
         );
         ui.expand_to_include_rect(r);
+    }
+    resp
+}
+
+/// The Group / Cluster shown in column `col`, if it is one of the extra columns.
+fn set_col(col: usize, extra: &[SetKind]) -> Option<SetKind> {
+    col.checked_sub(COLUMNS.len() - 1)
+        .and_then(|k| extra.get(k))
+        .copied()
+}
+
+/// A host's group / cluster as a link to its hosts page (#163); the click
+/// itself is the row's (`Output::clicked`).
+fn set_link(ui: &mut egui::Ui, name: &str) {
+    if name.is_empty() {
+        return;
+    }
+    let cell = ui.max_rect();
+    let color = ui.visuals().hyperlink_color;
+    let hovered = ui.rect_contains_pointer(cell);
+    let mut text = RichText::new(name).color(color);
+    if hovered {
+        text = text.underline();
+    }
+    clipped(ui, text).on_hover_text(format!("Open Hosts - {name}"));
+    if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
 }
 

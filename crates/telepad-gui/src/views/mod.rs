@@ -19,6 +19,7 @@ mod mykeys;
 mod overview;
 mod panels;
 mod picker;
+mod portainer;
 mod ports;
 mod run_info;
 mod sensors;
@@ -83,6 +84,7 @@ pub fn draw(root: &mut egui::Ui, m: &Model, d: &mut Drafts, now: Instant) -> Vec
     update_window::update_window(&ctx, m, d, &mut out);
     host_sync::host_sync_dialogs(&ctx, m, d, &mut out);
     workspaces::dialogs(&ctx, d, &mut out);
+    portainer::dialogs(&ctx, m, d, &mut out);
     out
 }
 
@@ -117,6 +119,8 @@ fn page(
         }
         Win::Sets(kind) => sets::sets_page(ui, m, d, kind, out),
         Win::SetHosts(id) => sets::set_hosts_page(ui, m, d, id, out),
+        Win::Portainers => portainer::portainers_page(ui, m, d, out),
+        Win::Portainer(id) => portainer::portainer_page(ui, m, d, id, out),
         Win::Docker => {
             ui.horizontal(|ui| search_box(ui, d));
             ui.add_space(4.0);

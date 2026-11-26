@@ -54,6 +54,9 @@ fn card(ui: &mut egui::Ui, m: &Model, i: usize, height: f32, out: &mut Vec<Msg>)
     let h = &m.hosts[i];
     // Text must not take the right-click meant for the card's menu (#83).
     ui.style_mut().interaction.selectable_labels = false;
+    // Group / cluster links (#163): the card takes the click (it is on top),
+    // so it checks whether the click was on one of them.
+    let mut links: Vec<(egui::Rect, SetKind, String)> = Vec::new();
     let card = egui::Frame::group(ui.style())
         .inner_margin(egui::Margin::same(CARD_MARGIN as i8))
         .show(ui, |ui| {
@@ -91,13 +94,16 @@ fn card(ui: &mut egui::Ui, m: &Model, i: usize, height: f32, out: &mut Vec<Msg>)
                             (SetKind::Cluster, icons::CIRCLES_THREE),
                         ] {
                             let name = h.entry.set(kind);
-                            if !name.is_empty() {
-                                ui.add(
-                                    egui::Label::new(RichText::new(il(icon, name)).small())
-                                        .truncate(),
-                                )
-                                .on_hover_text(format!("{}: {name}", kind.title()));
+                            if name.is_empty() {
+                                continue;
                             }
+                            let r = ui
+                                .add(egui::Link::new(RichText::new(il(icon, name)).small()))
+                                .on_hover_text(format!(
+                                    "{}: {name} · Open Hosts - {name}",
+                                    kind.title()
+                                ));
+                            links.push((r.rect, kind, name.to_string()));
                         }
                     });
                 }
@@ -169,7 +175,17 @@ fn card(ui: &mut egui::Ui, m: &Model, i: usize, height: f32, out: &mut Vec<Msg>)
         .interact(egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     if resp.clicked() {
-        out.push(Msg::Select(Some(i)));
+        let on = resp
+            .interact_pointer_pos()
+            .and_then(|p| links.iter().find(|(r, _, _)| r.contains(p)));
+        match on {
+            // Its hosts page instead of the host (#163).
+            Some((_, kind, name)) => out.push(Msg::Sets(telepad_app::sets::StMsg::OpenHosts {
+                kind: *kind,
+                name: name.clone(),
+            })),
+            None => out.push(Msg::Select(Some(i))),
+        }
     }
     resp.context_menu(|ui| host_menu(ui, m, i, out));
     card.inner

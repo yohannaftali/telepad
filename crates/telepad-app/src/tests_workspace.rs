@@ -8,7 +8,10 @@ use telepad_core::update::UpdateConfig;
 
 use telepad_core::prefs::{Current, WorkspacePrefs};
 
-use crate::workspace::{Win, WkMsg, Workspace, WsMsg, stack_rects, tile_rects};
+use crate::workspace::{
+    SNAP_LAYOUTS, Win, WkMsg, Workspace, WsMsg, ZONE_MAX, edge_zone, stack_rects, tile_rects,
+    zone_rect,
+};
 use crate::*;
 
 fn started(layout: &str) -> (State, Vec<Effect>) {
@@ -639,4 +642,88 @@ fn opening_an_open_database_or_log_info_raises_it() {
         now,
     );
     assert!(!hidden(&s, lg));
+}
+
+#[test]
+fn snap_zones_cover_halves_thirds_quarters_and_the_whole_workspace() {
+    // #168, a 1200 × 800 workspace: 2 points of gap around each zone.
+    let (w, h) = (1200.0, 800.0);
+    let r = |z| zone_rect(z, w, h);
+    assert_eq!(r(ZONE_MAX), [0.0, 0.0, 1200.0, 800.0]);
+    assert_eq!(r(SNAP_LAYOUTS[0][0]), [2.0, 2.0, 596.0, 796.0]);
+    assert_eq!(r(SNAP_LAYOUTS[0][1]), [602.0, 2.0, 596.0, 796.0]);
+    assert_eq!(r(SNAP_LAYOUTS[1][0]), [2.0, 2.0, 796.0, 796.0]);
+    assert_eq!(r(SNAP_LAYOUTS[1][1]), [802.0, 2.0, 396.0, 796.0]);
+    let thirds: Vec<_> = SNAP_LAYOUTS[2].iter().map(|&z| r(z)).collect();
+    assert_eq!(
+        thirds,
+        [
+            [2.0, 2.0, 396.0, 796.0],
+            [402.0, 2.0, 396.0, 796.0],
+            [802.0, 2.0, 396.0, 796.0]
+        ]
+    );
+    assert_eq!(r(SNAP_LAYOUTS[3][3]), [602.0, 402.0, 596.0, 396.0]);
+    // Edges: left / right half, top maximizes, corners quarter, inside nothing.
+    assert_eq!(edge_zone(0.0, 400.0, w, h), Some(SNAP_LAYOUTS[0][0]));
+    assert_eq!(edge_zone(1199.0, 400.0, w, h), Some(SNAP_LAYOUTS[0][1]));
+    assert_eq!(edge_zone(600.0, 0.0, w, h), Some(ZONE_MAX));
+    assert_eq!(edge_zone(0.0, 30.0, w, h), Some(SNAP_LAYOUTS[3][0]));
+    assert_eq!(edge_zone(1150.0, 0.0, w, h), Some(SNAP_LAYOUTS[3][1]));
+    assert_eq!(edge_zone(2.0, 790.0, w, h), Some(SNAP_LAYOUTS[3][2]));
+    assert_eq!(edge_zone(1199.0, 799.0, w, h), Some(SNAP_LAYOUTS[3][3]));
+    assert_eq!(edge_zone(600.0, 400.0, w, h), None);
+}
+
+#[test]
+fn a_snapped_window_keeps_its_old_size_until_moved_by_hand() {
+    // #168
+    let (mut s, _) = started("");
+    let free = [10.0, 20.0, 600.0, 400.0];
+    ws(&mut s, WsMsg::ToggleMaximize(Win::Overview));
+    ws(
+        &mut s,
+        WsMsg::Geometry {
+            win: Win::Overview,
+            rect: free,
+        },
+    );
+    let left = zone_rect(SNAP_LAYOUTS[0][0], 1200.0, 800.0);
+    ws(
+        &mut s,
+        WsMsg::Snap {
+            win: Win::Overview,
+            rect: left,
+            from: free,
+        },
+    );
+    let g = &s.model.ws.groups[0];
+    assert_eq!((g.rect, g.unsnap), (Some(left), Some(free)));
+    assert!(
+        s.model.wss.own.starts_with("2,2,596,796|"),
+        "saved with the layout"
+    );
+    // Snapped again (also from maximized): the first size stays.
+    ws(&mut s, WsMsg::ToggleMaximize(Win::Overview));
+    let quarter = zone_rect(SNAP_LAYOUTS[3][1], 1200.0, 800.0);
+    ws(
+        &mut s,
+        WsMsg::Snap {
+            win: Win::Overview,
+            rect: quarter,
+            from: left,
+        },
+    );
+    let g = &s.model.ws.groups[0];
+    assert!(!g.maximized);
+    assert_eq!((g.rect, g.unsnap), (Some(quarter), Some(free)));
+    // Dragged out (the view gives back the old size): no longer snapped.
+    ws(
+        &mut s,
+        WsMsg::Geometry {
+            win: Win::Overview,
+            rect: [300.0, 40.0, 600.0, 400.0],
+        },
+    );
+    assert_eq!(s.model.ws.groups[0].unsnap, None);
 }

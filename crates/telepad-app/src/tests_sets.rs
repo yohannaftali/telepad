@@ -393,6 +393,8 @@ fn group_pages_come_back_with_the_workspace() {
     assert_eq!(s2.model.set_pages.len(), 2);
     for p in &s2.model.set_pages {
         assert!(s2.model.ws.is_open(Win::SetHosts(p.id)), "{p:?}");
+        // Back from a restored page goes to its Groups / Clusters page (#169).
+        assert_eq!(p.parent, Win::Sets(p.kind), "{p:?}");
     }
     assert!(s2.model.ws.is_open(Win::Sets(SetKind::Cluster)));
 }
@@ -501,4 +503,86 @@ fn a_dragged_set_moves_before_or_after_another_and_the_order_is_saved_once() {
         now,
     );
     assert!(st(&fx).is_empty());
+}
+
+#[test]
+fn a_hosts_group_or_cluster_opens_its_page_once() {
+    // #163: a click on web1's Group / Cluster cell sends OpenHosts for it.
+    let now = Instant::now();
+    let mut s = started(now);
+    s.model.ws.open(Win::Overview);
+    let web1 = s.model.hosts[0].entry.clone();
+    for (kind, name) in [
+        (SetKind::Group, &web1.group),
+        (SetKind::Cluster, &web1.cluster),
+    ] {
+        for _ in 0..2 {
+            update(
+                &mut s,
+                Msg::Sets(StMsg::OpenHosts {
+                    kind,
+                    name: name.clone(),
+                }),
+                now,
+            );
+        }
+    }
+    let titles: Vec<String> = s.model.set_pages.iter().map(|p| p.title()).collect();
+    assert_eq!(titles, ["Hosts - Office", "Hosts - Web"]);
+    let web = s.model.set_pages[1].id;
+    assert_eq!(s.model.ws.focused, Some(Win::SetHosts(web)));
+}
+
+#[test]
+fn back_raises_the_page_it_was_opened_from() {
+    // #169
+    let now = Instant::now();
+    let mut s = started(now);
+    let open = |s: &mut State, kind: SetKind, name: &str| {
+        update(
+            s,
+            Msg::Sets(StMsg::OpenHosts {
+                kind,
+                name: name.into(),
+            }),
+            now,
+        );
+        s.model
+            .set_pages
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.id)
+            .unwrap()
+    };
+    // From the Groups page.
+    update(&mut s, Msg::Sets(StMsg::OpenList(SetKind::Group)), now);
+    let office = open(&mut s, SetKind::Group, "Office");
+    assert_eq!(
+        sets::back_target(&s.model, office),
+        Some(Win::Sets(SetKind::Group))
+    );
+    // From the Hosts page.
+    s.model.ws.open(Win::Overview);
+    let web = open(&mut s, SetKind::Cluster, "Web");
+    assert_eq!(sets::back_target(&s.model, web), Some(Win::Overview));
+    // From another set page; when that page is closed, back to Clusters / Groups.
+    let lab = open(&mut s, SetKind::Group, "Lab");
+    let lab_parent = sets::back_target(&s.model, lab);
+    assert_eq!(lab_parent, Some(Win::SetHosts(web)));
+    update(&mut s, Msg::Sets(StMsg::ClosePage(web)), now);
+    assert_eq!(
+        sets::back_target(&s.model, lab),
+        Some(Win::Sets(SetKind::Group))
+    );
+    // Back with the parent closed opens it and brings it to the front.
+    s.model.ws.close(Win::Sets(SetKind::Group));
+    update(&mut s, Msg::Sets(StMsg::Back(lab)), now);
+    assert!(s.model.ws.is_open(Win::Sets(SetKind::Group)));
+    assert_eq!(s.model.ws.focused, Some(Win::Sets(SetKind::Group)));
+    // The set page itself stays open.
+    assert!(s.model.ws.is_open(Win::SetHosts(lab)));
+    // Back from Office raises the already open Groups page.
+    s.model.ws.open(Win::SetHosts(office));
+    update(&mut s, Msg::Sets(StMsg::Back(office)), now);
+    assert_eq!(s.model.ws.focused, Some(Win::Sets(SetKind::Group)));
 }

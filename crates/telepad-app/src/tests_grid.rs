@@ -232,3 +232,40 @@ fn a_long_pdf_asks_first() {
     assert_eq!(fx.len(), 1);
     let _ = grid::natural("a", "b");
 }
+
+#[test]
+fn the_value_dropdown_lists_each_value_once_in_natural_order() {
+    // #170
+    let col = ["web10", "web2", " Web2 ", "", "db1", "web1"];
+    let v = grid::distinct_values(col, grid::VALUES_CAP);
+    assert_eq!(v, ["db1", "web1", "web2", "web10", ""]);
+    // The cap counts distinct values in row order.
+    assert_eq!(grid::distinct_values(col, 2), ["web2", "web10"]);
+    // Search: contains, any case.
+    assert_eq!(grid::search_values(&v, "WEB1"), ["web1", "web10"]);
+    assert_eq!(grid::search_values(&v, "").len(), 5);
+    // Picking a value filters to exactly that value; an empty cell is NULL.
+    assert_eq!(grid::exact_filter(" web1 "), "=web1");
+    assert_eq!(grid::exact_filter(""), "NULL");
+    assert!(filter_match("web1", &grid::exact_filter("web1")));
+    assert!(!filter_match("web10", &grid::exact_filter("web1")));
+    assert!(filter_match("", &grid::exact_filter("")));
+    assert!(!filter_match("x", &grid::exact_filter("")));
+}
+
+#[test]
+fn the_value_dropdown_follows_the_other_filters_only() {
+    // #170: column 1's list comes from rows that pass column 0's filter,
+    // whatever column 1's own filter says.
+    let rows = [["Office", "web1"], ["Office", "web2"], ["Lab", "db1"]];
+    let filters = ["=Office".to_string(), "=web1".to_string()];
+    let values: Vec<&str> = rows
+        .iter()
+        .filter(|r| grid::row_matches_except(&|c| r[c].to_string(), &filters, 1))
+        .map(|r| r[1])
+        .collect();
+    assert_eq!(
+        grid::distinct_values(values, grid::VALUES_CAP),
+        ["web1", "web2"]
+    );
+}

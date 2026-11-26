@@ -74,6 +74,60 @@ pub fn filter_value(value: &str) -> String {
     }
 }
 
+/// The filter box text that matches exactly `value` (#170, the value
+/// dropdown): `=value`, or `NULL` for an empty cell.
+pub fn exact_filter(value: &str) -> String {
+    let v = value.trim();
+    if v.is_empty() {
+        "NULL".into()
+    } else {
+        format!("={v}")
+    }
+}
+
+/// Most distinct values a filter dropdown lists (#170).
+pub const VALUES_CAP: usize = 500;
+
+/// The distinct values of a column for its filter dropdown (#170): trimmed,
+/// once each (same text in any case counts once, first spelling kept), in
+/// the table's natural order with empty last; at most `cap`, taken in row
+/// order so a huge table stays fast.
+pub fn distinct_values<'a>(cells: impl IntoIterator<Item = &'a str>, cap: usize) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for c in cells {
+        if out.len() >= cap {
+            break;
+        }
+        let v = c.trim();
+        if seen.insert(v.to_lowercase()) {
+            out.push(v.to_string());
+        }
+    }
+    out.sort_by(|a, b| compare(a, b));
+    out
+}
+
+/// The values whose text contains `query` (any case), for the dropdown's
+/// search field.
+pub fn search_values<'a>(values: &'a [String], query: &str) -> Vec<&'a str> {
+    let q = query.trim().to_lowercase();
+    values
+        .iter()
+        .filter(|v| q.is_empty() || v.to_lowercase().contains(&q))
+        .map(String::as_str)
+        .collect()
+}
+
+/// A row that passes every filter box except column `skip`'s: the rows
+/// whose values the dropdown of `skip` lists (#170).
+pub fn row_matches_except(cell: &dyn Fn(usize) -> String, filters: &[String], skip: usize) -> bool {
+    filters
+        .iter()
+        .enumerate()
+        .all(|(c, f)| c == skip || f.trim().is_empty() || filter_match(&cell(c), f))
+}
+
 /// One filter box against one cell, as in the wtbapp tables: contains (any
 /// case), `=x` equal, `>x` / `<x` (numbers by value, else text order, so
 /// `>2026-11-20` works on times; units as [`value`]), `!x` not equal, `NULL`

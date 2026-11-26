@@ -26,6 +26,8 @@ pub struct Palette {
     pub act: [ActColors; 4],
     /// Table headers (#151).
     pub head: HeadColors,
+    /// Inner window title bars (#167): focused, not focused.
+    pub title: [Color32; 2],
 }
 
 /// Table header colours (#151): the header band stands apart from the rows,
@@ -82,13 +84,18 @@ pub const DARK: Palette = Palette {
         act(0x166534, 0x1b7a3f, 0x11522a, 0xe6ffee),
         act(0xb45309, 0xbd5410, 0x92400e, 0xffffff),
     ],
+    // Dark navy, no green / teal tint (#167).
     head: HeadColors {
-        bg: Color32::from_rgb(0x2a, 0x33, 0x3f),
-        text: Color32::from_rgb(0xe6, 0xec, 0xf3),
-        hover_bg: Color32::from_rgb(0x1c, 0x5a, 0x9c),
+        bg: Color32::from_rgb(0x22, 0x35, 0x5c),
+        text: Color32::from_rgb(0xe2, 0xe8, 0xf4),
+        hover_bg: Color32::from_rgb(0x1e, 0x4f, 0xb8),
         hover_text: Color32::WHITE,
-        line: Color32::from_rgb(0x5a, 0xa2, 0xf0),
+        line: Color32::from_rgb(0x4f, 0x86, 0xe8),
     },
+    title: [
+        Color32::from_rgb(0x22, 0x3d, 0x75),
+        Color32::from_rgb(0x24, 0x28, 0x31),
+    ],
 };
 
 pub const LIGHT: Palette = Palette {
@@ -112,13 +119,18 @@ pub const LIGHT: Palette = Palette {
         act(0x15803d, 0x13703a, 0x0f5e30, 0xffffff),
         act(0xc2410c, 0xb23c0b, 0x9a3412, 0xffffff),
     ],
+    // Blue-grey (slate) like the rest of the light theme (#167).
     head: HeadColors {
-        bg: Color32::from_rgb(0xd5, 0xde, 0xea),
-        text: Color32::from_rgb(0x1f, 0x29, 0x37),
-        hover_bg: Color32::from_rgb(0x1d, 0x4e, 0xd8),
+        bg: Color32::from_rgb(0xc9, 0xd5, 0xe6),
+        text: Color32::from_rgb(0x0f, 0x1b, 0x2d),
+        hover_bg: Color32::from_rgb(0x1e, 0x4a, 0xb0),
         hover_text: Color32::WHITE,
-        line: Color32::from_rgb(0x1d, 0x4e, 0xd8),
+        line: Color32::from_rgb(0x1e, 0x4a, 0xb0),
     },
+    title: [
+        Color32::from_rgb(0xbf, 0xce, 0xe3),
+        Color32::from_rgb(0xe3, 0xe9, 0xf1),
+    ],
 };
 
 /// Telepad's light theme (#86). egui's own light colours put panels, windows
@@ -127,29 +139,42 @@ pub const LIGHT: Palette = Palette {
 /// background, white windows with a border, and buttons / inputs with a
 /// visible fill and border.
 pub fn light_visuals() -> egui::Visuals {
+    // Blue-grey (slate) instead of neutral grey (#167): sidebar, top bar,
+    // buttons, inputs and borders share one cool scale; windows stay white.
     let c = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
     let mut v = egui::Visuals::light();
-    v.panel_fill = c(0xe6e9ef);
+    v.panel_fill = c(0xd9e1ec);
     v.window_fill = c(0xffffff);
-    v.window_stroke = egui::Stroke::new(1.0, c(0xaeb6c2));
+    v.window_stroke = egui::Stroke::new(1.0, c(0x9aa9bf));
     v.window_shadow.color = Color32::from_black_alpha(40);
-    v.faint_bg_color = c(0xf1f3f6);
+    v.faint_bg_color = c(0xeef2f8);
     v.extreme_bg_color = c(0xffffff);
-    v.code_bg_color = c(0xeef1f5);
+    v.code_bg_color = c(0xe9eef6);
+    v.selection.bg_fill = c(0xb9cdf0);
+    v.selection.stroke = egui::Stroke::new(1.0, c(0x1e3a8a));
     let w = &mut v.widgets;
-    w.noninteractive.bg_stroke = egui::Stroke::new(1.0, c(0xc9cfd8));
-    w.noninteractive.fg_stroke = egui::Stroke::new(1.0, c(0x2b3440));
+    w.noninteractive.bg_stroke = egui::Stroke::new(1.0, c(0xbfcadb));
+    w.noninteractive.fg_stroke = egui::Stroke::new(1.0, c(0x1e293b));
     for (st, fill, border, text) in [
-        (&mut w.inactive, 0xe2e6ec, 0xa9b2bf, 0x1f2733),
-        (&mut w.hovered, 0xd3d9e2, 0x7c8796, 0x111820),
-        (&mut w.active, 0xc3cbd6, 0x5d6878, 0x000000),
-        (&mut w.open, 0xd3d9e2, 0x7c8796, 0x111820),
+        (&mut w.inactive, 0xd5deea, 0x93a3ba, 0x15202f),
+        (&mut w.hovered, 0xc3d1e4, 0x64789a, 0x0b1320),
+        (&mut w.active, 0xadc0da, 0x475a7a, 0x000000),
+        (&mut w.open, 0xc3d1e4, 0x64789a, 0x0b1320),
     ] {
         st.weak_bg_fill = c(fill);
         st.bg_fill = c(fill);
         st.bg_stroke = egui::Stroke::new(1.0, c(border));
         st.fg_stroke.color = c(text);
     }
+    v
+}
+
+/// Telepad's dark theme: egui's own, with a dark blue selection instead of
+/// its teal one (#167), so selected rows and focused titles read navy.
+pub fn dark_visuals() -> egui::Visuals {
+    let mut v = egui::Visuals::dark();
+    v.selection.bg_fill = Color32::from_rgb(0x1e, 0x3f, 0x8a);
+    v.selection.stroke = egui::Stroke::new(1.0, Color32::from_rgb(0xe6, 0xee, 0xff));
     v
 }
 
@@ -909,6 +934,47 @@ mod tests {
         }
     }
 
+    /// #167: window titles stay readable on both title bar colours, the
+    /// focused one stands apart, and the dark theme has no green / teal
+    /// tint (blue clearly above green) in its title, header and selection.
+    #[test]
+    fn title_bars_and_headers_are_blue_grey_or_navy() {
+        for (p, v) in [(&DARK, dark_visuals()), (&LIGHT, light_visuals())] {
+            let [on, off] = p.title;
+            // The title is drawn strong.
+            for bg in [on, off] {
+                assert!(
+                    contrast(v.strong_text_color(), bg) >= 4.5,
+                    "strong title text"
+                );
+            }
+            assert!(contrast(on, off) >= 1.15, "focused vs not focused");
+        }
+        let bluish = |c: Color32| c.b() as i32 - c.g() as i32 >= 25;
+        let d = dark_visuals();
+        for (what, c) in [
+            ("title", DARK.title[0]),
+            ("header", DARK.head.bg),
+            ("header hover", DARK.head.hover_bg),
+            ("selection", d.selection.bg_fill),
+        ] {
+            assert!(bluish(c), "dark {what} {c:?} is not dark blue");
+        }
+        // Light: the panels and buttons are blue-grey, not neutral grey.
+        let l = light_visuals();
+        for (what, c) in [
+            ("panel", l.panel_fill),
+            ("button", l.widgets.inactive.weak_bg_fill),
+            ("header", LIGHT.head.bg),
+            ("title", LIGHT.title[0]),
+        ] {
+            assert!(
+                c.b() as i32 - c.r() as i32 >= 15,
+                "light {what} {c:?} is not blue-grey"
+            );
+        }
+    }
+
     #[test]
     fn temperature_colours_and_fan_speed() {
         let blue = temp_color(45.0);
@@ -941,7 +1007,7 @@ mod tests {
 
     #[test]
     fn palette_text_is_readable_on_both_themes() {
-        let dark_bg = egui::Visuals::dark().panel_fill;
+        let dark_bg = dark_visuals().panel_fill;
         let light = light_visuals();
         for (theme, p, bg) in [
             ("dark", &DARK, dark_bg),
@@ -963,7 +1029,7 @@ mod tests {
         }
         // Bar text (egui draws it in the selection stroke colour) on each bar fill.
         for (theme, p, v) in [
-            ("dark", &DARK, egui::Visuals::dark()),
+            ("dark", &DARK, dark_visuals()),
             ("light", &LIGHT, light_visuals()),
         ] {
             for (i, fill) in p.bar.iter().enumerate() {
