@@ -969,7 +969,7 @@ fn confirm_dialog(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
         ui.add_space(4.0);
         ui.label(match &c.act {
             Action::StackStart { .. } => "Portainer deploys the stack again (docker compose up). This may take a while when images are pulled.",
-            Action::StackStop { .. } => "Portainer stops every container of the stack. Its files and volumes stay; Start brings it back.",
+            Action::StackStop { .. } => "Portainer takes the stack down: its containers are stopped and removed. Its files, variables and named volumes stay; Start deploys it again.",
             Action::StackDelete { .. } => "Portainer removes the stack: its containers and networks, and the stack's files in Portainer. Telepad sends no volume option (Portainer's own default for volumes applies). This cannot be undone.",
             Action::Container { op: ContainerOp::Kill, .. } => "The container is killed at once (SIGKILL), without a clean shutdown.",
             Action::Container { op: ContainerOp::Remove { .. }, .. } => "The container is removed (stopped first if it runs). Compose recreates it on the next deploy of the stack.",
@@ -1273,6 +1273,13 @@ fn review(
     if !opts.is_empty() {
         ui.label(RichText::new(format!("Options: {}", opts.join(", "))).weak());
     }
+    ui.label(
+        RichText::new(
+            "Portainer redeploys the stack (docker compose up): containers whose settings changed are recreated, and a service that waits for an unhealthy one may stay Created.",
+        )
+        .color(usage_color(80.0))
+        .small(),
+    );
     let h = ui.available_height() - 44.0;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         egui::ScrollArea::both()

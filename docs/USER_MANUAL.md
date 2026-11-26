@@ -421,7 +421,7 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
   | Button | What it does |
   |---|---|
   | **Edit** (yellow) | Opens the stack editor (below) |
-  | **Start** (green, inactive stacks) / **Stop** (amber, active stacks) | Asks "Start / Stop stack X on environment Y?" first; Start deploys it again (`docker compose up`), Stop stops its containers (files and volumes stay) |
+  | **Start** (green, inactive stacks) / **Stop** (amber, active stacks) | Asks "Start / Stop stack X on environment Y?" first; Start deploys it again (`docker compose up`); Stop takes it down: its containers are stopped and removed, its files, variables and named volumes stay |
   | **Delete** (red) | Asks first and needs the stack name typed. Portainer removes the stack's containers and networks and its files; Telepad sends no volume option, so Portainer's own default for volumes applies. Cannot be undone |
   | browser button | Opens the stack in Portainer |
   | host button | The host page of the Telepad host it runs on (its Docker table), when Telepad sees the stack's containers there |
@@ -445,7 +445,9 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
   **Re-pull image and redeploy** and **Prune services** are Portainer's update options.
   **Update the stack…** first checks the names (no spaces or `=`, no duplicates) and shows a
   review: whether the compose file changed (with its line diff) and which variables were added
-  (+), changed (~) or removed (−) — names only. **Update the stack** then sends it; Portainer
+  (+), changed (~) or removed (−) — names only. **Update the stack** then sends it and Portainer redeploys the stack (`docker compose up`): containers
+  whose settings changed are recreated, and a service that waits for an unhealthy one may stay
+  *Created* until that one is healthy (start it from the Containers list). Portainer
   deploys it in the background (the stack shows *deploying*; updating again before that ends
   gives 409). If someone changed the stack in Portainer since you opened it, nothing is sent
   and the editor says so: **Reload** (drop your edits) or **Overwrite** (send yours anyway).

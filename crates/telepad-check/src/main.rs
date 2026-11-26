@@ -399,7 +399,13 @@ fn run_portainer_stack(
             return Err(pc::ReadError::Other(format!("no stack named {sname}")));
         }
         for s in stacks {
-            let d = conn.stack(s.id)?;
+            let d = match conn.stack(s.id) {
+                Ok(d) => d,
+                Err(e) => {
+                    println!("stack {} (id {}): {e}", s.name, s.id);
+                    continue;
+                }
+            };
             let env = snap.environments.iter().find(|e| e.id == s.env);
             println!(
                 "stack {} (id {}, {}, env [{}] {}, updated {:?}{})",
@@ -423,11 +429,16 @@ fn run_portainer_stack(
             if let Some(why) = pc::stack_locked(s, env) {
                 println!("  locked: {why}");
             }
-            for c in conn.stack_containers(s)? {
-                println!(
-                    "  container {} ({}) {} [{}] {}",
-                    c.name, c.image, c.state, c.status, c.ports
-                );
+            match conn.stack_containers(s) {
+                Ok(list) => {
+                    for c in list {
+                        println!(
+                            "  container {} ({}) {} [{}] {}",
+                            c.name, c.image, c.state, c.status, c.ports
+                        );
+                    }
+                }
+                Err(e) => println!("  containers: {e}"),
             }
         }
         Ok(())

@@ -2,6 +2,11 @@
 
 Newest first.
 
+## [2026-11-26] — feat(portainer): Stack page with Containers and Editor tabs, opened by double-click on a stack or Open stack on the host page
+- Issue #176 created on GitHub
+- Scope: portainer (app, gui: Portainer page, host page Docker section)
+- Labels: enhancement
+
 ## [2026-11-26] — Tested and merged: #163, #167, #168, #169, #170, #171
 - Issues #163 (group / cluster links on Hosts pages and cards), #167 (blue-grey light theme, navy dark title / header / selection), #168 (snap layouts while dragging and on the maximize button), #169 (Back from Hosts - [name] to the page it was opened from), #170 (filter box funnel opens a searchable value list), #171 (Portainers page and Portainer - [name], read-only through an SSH tunnel, token in the OS password store, certificate pinned on first use; schema 6) addressed on Windows
 - Files: telepad-core `portainer.rs` (new), `store.rs`, `config.rs`, `db/secret.rs`, fixtures `tests/fixtures/portainer/`; telepad-app `portainer.rs`, `tests_portainer.rs` (new), `sets.rs`, `workspace.rs`, `grid.rs`, `update.rs`, `state.rs`, `msg.rs`; telepad-gui `views/portainer.rs` (new), `table.rs`, `widgets.rs`, `views/workspace.rs`, `overview.rs`, `cards.rs`, `runtime.rs`; telepad-check `--portainer`; docs (manual, README, SECURITY, AGENTS)
