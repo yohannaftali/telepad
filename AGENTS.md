@@ -67,7 +67,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/login_log.rs` | Log info (#126): read-only `script` (identity, `$SSH_CLIENT`, ancestor pids, journal access probe, `journalctl -t sshd -t sshd-session --since -30d` `Accepted` lines capped at `LIMIT`, plus `authorized_keys::list_script`), `parse` / `parse_line` (short-iso times incl. `+07:00`, publickey / password / keyboard-interactive / certificates, IPv6) → `LoginLog` (`JournalAccess`, `this_session`: the key sshd accepted for this read, `own` keys), `read`, `register_script` / `unregister_script` / `terminal_args` (exact sudo command after Enter) |
 | `src/local.rs` | My Computer (#129): `collect` this computer without SSH (Windows: `sysinfo`, `netstat -ano` → `parse_netstat`, `reg query` reboot pending, `docker` / `podman` CLI in the remote script's formats → `parse::parse_docker`; Linux / macOS: `script.sh` via local `sh -s`), `db_targets` (127.0.0.1 only), `open_terminal` (`platform::open_local_shell`) |
 | `src/table_export.rs` | Table exports (#153): `TableData` (title, columns, rows as text), `Format` (CSV / Excel / PDF / JSON), `to_csv` (BOM, formulas defused as #111), `to_json` (objects in column order, repeated names numbered), `to_xlsx` (`rust_xlsxwriter`: bold frozen header, autofilter, plain numbers only), `pdf::to_pdf` (`pdf-writer` + `ttf-parser`: A4 / landscape, header per page, embedded TrueType fonts with ToUnicode, per-character font fallback), `render`, `write` (via `.telepad-part`), `file_name`, `PDF_ASK_ABOVE` |
-| `src/portainer.rs` | Portainers (#171): `Portainer` (name, alias, port, https, pinned `fingerprint`), `check_name`, tokens in the OS password store (`load_token` / `save_token` / `forget_token`, service "Telepad Portainer"), `read` (tunnel via `db::tunnel`, own HTTP/1.1 `GET` client, TLS via `rustls` with a trust-on-first-use `Pin` verifier → `ReadResult` with the certificate seen), `parse_status` / `parse_endpoints` / `parse_stacks` (fixtures in `tests/fixtures/portainer/`, stack `Env` never read), `version_ok` (`MIN_VERSION` 2.11.0), `ReadError`, `env_host` (environment → Telepad host), `env_url` / `stack_url` |
+| `src/portainer.rs` | Portainers (#171; changes #173: `Conn` (tunnel + token) with `stack` (`StackDetail` + compose file), `stack_containers` (`StackContainer`, Docker proxy, `containers_path`), `act(Action)` (`Action::StackStart` / `StackStop` / `StackDelete` / `Container { op: ContainerOp }`, `request()` = method + path), `update_stack(StackUpdate, expect UpdateDate)` → `ReadError::Changed`; `stack_locked`; `Stack::state` incl. deploying / error): `Portainer` (name, alias, port, https, pinned `fingerprint`), `check_name`, tokens in the OS password store (`load_token` / `save_token` / `forget_token`, service "Telepad Portainer"), `read` (tunnel via `db::tunnel`, own HTTP/1.1 `GET` client, TLS via `rustls` with a trust-on-first-use `Pin` verifier → `ReadResult` with the certificate seen), `parse_status` / `parse_endpoints` / `parse_stacks` (fixtures in `tests/fixtures/portainer/`, stack `Env` never read), `version_ok` (`MIN_VERSION` 2.11.0), `ReadError`, `env_host` (environment → Telepad host), `env_url` / `stack_url` |
 | `src/prefs.rs` | `preference.db` (#94): named workspaces (`WorkspacePrefs`: `<own>` layout, custom (label, layout), `Current`), `check_label`, `prefs_path`, one-time `import_legacy` of `ui_workspace`, `PRAGMA user_version` |
 
 ### telepad-app (Model–View–Update)
@@ -103,7 +103,7 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
 | `src/tests_local.rs` | Behaviour tests for #129 (My Computer page, local reads, local file and database windows) |
 | `src/sets.rs` | Groups (#144) and clusters (#145): `SetPage` ("Hosts - [name]", `""` = Ungrouped / No cluster), `members`, `stats`, `SetForm`, `AddHosts`, `StMsg::MoveTo` (drag and drop, #160), `SetPage::parent` / `back_target` / `StMsg::Back` (#169), `SetsDraft` (incl. Hosts page `hosts_columns`, Group and Cluster by default; no "By group" since #157), `StMsg` / `StEffect`, `update` (restored as `group:<name>` / `cluster:<name>`) |
 | `src/tests_sets.rs` | Behaviour tests for #144 / #145 (and #163 / #169: set links, Back) |
-| `src/portainer.rs` | Portainers (#171): `PtRow` (registered `Portainer`, `PtStatus`, last good `Snapshot`, checked, reading), `PtPage` ("Portainer - [name]", chosen environment), `PtForm` / `PtDraft`, `PtMsg` / `PtEffect` (Save with an optional new token, Delete, Read through a host, Test, Pin), `update` (reads on open / Refresh only; first certificate pinned; restored as `portainer:<name>`), `suggestions` (hosts running `portainer/portainer` with the published port) |
+| `src/portainer.rs` | Portainers (#171; #173: `PtPage::stack` / `containers` / `busy`, `PtConfirm` + `needs_confirm`, `StackEditor` / `EditorDraft` (`Win::PtStack`), `var_changes`, `check_var_name`, `editor_dirty`, effects `Containers` / `Act` / `LoadStack` / `Update`): `PtRow` (registered `Portainer`, `PtStatus`, last good `Snapshot`, checked, reading), `PtPage` ("Portainer - [name]", chosen environment), `PtForm` / `PtDraft`, `PtMsg` / `PtEffect` (Save with an optional new token, Delete, Read through a host, Test, Pin), `update` (reads on open / Refresh only; first certificate pinned; restored as `portainer:<name>`), `suggestions` (hosts running `portainer/portainer` with the published port) |
 | `src/tests_portainer.rs` | Behaviour tests for #171 |
 
 ### telepad-gui
@@ -166,9 +166,17 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
   prints the exact command and runs it only after Enter (`yes` for kill / remove / compose down).
   Container IDs, project names and paths from labels are validated and single-quoted.
   Portainer-managed stacks are never changed from Telepad (Open in Portainer only).
-  The **Portainers** pages (#171, owner decisions on #171) read a Portainer only through
+  The **Portainers** pages (#171, owner decisions on #171) reach a Portainer only through
   `ssh -N -L` to the host it runs on (never a direct network call), with an API access token
-  from the OS password store, `GET` requests only; its certificate is pinned on first use.
+  from the OS password store; its certificate is pinned on first use. Reads are `GET` only.
+  Exception (owner decision on #173): stacks and their containers are changed **only through
+  the Portainer API** with the user's token, from a button the user clicked — stack start /
+  stop / delete (confirmed, delete needs the name typed), the stack editor's Update (review
+  first, UpdateDate check unless Overwrite), container start / stop / kill / restart / pause /
+  resume / remove (kill / remove confirmed); never from a refresh or in the background; each
+  change logged in `history.db` (kind `portainer`, never variable values). Git, Kubernetes and
+  Edge stacks are changed in Portainer. The Docker / compose terminal actions of #26 still
+  refuse Portainer stacks (they would bypass Portainer).
   Also in a user-opened terminal (owner decision on #126): **Log info**'s Register / Unregister
   Systemd Journal (`login_log.rs`) prints `sudo usermod -aG systemd-journal "$U"` /
   `sudo gpasswd -d "$U" systemd-journal` (`U=$(id -un)`), runs it after Enter and lets sudo ask
@@ -259,6 +267,7 @@ cargo run --release --bin telepad-check -- --check-update
 cargo run --release --bin telepad-check -- --logins <alias>   # Log info read (#126)
 cargo run --release --bin telepad-check -- --local [--json]   # My Computer read (#129)
 cargo run --release --bin telepad-check -- --portainer <name> [--json]   # Portainer read (#171)
+cargo run --release --bin telepad-check -- --portainer <name> --stack <stack>   # one stack: variable names, file size, containers (#173, read-only)
 cargo run --release --bin telepad   # GUI
 ```
 

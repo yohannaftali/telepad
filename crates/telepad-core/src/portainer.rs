@@ -188,6 +188,10 @@ pub struct Stack {
     pub kind: i64,
     pub env: i64,
     pub active: Option<bool>,
+    /// Portainer is deploying it (Status 3, e.g. after an update, #173).
+    pub deploying: bool,
+    /// The last deploy failed (Status 4).
+    pub failed: bool,
     /// Unix seconds; `None` when not known.
     pub created: Option<i64>,
     pub updated: Option<i64>,
@@ -196,6 +200,21 @@ pub struct Stack {
 }
 
 impl Stack {
+    /// active, inactive, deploying, error.
+    pub fn state(&self) -> &'static str {
+        if self.deploying {
+            "deploying"
+        } else if self.failed {
+            "error"
+        } else {
+            match self.active {
+                Some(true) => "active",
+                Some(false) => "inactive",
+                None => "",
+            }
+        }
+    }
+
     pub fn kind_name(&self) -> &'static str {
         match self.kind {
             1 => "Swarm",
@@ -713,6 +732,8 @@ pub fn parse_stacks(body: &[u8]) -> Result<Vec<Stack>, ReadError> {
             kind: int(s, "Type").unwrap_or_default(),
             env: int(s, "EndpointId").unwrap_or_default(),
             active: int(s, "Status").map(|x| x == 1),
+            deploying: int(s, "Status") == Some(3),
+            failed: int(s, "Status") == Some(4),
             created: time(s, "CreationDate"),
             updated: time(s, "UpdateDate"),
             created_by: text(s, "CreatedBy"),
@@ -1166,6 +1187,15 @@ mod tests {
         assert_eq!((s.created, s.updated), (Some(1_763_000_000), None));
         assert_eq!(s.created_by, "admin");
         assert_eq!(stacks[1].active, Some(false));
+        assert_eq!(
+            (stacks[0].state(), stacks[1].state()),
+            ("active", "inactive")
+        );
+        let deploying = parse_stacks(br#"[{"Id":1,"Status":3},{"Id":2,"Status":4}]"#).unwrap();
+        assert_eq!(
+            (deploying[0].state(), deploying[1].state()),
+            ("deploying", "error")
+        );
         assert_eq!(stacks[2].kind_name(), "Swarm");
         // Environment variables are not kept anywhere.
         assert!(!format!("{stacks:?}").contains("hunter2"));

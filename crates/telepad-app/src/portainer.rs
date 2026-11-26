@@ -701,7 +701,12 @@ pub(crate) fn update(
                     if let Some(dr) = d.editors.get_mut(&editor) {
                         dr.review = false;
                     }
-                    say(m, format!("Portainer {portainer}: stack {name} updated"));
+                    say(
+                        m,
+                        format!(
+                            "Portainer {portainer}: stack {name} updated; Portainer deploys it in the background"
+                        ),
+                    );
                     fx.extend(load_stack(m, editor));
                     fx.extend(read(m, &portainer, None, now, say));
                 }

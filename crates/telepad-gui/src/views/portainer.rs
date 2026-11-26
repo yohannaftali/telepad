@@ -59,7 +59,7 @@ pub fn portainers_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, out: &mut V
         }
         ui.label(
             RichText::new(
-                "Read-only, through an SSH tunnel to the host that runs Portainer; tokens stay in the OS password store.",
+                "Through an SSH tunnel to the host that runs Portainer, with your token (kept in the OS password store); changes only after you confirm them.",
             )
             .weak()
             .small(),
@@ -491,11 +491,16 @@ pub fn portainer_page(
         Col::action(""),
     ];
     // Environments on top, stacks below, then the chosen stack's containers.
-    let split = (ui.available_height() * 0.3).clamp(130.0, 320.0);
+    let split = if page.stack.is_some() {
+        (ui.available_height() * 0.22).clamp(100.0, 260.0)
+    } else {
+        (ui.available_height() * 0.3).clamp(130.0, 320.0)
+    };
     let mut env_click = None;
     let mut button = false;
     ui.label(RichText::new(il(icons::NETWORK, "Environments")).strong());
     ui.allocate_ui(egui::vec2(ui.available_width(), split), |ui| {
+        ui.set_max_height(split);
         let state = d.tables.entry(format!("pt-env:{id}")).or_default();
         let env_title = format!("{} environments", row.p.name);
         let spec = Spec::new(("pt-env", id), &env_title, &env_cols)
@@ -593,11 +598,7 @@ pub fn portainer_page(
             vec![
                 s.name.clone(),
                 s.kind_name().to_string(),
-                match s.active {
-                    Some(true) => "active".into(),
-                    Some(false) => "inactive".into(),
-                    None => String::new(),
-                },
+                s.state().to_string(),
                 unix_time(s.created),
                 unix_time(s.updated),
                 s.created_by.clone(),
@@ -616,13 +617,14 @@ pub fn portainer_page(
     ];
     let busy = page.busy.is_some();
     let stack_h = if page.stack.is_some() {
-        (ui.available_height() * 0.5).clamp(140.0, 420.0)
+        (ui.available_height() * 0.42).clamp(100.0, 420.0)
     } else {
         ui.available_height()
     };
     let mut stack_click = None;
     let mut button = false;
     ui.allocate_ui(egui::vec2(ui.available_width(), stack_h), |ui| {
+        ui.set_max_height(stack_h);
         let state = d.tables.entry(format!("pt-stacks:{id}")).or_default();
         let stack_title = format!("{} stacks", row.p.name);
         let spec = Spec::new(("pt-stacks", id), &stack_title, &stack_cols)
@@ -636,16 +638,25 @@ pub fn portainer_page(
                     0 => {
                         ui.label(RichText::new(&s.name).strong());
                     }
-                    2 => match s.active {
-                        Some(true) => {
+                    2 => match s.state() {
+                        "active" => {
                             ui.colored_label(usage_color(10.0), "active");
                         }
-                        Some(false) => table::weak(ui, "inactive"),
-                        None => table::weak(ui, "—"),
+                        "deploying" => {
+                            ui.colored_label(usage_color(80.0), "deploying");
+                        }
+                        "error" => {
+                            ui.colored_label(usage_color(95.0), "error");
+                        }
+                        "" => table::weak(ui, "—"),
+                        other => table::weak(ui, other),
                     },
                     6 => {
                         if let Some(why) = stack_locked(s, env) {
                             table::weak(ui, why);
+                        } else if s.deploying {
+                            ui.spinner();
+                            table::weak(ui, "Portainer is deploying it");
                         } else {
                             if act_small(ui, !busy, Act::Edit, &il(icons::EDIT, "Edit"))
                                 .on_hover_text("The compose file and variables; Update the stack")
@@ -1092,8 +1103,9 @@ pub fn stack_editor_page(
     let vars_w = (total * 0.36).clamp(280.0, 520.0);
     let body_h = ui.available_height() - 44.0;
     ui.horizontal_top(|ui| {
-        ui.allocate_ui(egui::vec2(total - vars_w - 12.0, body_h), |ui| {
-            ui.set_min_height(body_h);
+        let down = egui::Layout::top_down(egui::Align::Min);
+        ui.allocate_ui_with_layout(egui::vec2(total - vars_w - 12.0, body_h), down, |ui| {
+            ui.set_min_size(egui::vec2(total - vars_w - 12.0, body_h));
             ui.horizontal(|ui| {
                 ui.label(RichText::new("docker-compose.yml").strong());
                 let find_id = egui::Id::unique(("pt-ed-find", id));
@@ -1133,7 +1145,8 @@ pub fn stack_editor_page(
                 );
             });
         });
-        ui.allocate_ui(egui::vec2(vars_w, body_h), |ui| {
+        ui.allocate_ui_with_layout(egui::vec2(vars_w, body_h), down, |ui| {
+            ui.set_min_width(vars_w);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Environment variables").strong());
                 ui.checkbox(&mut dr.reveal, "Show values");
@@ -1143,34 +1156,31 @@ pub fn stack_editor_page(
                 .max_height(body_h - 40.0)
                 .show(ui, |ui| {
                     let mut remove = None;
-                    egui::Grid::new(("pt-ed-vars-grid", id))
-                        .num_columns(3)
-                        .spacing([6.0, 4.0])
-                        .show(ui, |ui| {
-                            for (i, v) in dr.vars.iter_mut().enumerate() {
-                                ui.add_enabled(
-                                    editable,
-                                    egui::TextEdit::singleline(&mut v.name)
-                                        .desired_width(vars_w * 0.38)
-                                        .hint_text("NAME"),
+                    let row_h = ui.spacing().interact_size.y;
+                    let (nw, vw) = (vars_w * 0.40, vars_w * 0.44);
+                    for (i, v) in dr.vars.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.add_enabled_ui(editable, |ui| {
+                                ui.add_sized(
+                                    [nw, row_h],
+                                    egui::TextEdit::singleline(&mut v.name).hint_text("NAME"),
                                 );
-                                ui.add_enabled(
-                                    editable,
+                                ui.add_sized(
+                                    [vw, row_h],
                                     egui::TextEdit::singleline(&mut v.value)
                                         .password(!dr.reveal)
-                                        .desired_width(vars_w * 0.42)
                                         .hint_text("value"),
                                 );
                                 if ui
-                                    .add_enabled(editable, egui::Button::new(icons::X).small())
+                                    .add(egui::Button::new(icons::X).small())
                                     .on_hover_text("Remove this variable")
                                     .clicked()
                                 {
                                     remove = Some(i);
                                 }
-                                ui.end_row();
-                            }
+                            });
                         });
+                    }
                     if let Some(i) = remove {
                         dr.vars.remove(i);
                     }
