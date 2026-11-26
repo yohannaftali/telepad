@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-26] — Telepad 0.9.14
+- #180 A database from a newer Telepad: a clear screen with Update Telepad, Open the database folder, Copy the message; newer but compatible databases open (minimum compatible schema stored)
+- #181 Readable secondary text: near white in the dark theme, near black in the light theme
+- #182 Editor indentation: tabs / spaces, size 2 / 4 / 8, convert and re-indent
+- #183 Editor colour schemes (Dark Modern, Light Modern, Monokai, Solarized, Red, …) and a language picker with Auto detect
+
 ## [2026-11-26] — feat(editor): colour schemes and a language picker for syntax highlighting
 - Issue #183 addressed on Windows
 - Files: telepad-gui `editor_theme.rs` (new: 11 schemes — Dark Modern, Dark, Light Modern, Light, Monokai, Solarized Dark / Light, Red, Tomorrow Night Blue, Quiet Light, High Contrast; `apply`, `current`, `set`), `views/text_editor.rs` (editor drawn with the scheme, `scheme_menu` / `scheme_list`, `lang_menu` with Auto detect, embedded editor: language and scheme), `views/panels.rs` (☰ ▸ Settings ▸ Editor colours), `views/portainer.rs`, `app.rs`, `icons.rs` (PALETTE); telepad-core `store.rs` (`UiPrefs::editor_scheme`, setting `ui_editor_scheme`); telepad-app `msg.rs` / `update.rs` / `state.rs` (`Msg::SetEditorScheme`), tests; manual
