@@ -2,6 +2,21 @@
 
 Newest first.
 
+## [2026-11-26] — feat(editor): colour schemes (Dark Modern, Light Modern, Monokai, Solarized, Red, …) and a language picker for syntax highlighting
+- Issue #183 created on GitHub
+- Scope: editor (text_editor.rs, syntax.rs, settings)
+- Labels: enhancement
+
+## [2026-11-26] — feat(editor): change indentation — tabs / spaces, size 2 / 4 / 8, convert and re-indent
+- Issue #182 created on GitHub
+- Scope: editor (files/text.rs, editor.rs, text_editor.rs)
+- Labels: enhancement
+
+## [2026-11-26] — fix(ui): grey secondary text too faint — lighter in the dark theme, darker in the light theme
+- Issue #181 created on GitHub
+- Scope: ui (widgets.rs theme visuals)
+- Labels: bug
+
 ## [2026-11-26] — #180 updated: compatible open of newer schemas
 - Owner asked for a button to fix the schema; added to #180: Update Telepad stays the button, plus a stored minimum compatible schema so additive changes (like schema 6) open in older builds
 - Title now: fix(store): Update Telepad on a database from a newer Telepad, and open newer but compatible schemas

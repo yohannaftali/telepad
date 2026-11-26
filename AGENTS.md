@@ -365,3 +365,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #173 | feat(portainer): manage stacks and their containers through the Portainer API — start / stop / delete, stack editor with env variables and update, container actions | closed | 2026-11-26 |
 | #176 | feat(portainer): Stack page with Containers and Editor tabs, opened by double-click on a stack or Open stack on the host page | closed | 2026-11-26 |
 | #180 | fix(store): Update Telepad on a database from a newer Telepad, and open newer but compatible schemas | open | 2026-11-26 |
+| #181 | fix(ui): grey secondary text too faint — lighter in the dark theme, darker in the light theme | open | 2026-11-26 |
+| #182 | feat(editor): change indentation — tabs / spaces, size 2 / 4 / 8, convert and re-indent | open | 2026-11-26 |
+| #183 | feat(editor): colour schemes (Dark Modern, Light Modern, Monokai, Solarized, Red, …) and a language picker for syntax highlighting | open | 2026-11-26 |
