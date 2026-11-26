@@ -6,6 +6,13 @@ Newest first.
 - Issue #176 created on GitHub
 - Scope: portainer (app, gui: Portainer page, host page Docker section)
 - Labels: enhancement
+## [2026-11-26] — Telepad 0.9.12
+- #163 Group / Cluster cells and card links open "Hosts - [name]"
+- #167 Blue-grey (slate) light theme; navy title bar, table header and selection in the dark theme
+- #168 Snap layouts: window edges, corners, a layout picker at the top, and on the maximize button
+- #169 Back from "Hosts - [name]" to the page it was opened from
+- #170 Filter boxes: the funnel opens a searchable list of the column's values
+- #171 Portainers page and "Portainer - [name]": environments and stacks, read-only through an SSH tunnel (schema 6)
 
 ## [2026-11-26] — Tested and merged: #163, #167, #168, #169, #170, #171
 - Issues #163 (group / cluster links on Hosts pages and cards), #167 (blue-grey light theme, navy dark title / header / selection), #168 (snap layouts while dragging and on the maximize button), #169 (Back from Hosts - [name] to the page it was opened from), #170 (filter box funnel opens a searchable value list), #171 (Portainers page and Portainer - [name], read-only through an SSH tunnel, token in the OS password store, certificate pinned on first use; schema 6) addressed on Windows
