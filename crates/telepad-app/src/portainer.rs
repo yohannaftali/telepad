@@ -1,12 +1,18 @@
 //! Portainers (#171): the Portainers page (register, edit, delete, status)
 //! and one "Portainer - [name]" page per server with its environments and
-//! stacks. Read-only: reads go through an SSH tunnel to the host that runs
-//! Portainer, with an API token from the OS password store.
+//! stacks. Everything goes through an SSH tunnel to the host that runs
+//! Portainer, with the user's API token from the OS password store. Reads
+//! happen on open / Refresh; changes (#173: stack start / stop / delete,
+//! container actions, the stack editor's Update) only after the user
+//! confirmed them ([`needs_confirm`]), and are logged in `history.db`.
 
 use std::time::Instant;
 
 use telepad_core::db::Secret;
-use telepad_core::portainer::{Portainer, ReadError, Snapshot, check_name};
+use telepad_core::portainer::{
+    Action, ContainerOp, EnvVar, Portainer, ReadError, Snapshot, StackContainer, StackDetail,
+    StackUpdate, check_name,
+};
 
 use crate::msg::Effect;
 use crate::state::Model;
@@ -45,18 +51,78 @@ impl PtStatus {
             PtStatus::Error(ReadError::Rejected) => "token rejected".into(),
             PtStatus::Error(ReadError::CertChanged { .. }) => "certificate changed".into(),
             PtStatus::Error(ReadError::TooOld(v)) => format!("too old ({v})"),
-            PtStatus::Error(ReadError::Other(_)) => "error".into(),
+            PtStatus::Error(ReadError::Other(_) | ReadError::Changed) => "error".into(),
         }
     }
 }
 
 /// One "Portainer - [name]" page.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PtPage {
     pub id: PtPageId,
     pub name: String,
     /// The environment whose stacks are listed.
     pub env: Option<i64>,
+    /// The stack whose containers are listed (#173).
+    pub stack: Option<i64>,
+    pub containers: Option<Result<Vec<StackContainer>, String>>,
+    pub loading_containers: bool,
+    /// An action running from this page ("Stopping stack shop…").
+    pub busy: Option<String>,
+}
+
+pub type EditorId = u64;
+
+/// A stack editor window (#173), like Portainer's Editor tab.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StackEditor {
+    pub id: EditorId,
+    pub portainer: String,
+    pub stack_id: i64,
+    pub env_id: i64,
+    pub name: String,
+    /// As loaded from Portainer (file, variables, UpdateDate).
+    pub detail: Option<StackDetail>,
+    pub loading: bool,
+    pub saving: bool,
+    pub error: Option<String>,
+    /// Changed in Portainer since it was loaded: Reload or Overwrite.
+    pub conflict: bool,
+}
+
+impl StackEditor {
+    pub fn title(&self) -> String {
+        format!("Stack - {}", self.name)
+    }
+}
+
+/// What the user typed in a stack editor.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EditorDraft {
+    pub file: String,
+    pub vars: Vec<EnvVar>,
+    /// Show variable values.
+    pub reveal: bool,
+    pub prune: bool,
+    /// Re-pull image and redeploy.
+    pub repull: bool,
+    /// The review step (diff, changed names) before Update.
+    pub review: bool,
+    /// Closing with unsaved changes: asking.
+    pub ask_close: bool,
+}
+
+/// A confirmation waiting for the user (#173).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PtConfirm {
+    pub portainer: String,
+    pub page: PtPageId,
+    pub act: Action,
+    /// "Stop stack shop on Docker Center".
+    pub title: String,
+    /// The name to type (stack delete), else empty.
+    pub type_name: String,
+    pub typed: String,
 }
 
 impl PtPage {
@@ -87,6 +153,9 @@ pub struct PtDraft {
     pub form: Option<PtForm>,
     /// Waiting for the delete confirmation.
     pub delete: Option<String>,
+    /// A stack / container action waiting for its confirmation (#173).
+    pub confirm: Option<PtConfirm>,
+    pub editors: std::collections::BTreeMap<EditorId, EditorDraft>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -124,6 +193,61 @@ pub enum PtMsg {
     },
     /// A store change finished: the list is read again.
     Saved(Result<(), String>),
+    /// Show this stack's containers on a page (#173).
+    SelectStack {
+        page: PtPageId,
+        stack: Option<i64>,
+    },
+    ContainersLoaded {
+        page: PtPageId,
+        stack: i64,
+        result: Result<Vec<StackContainer>, String>,
+    },
+    /// A stack / container action: asks first when [`needs_confirm`].
+    Ask {
+        page: PtPageId,
+        act: Action,
+        /// "Stop stack shop on Docker Center".
+        title: String,
+        /// For a stack delete: the stack name to type.
+        type_name: String,
+    },
+    ConfirmYes,
+    ConfirmNo,
+    /// Container Remove: also its anonymous volumes.
+    ConfirmVolumes(bool),
+    Acted {
+        portainer: String,
+        page: PtPageId,
+        title: String,
+        result: Result<(), String>,
+    },
+    /// Open the stack editor (#173).
+    EditStack {
+        page: PtPageId,
+        stack: i64,
+    },
+    StackLoaded {
+        editor: EditorId,
+        result: Box<Result<StackDetail, ReadError>>,
+    },
+    /// Update the stack…: check the form, then show the review.
+    EditorReview(EditorId),
+    EditorBack(EditorId),
+    /// Send the update; `force` = overwrite a stack changed meanwhile.
+    EditorUpdate {
+        editor: EditorId,
+        force: bool,
+    },
+    StackUpdated {
+        editor: EditorId,
+        result: Result<(), ReadError>,
+    },
+    /// Load the stack again, dropping the edits.
+    EditorReload(EditorId),
+    /// Close; asks first with unsaved edits.
+    EditorClose(EditorId),
+    EditorDiscard(EditorId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,6 +275,87 @@ pub enum PtEffect {
     },
     /// Pin a certificate fingerprint.
     Pin { name: String, fingerprint: String },
+    /// The containers of a stack (#173).
+    Containers {
+        p: Portainer,
+        host: telepad_core::config::HostEntry,
+        page: PtPageId,
+        stack: telepad_core::portainer::Stack,
+    },
+    /// A confirmed action (#173); logged in `history.db`.
+    Act {
+        p: Portainer,
+        host: telepad_core::config::HostEntry,
+        page: PtPageId,
+        act: Action,
+        title: String,
+    },
+    /// The stack and its compose file for the editor.
+    LoadStack {
+        p: Portainer,
+        host: telepad_core::config::HostEntry,
+        editor: EditorId,
+        stack: i64,
+    },
+    /// The editor's Update the stack; `expect` = the UpdateDate it was
+    /// loaded with (`None` = overwrite whatever is there).
+    Update {
+        p: Portainer,
+        host: telepad_core::config::HostEntry,
+        editor: EditorId,
+        upd: StackUpdate,
+        expect: Option<Option<i64>>,
+        /// What changed, for the history log (names only, never values).
+        summary: String,
+    },
+}
+
+/// Asks before running: stack start / stop / delete, container kill /
+/// remove. Container start / stop / restart / pause / resume run at once.
+pub fn needs_confirm(a: &Action) -> bool {
+    match a {
+        Action::Container { op, .. } => op.risky(),
+        _ => true,
+    }
+}
+
+/// The variable names added, removed or changed between `old` and `new`
+/// (for the review; values are never listed).
+pub fn var_changes(old: &[EnvVar], new: &[EnvVar]) -> Vec<String> {
+    let mut out = Vec::new();
+    for v in new {
+        match old.iter().find(|o| o.name == v.name) {
+            None => out.push(format!("+ {}", v.name)),
+            Some(o) if o.value != v.value => out.push(format!("~ {}", v.name)),
+            _ => {}
+        }
+    }
+    for o in old {
+        if !new.iter().any(|v| v.name == o.name) {
+            out.push(format!("- {}", o.name));
+        }
+    }
+    out
+}
+
+/// A variable name Portainer / compose accept: one word, no `=`.
+pub fn check_var_name(n: &str) -> Result<(), String> {
+    if n.is_empty() {
+        return Err("A variable needs a name".into());
+    }
+    if n.chars()
+        .any(|c| c.is_whitespace() || c.is_control() || c == '=')
+    {
+        return Err(format!("'{n}': no spaces or '=' in a variable name"));
+    }
+    Ok(())
+}
+
+/// The editor has edits not sent yet.
+pub fn editor_dirty(e: &StackEditor, d: &EditorDraft) -> bool {
+    e.detail
+        .as_ref()
+        .is_some_and(|x| x.file != d.file || x.env != d.vars)
 }
 
 pub(crate) fn update(
@@ -182,6 +387,8 @@ pub(crate) fn update(
                 .collect();
             m.portainers_loaded = true;
             // A page whose Portainer was renamed follows it; a deleted one closes.
+            m.pt_editors
+                .retain(|e| m.portainers.iter().any(|r| r.p.name == e.portainer));
             m.pt_pages.retain_mut(|pg| {
                 match m
                     .portainers
@@ -238,7 +445,7 @@ pub(crate) fn update(
                     m.pt_pages.push(PtPage {
                         id,
                         name: name.clone(),
-                        env: None,
+                        ..Default::default()
                     });
                 }
             }
@@ -247,6 +454,283 @@ pub(crate) fn update(
             }
         }
         PtMsg::ClosePage(id) => m.pt_pages.retain(|p| p.id != id),
+        PtMsg::SelectStack { page, stack } => {
+            let Some(pg) = m.pt_pages.iter_mut().find(|p| p.id == page) else {
+                return fx;
+            };
+            pg.stack = stack;
+            pg.containers = None;
+            if let Some(s) = stack {
+                fx.extend(load_containers(m, page, s));
+            }
+        }
+        PtMsg::ContainersLoaded {
+            page,
+            stack,
+            result,
+        } => {
+            if let Some(pg) = m
+                .pt_pages
+                .iter_mut()
+                .find(|p| p.id == page && p.stack == Some(stack))
+            {
+                pg.loading_containers = false;
+                pg.containers = Some(result);
+            }
+        }
+        PtMsg::Ask {
+            page,
+            act,
+            title,
+            type_name,
+        } => {
+            let Some(pg) = m.pt_pages.iter().find(|p| p.id == page) else {
+                return fx;
+            };
+            let portainer = pg.name.clone();
+            if needs_confirm(&act) {
+                d.confirm = Some(PtConfirm {
+                    portainer,
+                    page,
+                    act,
+                    title,
+                    type_name,
+                    typed: String::new(),
+                });
+            } else {
+                fx.extend(run_action(m, &portainer, page, act, title));
+            }
+        }
+        PtMsg::ConfirmNo => d.confirm = None,
+        PtMsg::ConfirmVolumes(v) => {
+            if let Some(c) = &mut d.confirm
+                && let Action::Container {
+                    op: ContainerOp::Remove { volumes },
+                    ..
+                } = &mut c.act
+            {
+                *volumes = v;
+            }
+        }
+        PtMsg::ConfirmYes => {
+            let Some(c) = d.confirm.take() else {
+                return fx;
+            };
+            // A stack delete runs only with its name typed.
+            if !c.type_name.is_empty() && c.typed.trim() != c.type_name {
+                d.confirm = Some(c);
+                return fx;
+            }
+            fx.extend(run_action(m, &c.portainer, c.page, c.act, c.title));
+        }
+        PtMsg::Acted {
+            portainer,
+            page,
+            title,
+            result,
+        } => {
+            if let Some(pg) = m.pt_pages.iter_mut().find(|p| p.id == page) {
+                pg.busy = None;
+            }
+            match result {
+                Ok(()) => say(m, format!("Portainer {portainer}: {title}: done")),
+                Err(e) => say(m, format!("Portainer {portainer}: {title}: {e}")),
+            }
+            // What changed is read again: the stacks, and the containers shown.
+            fx.extend(read(m, &portainer, None, now, say));
+            let shown: Vec<(PtPageId, i64)> = m
+                .pt_pages
+                .iter()
+                .filter(|p| p.name == portainer)
+                .filter_map(|p| p.stack.map(|s| (p.id, s)))
+                .collect();
+            for (pg, s) in shown {
+                fx.extend(load_containers(m, pg, s));
+            }
+        }
+        PtMsg::EditStack { page, stack } => {
+            let Some(pg) = m.pt_pages.iter().find(|p| p.id == page) else {
+                return fx;
+            };
+            let portainer = pg.name.clone();
+            if let Some(e) = m
+                .pt_editors
+                .iter()
+                .find(|e| e.portainer == portainer && e.stack_id == stack)
+            {
+                m.ws.open(Win::PtStack(e.id));
+                return fx;
+            }
+            let Some(s) = m
+                .pt(&portainer)
+                .and_then(|r| r.data.as_ref())
+                .and_then(|d| d.stacks.iter().find(|s| s.id == stack))
+                .cloned()
+            else {
+                return fx;
+            };
+            m.pt_editors_next += 1;
+            let id = m.pt_editors_next;
+            m.pt_editors.push(StackEditor {
+                id,
+                portainer: portainer.clone(),
+                stack_id: s.id,
+                env_id: s.env,
+                name: s.name.clone(),
+                loading: true,
+                ..Default::default()
+            });
+            d.editors.insert(id, EditorDraft::default());
+            fx.extend(load_stack(m, id));
+        }
+        PtMsg::StackLoaded { editor, result } => {
+            let Some(e) = m.pt_editors.iter_mut().find(|e| e.id == editor) else {
+                return fx;
+            };
+            e.loading = false;
+            match *result {
+                Ok(detail) => {
+                    e.error = None;
+                    e.conflict = false;
+                    let dr = d.editors.entry(editor).or_default();
+                    dr.file = detail.file.clone();
+                    dr.vars = detail.env.clone();
+                    dr.review = false;
+                    e.detail = Some(detail);
+                }
+                Err(err) => e.error = Some(err.to_string()),
+            }
+        }
+        PtMsg::EditorReview(editor) => {
+            let (Some(e), Some(dr)) = (
+                m.pt_editors.iter_mut().find(|e| e.id == editor),
+                d.editors.get_mut(&editor),
+            ) else {
+                return fx;
+            };
+            e.error = None;
+            if e.detail.as_ref().is_some_and(|x| x.git.is_some()) {
+                e.error = Some("A git-based stack is edited in Portainer".into());
+                return fx;
+            }
+            if dr.file.trim().is_empty() {
+                e.error = Some("The compose file is empty".into());
+                return fx;
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            for v in &dr.vars {
+                if let Err(err) = check_var_name(v.name.trim()) {
+                    e.error = Some(err);
+                    return fx;
+                }
+                if !seen.insert(v.name.trim().to_string()) {
+                    e.error = Some(format!("The variable {} is there twice", v.name.trim()));
+                    return fx;
+                }
+            }
+            dr.review = true;
+        }
+        PtMsg::EditorBack(editor) => {
+            if let Some(dr) = d.editors.get_mut(&editor) {
+                dr.review = false;
+            }
+        }
+        PtMsg::EditorUpdate { editor, force } => {
+            let (Some(e), Some(dr)) = (
+                m.pt_editors.iter().find(|e| e.id == editor),
+                d.editors.get(&editor),
+            ) else {
+                return fx;
+            };
+            let Some(detail) = &e.detail else {
+                return fx;
+            };
+            if e.saving || detail.git.is_some() {
+                return fx;
+            }
+            let vars: Vec<EnvVar> = dr
+                .vars
+                .iter()
+                .map(|v| EnvVar {
+                    name: v.name.trim().to_string(),
+                    value: v.value.clone(),
+                })
+                .collect();
+            let mut changes = var_changes(&detail.env, &vars);
+            if detail.file != dr.file {
+                changes.insert(0, "compose file changed".into());
+            }
+            let summary = if changes.is_empty() {
+                "redeploy without changes".to_string()
+            } else {
+                changes.join(", ")
+            };
+            let upd = StackUpdate {
+                id: e.stack_id,
+                env: e.env_id,
+                file: dr.file.clone(),
+                vars,
+                prune: dr.prune,
+                repull: dr.repull,
+            };
+            let expect = (!force).then_some(detail.updated);
+            let Some((p, host)) = target(m, &e.portainer) else {
+                return fx;
+            };
+            if let Some(e) = m.pt_editors.iter_mut().find(|e| e.id == editor) {
+                e.saving = true;
+                e.error = None;
+            }
+            fx.push(Effect::Portainer(PtEffect::Update {
+                p,
+                host,
+                editor,
+                upd,
+                expect,
+                summary,
+            }));
+        }
+        PtMsg::StackUpdated { editor, result } => {
+            let Some(e) = m.pt_editors.iter_mut().find(|e| e.id == editor) else {
+                return fx;
+            };
+            e.saving = false;
+            match result {
+                Ok(()) => {
+                    let (portainer, name) = (e.portainer.clone(), e.name.clone());
+                    if let Some(dr) = d.editors.get_mut(&editor) {
+                        dr.review = false;
+                    }
+                    say(m, format!("Portainer {portainer}: stack {name} updated"));
+                    fx.extend(load_stack(m, editor));
+                    fx.extend(read(m, &portainer, None, now, say));
+                }
+                Err(ReadError::Changed) => e.conflict = true,
+                Err(err) => e.error = Some(err.to_string()),
+            }
+        }
+        PtMsg::EditorReload(editor) => fx.extend(load_stack(m, editor)),
+        PtMsg::EditorClose(editor) => {
+            let dirty = match (
+                m.pt_editors.iter().find(|e| e.id == editor),
+                d.editors.get(&editor),
+            ) {
+                (Some(e), Some(dr)) => editor_dirty(e, dr),
+                _ => false,
+            };
+            if dirty {
+                if let Some(dr) = d.editors.get_mut(&editor) {
+                    dr.ask_close = true;
+                }
+            } else {
+                m.pt_editors.retain(|e| e.id != editor);
+                d.editors.remove(&editor);
+            }
+        }
+        PtMsg::EditorDiscard(editor) => {
+            m.pt_editors.retain(|e| e.id != editor);
+            d.editors.remove(&editor);
+        }
         PtMsg::Refresh(name) => fx.extend(read(m, &name, None, now, say)),
         PtMsg::RefreshAll => {
             let names: Vec<String> = m.portainers.iter().map(|r| r.p.name.clone()).collect();
@@ -415,6 +899,86 @@ pub(crate) fn update(
         }
     }
     fx
+}
+
+/// The Portainer `name` and the host its tunnel goes through.
+fn target(m: &Model, name: &str) -> Option<(Portainer, telepad_core::config::HostEntry)> {
+    let p = m.pt(name)?.p.clone();
+    let host = m
+        .hosts
+        .iter()
+        .find(|h| h.entry.alias == p.alias)?
+        .entry
+        .clone();
+    Some((p, host))
+}
+
+fn run_action(
+    m: &mut Model,
+    portainer: &str,
+    page: PtPageId,
+    act: Action,
+    title: String,
+) -> Vec<Effect> {
+    let Some((p, host)) = target(m, portainer) else {
+        return Vec::new();
+    };
+    if let Some(pg) = m.pt_pages.iter_mut().find(|p| p.id == page) {
+        pg.busy = Some(format!("{title}…"));
+    }
+    vec![Effect::Portainer(PtEffect::Act {
+        p,
+        host,
+        page,
+        act,
+        title,
+    })]
+}
+
+fn load_containers(m: &mut Model, page: PtPageId, stack: i64) -> Vec<Effect> {
+    let Some(pg) = m.pt_pages.iter().find(|p| p.id == page) else {
+        return Vec::new();
+    };
+    let name = pg.name.clone();
+    let Some(s) = m
+        .pt(&name)
+        .and_then(|r| r.data.as_ref())
+        .and_then(|d| d.stacks.iter().find(|s| s.id == stack))
+        .cloned()
+    else {
+        return Vec::new();
+    };
+    let Some((p, host)) = target(m, &name) else {
+        return Vec::new();
+    };
+    if let Some(pg) = m.pt_pages.iter_mut().find(|p| p.id == page) {
+        pg.loading_containers = true;
+    }
+    vec![Effect::Portainer(PtEffect::Containers {
+        p,
+        host,
+        page,
+        stack: s,
+    })]
+}
+
+fn load_stack(m: &mut Model, editor: EditorId) -> Vec<Effect> {
+    let Some(e) = m.pt_editors.iter().find(|e| e.id == editor) else {
+        return Vec::new();
+    };
+    let (name, stack) = (e.portainer.clone(), e.stack_id);
+    let Some((p, host)) = target(m, &name) else {
+        return Vec::new();
+    };
+    if let Some(e) = m.pt_editors.iter_mut().find(|e| e.id == editor) {
+        e.loading = true;
+    }
+    vec![Effect::Portainer(PtEffect::LoadStack {
+        p,
+        host,
+        editor,
+        stack,
+    })]
 }
 
 /// Same address and port: what was read from it still holds.

@@ -19,6 +19,7 @@ fn main() -> ExitCode {
     let mut logins = false;
     let mut local = false;
     let mut portainer: Option<String> = None;
+    let mut stack: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--config" => cfg = args.next(),
@@ -28,6 +29,7 @@ fn main() -> ExitCode {
             "--logins" => logins = true,
             "--local" => local = true,
             "--portainer" => portainer = args.next(),
+            "--stack" => stack = args.next(),
             "-h" | "--help" => {
                 println!(
                     "telepad-check [--db <telepad.db>] [--config <ssh config>] [--json] [alias ...]
@@ -60,7 +62,7 @@ fn main() -> ExitCode {
         return run_check_update(&ws);
     }
     if let Some(name) = portainer {
-        return run_portainer(&ws, &name, json);
+        return run_portainer(&ws, &name, stack.as_deref(), json);
     }
     let hosts: Vec<_> = match ws.store.hosts() {
         Ok(h) => h
@@ -279,7 +281,12 @@ fn run_check_update(ws: &telepad_core::Workspace) -> ExitCode {
 
 /// `--portainer`: read a registered Portainer (#171) like its page does:
 /// through the tunnel, token from the OS password store, `GET`s only.
-fn run_portainer(ws: &telepad_core::Workspace, name: &str, json: bool) -> ExitCode {
+fn run_portainer(
+    ws: &telepad_core::Workspace,
+    name: &str,
+    stack: Option<&str>,
+    json: bool,
+) -> ExitCode {
     use telepad_core::portainer as pc;
     let list = match ws.store.portainers() {
         Ok(l) => l,
@@ -309,6 +316,9 @@ fn run_portainer(ws: &telepad_core::Workspace, name: &str, json: bool) -> ExitCo
             return ExitCode::from(1);
         }
     };
+    if let Some(sname) = stack {
+        return run_portainer_stack(ws, host, p, &token, sname);
+    }
     match pc::read(&ws.settings(), host, p, &token, None) {
         Ok((snap, seen)) => {
             if json {
@@ -359,6 +369,71 @@ fn run_portainer(ws: &telepad_core::Workspace, name: &str, json: bool) -> ExitCo
             }
             ExitCode::SUCCESS
         }
+        Err(e) => {
+            eprintln!("Portainer {}: {e}", p.name);
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// `--portainer <name> --stack <stack>`: one stack as the editor reads it
+/// (#173), read-only: variable names (never values), the compose file's
+/// size and the stack's containers.
+fn run_portainer_stack(
+    ws: &telepad_core::Workspace,
+    host: &telepad_core::config::HostEntry,
+    p: &telepad_core::portainer::Portainer,
+    token: &telepad_core::db::Secret,
+    sname: &str,
+) -> ExitCode {
+    use telepad_core::portainer as pc;
+    let run = || -> Result<(), pc::ReadError> {
+        let conn = pc::Conn::open(&ws.settings(), host, p, token, None)?;
+        let snap = pc::read(&ws.settings(), host, p, token, None)?.0;
+        let stacks: Vec<_> = snap
+            .stacks
+            .iter()
+            .filter(|s| s.name.eq_ignore_ascii_case(sname))
+            .collect();
+        if stacks.is_empty() {
+            return Err(pc::ReadError::Other(format!("no stack named {sname}")));
+        }
+        for s in stacks {
+            let d = conn.stack(s.id)?;
+            let env = snap.environments.iter().find(|e| e.id == s.env);
+            println!(
+                "stack {} (id {}, {}, env [{}] {}, updated {:?}{})",
+                d.name,
+                d.id,
+                s.kind_name(),
+                s.env,
+                env.map_or("?", |e| e.name.as_str()),
+                d.updated,
+                d.git
+                    .as_ref()
+                    .map_or(String::new(), |g| format!(", git {g}"))
+            );
+            let names: Vec<&str> = d.env.iter().map(|v| v.name.as_str()).collect();
+            println!("  variables: {names:?}");
+            println!(
+                "  compose file: {} lines, {} bytes",
+                d.file.lines().count(),
+                d.file.len()
+            );
+            if let Some(why) = pc::stack_locked(s, env) {
+                println!("  locked: {why}");
+            }
+            for c in conn.stack_containers(s)? {
+                println!(
+                    "  container {} ({}) {} [{}] {}",
+                    c.name, c.image, c.state, c.status, c.ports
+                );
+            }
+        }
+        Ok(())
+    };
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("Portainer {}: {e}", p.name);
             ExitCode::from(1)

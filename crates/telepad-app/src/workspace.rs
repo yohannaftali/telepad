@@ -48,6 +48,8 @@ pub enum Win {
     Portainers,
     /// "Portainer - [name]" of one registered Portainer.
     Portainer(crate::portainer::PtPageId),
+    /// A stack editor (#173); not reopened with a workspace.
+    PtStack(crate::portainer::EditorId),
 }
 
 impl Win {
@@ -73,7 +75,8 @@ impl Win {
             | Win::Editor(_)
             | Win::Logins(_)
             | Win::SetHosts(_)
-            | Win::Portainer(_) => None,
+            | Win::Portainer(_)
+            | Win::PtStack(_) => None,
         }
     }
 
@@ -309,6 +312,9 @@ impl Workspace {
         for p in &m.pt_pages {
             want.push(Win::Portainer(p.id));
         }
+        for e in &m.pt_editors {
+            want.push(Win::PtStack(e.id));
+        }
         let session = |w: &Win| {
             matches!(
                 w,
@@ -320,6 +326,7 @@ impl Workspace {
                     | Win::Logins(_)
                     | Win::SetHosts(_)
                     | Win::Portainer(_)
+                    | Win::PtStack(_)
             )
         };
         let gone: Vec<Win> = self

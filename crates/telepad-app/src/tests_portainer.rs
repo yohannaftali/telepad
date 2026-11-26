@@ -321,3 +321,260 @@ fn the_form_checks_its_fields_and_saves_the_token_apart() {
     );
     assert!(s.drafts.pt.delete.is_none());
 }
+
+fn with_stack() -> Snapshot {
+    let mut s = snapshot();
+    s.stacks.push(telepad_core::portainer::Stack {
+        id: 11,
+        name: "shop".into(),
+        kind: 2,
+        env: 1,
+        active: Some(true),
+        ..Default::default()
+    });
+    s
+}
+
+fn page_with_stack(s: &mut State) -> crate::portainer::PtPageId {
+    loaded(s);
+    pt(s, PtMsg::Open("Main".into()));
+    done(s, "Main", Ok((with_stack(), None)));
+    s.model.pt_pages[0].id
+}
+
+#[test]
+fn stack_actions_ask_first_and_read_again_after() {
+    // #173
+    use telepad_core::portainer::{Action, ContainerOp};
+    let mut s = started(Instant::now(), "");
+    let page = page_with_stack(&mut s);
+    // Choosing a stack lists its containers through the Portainer.
+    let fx = pt(
+        &mut s,
+        PtMsg::SelectStack {
+            page,
+            stack: Some(11),
+        },
+    );
+    assert!(
+        matches!(&fx[..], [PtEffect::Containers { stack, page: p, .. }] if stack.name == "shop" && *p == page)
+    );
+    assert!(s.model.pt_pages[0].loading_containers);
+    pt(
+        &mut s,
+        PtMsg::ContainersLoaded {
+            page,
+            stack: 11,
+            result: Ok(vec![]),
+        },
+    );
+    assert_eq!(s.model.pt_pages[0].containers, Some(Ok(vec![])));
+    // Stop asks first; No runs nothing.
+    let stop = Action::StackStop { id: 11, env: 1 };
+    let ask = |act: Action, type_name: &str| PtMsg::Ask {
+        page,
+        act,
+        title: "Stop stack shop".into(),
+        type_name: type_name.into(),
+    };
+    assert!(pt(&mut s, ask(stop.clone(), "")).is_empty());
+    assert!(s.drafts.pt.confirm.is_some());
+    assert!(pt(&mut s, PtMsg::ConfirmNo).is_empty());
+    assert!(s.drafts.pt.confirm.is_none());
+    // Yes runs it, through the Portainer's host.
+    pt(&mut s, ask(stop.clone(), ""));
+    let fx = pt(&mut s, PtMsg::ConfirmYes);
+    assert!(
+        matches!(&fx[..], [PtEffect::Act { act, host, .. }] if *act == stop && host.alias == "docker1")
+    );
+    assert!(s.model.pt_pages[0].busy.is_some());
+    // Done: the Portainer and the shown containers are read again.
+    let fx = pt(
+        &mut s,
+        PtMsg::Acted {
+            portainer: "Main".into(),
+            page,
+            title: "Stop stack shop".into(),
+            result: Ok(()),
+        },
+    );
+    assert!(s.model.pt_pages[0].busy.is_none());
+    assert_eq!(reads(&fx), ["Main"]);
+    assert!(fx.iter().any(|e| matches!(e, PtEffect::Containers { .. })));
+    // Delete needs the name typed.
+    let del = Action::StackDelete { id: 11, env: 1 };
+    pt(&mut s, ask(del.clone(), "shop"));
+    s.drafts.pt.confirm.as_mut().unwrap().typed = "sho".into();
+    assert!(pt(&mut s, PtMsg::ConfirmYes).is_empty());
+    assert!(s.drafts.pt.confirm.is_some(), "still asking");
+    s.drafts.pt.confirm.as_mut().unwrap().typed = "shop".into();
+    assert!(
+        matches!(&pt(&mut s, PtMsg::ConfirmYes)[..], [PtEffect::Act { act, .. }] if *act == del)
+    );
+    // Container restart runs at once; remove asks, with the volume option.
+    let c = |op| Action::Container {
+        env: 1,
+        id: "abc".into(),
+        op,
+    };
+    let fx = pt(&mut s, ask(c(ContainerOp::Restart), ""));
+    assert!(matches!(&fx[..], [PtEffect::Act { .. }]));
+    assert!(pt(&mut s, ask(c(ContainerOp::Remove { volumes: false }), "")).is_empty());
+    pt(&mut s, PtMsg::ConfirmVolumes(true));
+    assert!(matches!(
+        &pt(&mut s, PtMsg::ConfirmYes)[..],
+        [PtEffect::Act {
+            act: Action::Container {
+                op: ContainerOp::Remove { volumes: true },
+                ..
+            },
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn the_stack_editor_reviews_updates_and_handles_a_changed_stack() {
+    // #173
+    use telepad_core::portainer::{EnvVar, StackDetail};
+    let mut s = started(Instant::now(), "");
+    let page = page_with_stack(&mut s);
+    let fx = pt(&mut s, PtMsg::EditStack { page, stack: 11 });
+    assert!(matches!(&fx[..], [PtEffect::LoadStack { stack: 11, .. }]));
+    let ed = s.model.pt_editors[0].id;
+    assert_eq!(s.model.pt_editors[0].title(), "Stack - shop");
+    assert!(s.model.ws.is_open(Win::PtStack(ed)));
+    // Opening it again brings the same window.
+    assert!(pt(&mut s, PtMsg::EditStack { page, stack: 11 }).is_empty());
+    assert_eq!(s.model.pt_editors.len(), 1);
+    let var = |n: &str, v: &str| EnvVar {
+        name: n.into(),
+        value: v.into(),
+    };
+    let detail = StackDetail {
+        id: 11,
+        name: "shop".into(),
+        kind: 2,
+        env_id: 1,
+        env: vec![var("MODE", "dev"), var("OLD", "x")],
+        updated: Some(100),
+        file: "services: {}\n".into(),
+        ..Default::default()
+    };
+    let load = |d: StackDetail| PtMsg::StackLoaded {
+        editor: ed,
+        result: Box::new(Ok(d)),
+    };
+    pt(&mut s, load(detail.clone()));
+    let dr = s.drafts.pt.editors.get_mut(&ed).unwrap();
+    assert_eq!(dr.file, "services: {}\n");
+    // Bad names stop the review.
+    dr.vars = vec![var("MODE", "prod"), var("BAD NAME", "1")];
+    pt(&mut s, PtMsg::EditorReview(ed));
+    let err = s.model.pt_editors[0].error.clone().unwrap_or_default();
+    assert!(err.contains("no spaces"), "{err}");
+    let dr = s.drafts.pt.editors.get_mut(&ed).unwrap();
+    dr.vars = vec![var("MODE", "prod"), var("NEW", "1")];
+    dr.repull = true;
+    pt(&mut s, PtMsg::EditorReview(ed));
+    assert!(s.drafts.pt.editors[&ed].review);
+    assert_eq!(
+        crate::portainer::var_changes(&detail.env, &s.drafts.pt.editors[&ed].vars),
+        ["~ MODE", "+ NEW", "- OLD"]
+    );
+    // Update: sent with the UpdateDate it was loaded with; values never in the summary.
+    let fx = pt(
+        &mut s,
+        PtMsg::EditorUpdate {
+            editor: ed,
+            force: false,
+        },
+    );
+    match &fx[..] {
+        [
+            PtEffect::Update {
+                upd,
+                expect,
+                summary,
+                ..
+            },
+        ] => {
+            assert_eq!(*expect, Some(Some(100)));
+            assert!(upd.repull && !upd.prune);
+            assert_eq!(upd.vars.len(), 2);
+            assert_eq!(summary, "~ MODE, + NEW, - OLD");
+            assert!(!summary.contains("prod"));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(s.model.pt_editors[0].saving);
+    // Changed in Portainer meanwhile: conflict; Overwrite sends without the check.
+    pt(
+        &mut s,
+        PtMsg::StackUpdated {
+            editor: ed,
+            result: Err(ReadError::Changed),
+        },
+    );
+    assert!(s.model.pt_editors[0].conflict && !s.model.pt_editors[0].saving);
+    let fx = pt(
+        &mut s,
+        PtMsg::EditorUpdate {
+            editor: ed,
+            force: true,
+        },
+    );
+    assert!(matches!(&fx[..], [PtEffect::Update { expect: None, .. }]));
+    // Updated: loaded again and the Portainer read again.
+    let fx = pt(
+        &mut s,
+        PtMsg::StackUpdated {
+            editor: ed,
+            result: Ok(()),
+        },
+    );
+    assert!(fx.iter().any(|e| matches!(e, PtEffect::LoadStack { .. })));
+    assert_eq!(reads(&fx), ["Main"]);
+    // Closing with edits asks; Discard closes.
+    pt(&mut s, load(detail.clone()));
+    s.drafts
+        .pt
+        .editors
+        .get_mut(&ed)
+        .unwrap()
+        .file
+        .push_str("# x\n");
+    pt(&mut s, PtMsg::EditorClose(ed));
+    assert!(s.drafts.pt.editors[&ed].ask_close);
+    assert_eq!(s.model.pt_editors.len(), 1);
+    pt(&mut s, PtMsg::EditorDiscard(ed));
+    assert!(s.model.pt_editors.is_empty());
+    assert!(!s.model.ws.is_open(Win::PtStack(ed)));
+    // A git stack is not sent from Telepad.
+    pt(&mut s, PtMsg::EditStack { page, stack: 11 });
+    let ed = s.model.pt_editors[0].id;
+    let git = StackDetail {
+        git: Some("https://git.example/shop.git".into()),
+        ..detail
+    };
+    pt(
+        &mut s,
+        PtMsg::StackLoaded {
+            editor: ed,
+            result: Box::new(Ok(git)),
+        },
+    );
+    pt(&mut s, PtMsg::EditorReview(ed));
+    let err = s.model.pt_editors[0].error.clone().unwrap_or_default();
+    assert!(err.contains("git"), "{err}");
+    assert!(
+        pt(
+            &mut s,
+            PtMsg::EditorUpdate {
+                editor: ed,
+                force: false
+            }
+        )
+        .is_empty()
+    );
+}

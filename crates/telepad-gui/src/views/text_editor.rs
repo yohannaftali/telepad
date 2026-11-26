@@ -1327,3 +1327,152 @@ fn question(ui: &mut egui::Ui, s: &FileSession, dr: &EdDraft, out: &mut Vec<Msg>
         send(out, id, EdMsg::Answer(Answer::Cancel));
     }
 }
+
+/// A code box with colours and line numbers for other windows (#173, the
+/// Portainer stack editor): `find` highlights its matches (any case);
+/// [`code_box_select`] selects a range in it.
+pub fn code_box(
+    ui: &mut egui::Ui,
+    eid: egui::Id,
+    buf: &mut String,
+    lang: Lang,
+    editable: bool,
+    find: &str,
+) {
+    let ctx = ui.ctx().clone();
+    let mono = egui::TextStyle::Monospace.resolve(ui.style());
+    let pending = ctx.data_mut(|m| m.remove_temp::<Range<usize>>(eid.with("select")));
+    if let Some(r) = &pending {
+        let mut st = egui::TextEdit::load_state(&ctx, eid).unwrap_or_default();
+        st.cursor.set_char_range(Some(CCursorRange::two(
+            CCursor::new(r.start),
+            CCursor::new(r.end),
+        )));
+        st.store(&ctx, eid);
+        ctx.memory_mut(|m| m.request_focus(eid));
+    }
+    let lines = text::line_count(buf);
+    let digits = lines.to_string().len().max(3);
+    let char_w = ui.fonts_mut(|f| f.glyph_width(&mono, '0'));
+    let gutter = digits as f32 * char_w + 16.0;
+    let mut layouter = |ui: &egui::Ui, b: &dyn egui::TextBuffer, _wrap: f32| {
+        let job = layout(ui, b.as_str(), lang, &mono);
+        ui.fonts_mut(|f| f.layout_job(job))
+    };
+    egui::ScrollArea::both()
+        .id_salt(eid.with("scroll"))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.add_space(gutter);
+                let under = ui.painter().add(egui::Shape::Noop);
+                let min = egui::vec2(ui.available_width(), ui.available_height().max(100.0));
+                let output = egui::TextEdit::multiline(buf)
+                    .id(eid)
+                    .code_editor()
+                    .interactive(editable)
+                    .frame(egui::Frame::NONE)
+                    .margin(egui::Margin::symmetric(4, 2))
+                    .desired_width(f32::INFINITY)
+                    .min_size(min)
+                    .layouter(&mut layouter)
+                    .show(ui);
+                let galley = &output.galley;
+                let origin = output.galley_pos;
+                let clip = ui.clip_rect();
+                let v = ui.visuals();
+                let row_h = galley
+                    .rows
+                    .first()
+                    .map_or(14.0, |r| r.rect().height())
+                    .max(1.0);
+                let mut shapes = Vec::new();
+                let q = find.trim().to_lowercase();
+                if !q.is_empty() {
+                    let low = buf.to_lowercase();
+                    if low.len() == buf.len() {
+                        for (at, _) in low.match_indices(&q) {
+                            let a = buf[..at].chars().count();
+                            let b = a + buf[at..at + q.len()].chars().count();
+                            let ra = galley
+                                .pos_from_cursor(CCursor::new(a))
+                                .translate(origin.to_vec2());
+                            let rb = galley
+                                .pos_from_cursor(CCursor::new(b))
+                                .translate(origin.to_vec2());
+                            if ra.bottom() < clip.top() || ra.top() > clip.bottom() {
+                                continue;
+                            }
+                            shapes.push(egui::Shape::rect_filled(
+                                egui::Rect::from_min_max(
+                                    ra.min,
+                                    egui::pos2(rb.max.x.max(ra.min.x + 2.0), ra.max.y),
+                                ),
+                                2.0,
+                                v.selection.bg_fill.gamma_multiply(0.55),
+                            ));
+                        }
+                    }
+                }
+                ui.painter().set(under, egui::Shape::Vec(shapes));
+                let gx = clip.left();
+                let p = ui.painter();
+                p.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(gx, clip.top()),
+                        egui::pos2(gx + gutter, clip.bottom()),
+                    ),
+                    0.0,
+                    v.extreme_bg_color,
+                );
+                let first = (((clip.top() - origin.y) / row_h).floor().max(0.0)) as usize;
+                let last = ((((clip.bottom() - origin.y) / row_h).ceil()).max(0.0) as usize)
+                    .min(galley.rows.len());
+                for (i, row) in galley.rows.iter().enumerate().take(last).skip(first) {
+                    p.text(
+                        egui::pos2(gx + gutter - 6.0, origin.y + row.rect().min.y),
+                        egui::Align2::RIGHT_TOP,
+                        (i + 1).to_string(),
+                        mono.clone(),
+                        v.weak_text_color(),
+                    );
+                }
+                if pending.is_some()
+                    && let Some(c) = output.cursor_range
+                {
+                    let r = galley
+                        .pos_from_cursor(c.primary)
+                        .translate(origin.to_vec2());
+                    ui.scroll_to_rect(
+                        r.expand2(egui::vec2(gutter + 40.0, row_h * 2.0)),
+                        Some(egui::Align::Center),
+                    );
+                }
+            });
+        });
+}
+
+/// Select the next match of `find` after the cursor in a [`code_box`]
+/// (wraps around); `false` when there is none.
+pub fn code_box_next(ctx: &egui::Context, eid: egui::Id, buf: &str, find: &str) -> bool {
+    let q = find.trim().to_lowercase();
+    let low = buf.to_lowercase();
+    if q.is_empty() || low.len() != buf.len() {
+        return false;
+    }
+    let from = egui::TextEdit::load_state(ctx, eid)
+        .and_then(|s| s.cursor.char_range())
+        .map_or(0, |r| r.primary.index.0.max(r.secondary.index.0));
+    let starts: Vec<(usize, usize)> = low
+        .match_indices(&q)
+        .map(|(at, _)| {
+            let a = buf[..at].chars().count();
+            (a, a + buf[at..at + q.len()].chars().count())
+        })
+        .collect();
+    let Some(&(a, b)) = starts.iter().find(|(a, _)| *a >= from).or(starts.first()) else {
+        return false;
+    };
+    ctx.data_mut(|m| m.insert_temp(eid.with("select"), a..b));
+    true
+}

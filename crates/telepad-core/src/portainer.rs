@@ -1,8 +1,10 @@
-//! Portainer servers (#171): registered in `telepad.db`, read only through
-//! an `ssh -N -L` tunnel to the Telepad host that runs them, with an API
-//! access token kept in the OS password store. Telepad only sends `GET`
-//! requests: it lists the environments and stacks a Portainer manages and
-//! never changes anything there.
+//! Portainer servers (#171): registered in `telepad.db`, reached only
+//! through an `ssh -N -L` tunnel to the Telepad host that runs them, with
+//! an API access token kept in the OS password store. A read sends only
+//! `GET` requests. Changes (#173: stack start / stop / delete / update,
+//! container actions) go through the Portainer API with the user's own
+//! token, only from an action the user confirmed ([`Action`],
+//! [`update_stack`]).
 //!
 //! Portainer's HTTPS certificate is usually self-signed: it is trusted on
 //! first use and its SHA-256 fingerprint is pinned in `telepad.db`; a
@@ -28,8 +30,12 @@ pub const MIN_VERSION: &str = "2.11.0";
 /// OS password store service of the API tokens.
 const SERVICE: &str = "Telepad Portainer";
 
-/// How long one request may take.
+/// How long one read may take.
 const TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long an action may take: starting or updating a stack runs
+/// `docker compose up` (and pulls) before Portainer answers.
+const ACTION_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Most bytes one API answer may have.
 const MAX_BODY: usize = 64 * 1024 * 1024;
@@ -220,6 +226,8 @@ pub enum ReadError {
         pinned: String,
         seen: String,
     },
+    /// The stack changed in Portainer since the editor loaded it (#173).
+    Changed,
     /// 401 / 403: the token is wrong, expired or revoked.
     Rejected,
     /// Older than [`MIN_VERSION`].
@@ -237,6 +245,10 @@ impl std::fmt::Display for ReadError {
                 "The HTTPS certificate changed (was {}, now {}): accept it only if you know why",
                 short_fp(pinned),
                 short_fp(seen)
+            ),
+            ReadError::Changed => write!(
+                f,
+                "The stack was changed in Portainer since you opened it: Reload, or Overwrite with your version"
             ),
             ReadError::Rejected => write!(
                 f,
@@ -273,24 +285,105 @@ pub fn read(
     token: &Secret,
     accept: Option<&str>,
 ) -> ReadResult {
-    if token.is_empty() {
-        return Err(ReadError::NoToken);
-    }
-    let tunnel = Tunnel::open(settings, host, "127.0.0.1", p.port)
-        .map_err(|e| ReadError::Unreachable(e.to_string()))?;
-    let pin = accept
-        .map(str::to_string)
-        .or_else(|| (!p.fingerprint.is_empty()).then(|| p.fingerprint.clone()));
-    let client = Client {
-        port: tunnel.local_port,
-        https: p.https,
-        pin,
-        seen: Arc::new(Mutex::new(None)),
-    };
-    let result = read_with(&client, token);
-    drop(tunnel);
-    let seen = client.seen.lock().ok().and_then(|s| s.clone());
+    let conn = Conn::open(settings, host, p, token, accept)?;
+    let result = read_with(&conn.client, token);
+    let seen = conn.seen();
     result.map(|snap| (snap, seen))
+}
+
+/// A tunnel to one Portainer with its token; closed when dropped.
+pub struct Conn {
+    _tunnel: Tunnel,
+    client: Client,
+    token: Secret,
+}
+
+impl Conn {
+    /// Open the tunnel (the pinned certificate, or `accept` instead).
+    pub fn open(
+        settings: &SshSettings,
+        host: &HostEntry,
+        p: &Portainer,
+        token: &Secret,
+        accept: Option<&str>,
+    ) -> Result<Conn, ReadError> {
+        if token.is_empty() {
+            return Err(ReadError::NoToken);
+        }
+        let tunnel =
+            Tunnel::open(settings, host, "127.0.0.1", p.port).map_err(ReadError::Unreachable)?;
+        let pin = accept
+            .map(str::to_string)
+            .or_else(|| (!p.fingerprint.is_empty()).then(|| p.fingerprint.clone()));
+        let client = Client {
+            port: tunnel.local_port,
+            https: p.https,
+            pin,
+            seen: Arc::new(Mutex::new(None)),
+        };
+        Ok(Conn {
+            _tunnel: tunnel,
+            client,
+            token: token.clone(),
+        })
+    }
+
+    /// The certificate seen on this connection.
+    pub fn seen(&self) -> Option<String> {
+        self.client.seen.lock().ok().and_then(|s| s.clone())
+    }
+
+    fn get(&self, path: &str) -> Result<Vec<u8>, ReadError> {
+        self.client.get(path, Some(&self.token))
+    }
+
+    /// A stack with its compose file (#173, the stack editor).
+    pub fn stack(&self, id: i64) -> Result<StackDetail, ReadError> {
+        let mut d = parse_stack_detail(&self.get(&format!("/api/stacks/{id}"))?)?;
+        // A git stack's file comes from the repository: shown read-only.
+        d.file = parse_stack_file(&self.get(&format!("/api/stacks/{id}/file"))?)?;
+        Ok(d)
+    }
+
+    /// The containers of a stack on its environment, through Portainer's
+    /// Docker proxy.
+    pub fn stack_containers(&self, s: &Stack) -> Result<Vec<StackContainer>, ReadError> {
+        parse_containers(&self.get(&containers_path(s))?)
+    }
+
+    /// Run a confirmed action (#173).
+    pub fn act(&self, a: &Action) -> Result<(), ReadError> {
+        let (method, path) = a.request();
+        self.client
+            .request(method, &path, Some(&self.token), None, ACTION_TIMEOUT)
+            .map(|_| ())
+    }
+
+    /// Update the stack's file and variables (#173). When `expect` is set
+    /// and Portainer's UpdateDate differs (changed meanwhile), nothing is
+    /// sent: [`ReadError::Changed`].
+    pub fn update_stack(
+        &self,
+        u: &StackUpdate,
+        expect: Option<Option<i64>>,
+    ) -> Result<(), ReadError> {
+        if let Some(expect) = expect {
+            let now = parse_stack_detail(&self.get(&format!("/api/stacks/{}", u.id))?)?;
+            if now.updated != expect {
+                return Err(ReadError::Changed);
+            }
+        }
+        let body = u.body();
+        self.client
+            .request(
+                "PUT",
+                &format!("/api/stacks/{}?endpointId={}", u.id, u.env),
+                Some(&self.token),
+                Some(body.as_bytes()),
+                ACTION_TIMEOUT,
+            )
+            .map(|_| ())
+    }
 }
 
 fn read_with(c: &Client, token: &Secret) -> Result<Snapshot, ReadError> {
@@ -331,35 +424,46 @@ struct Client {
 impl Client {
     /// One `GET`; the body of a 2xx answer.
     fn get(&self, path: &str, token: Option<&Secret>) -> Result<Vec<u8>, ReadError> {
+        self.request("GET", path, token, None, TIMEOUT)
+    }
+
+    /// One request; the body of a 2xx answer.
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        token: Option<&Secret>,
+        body: Option<&[u8]>,
+        timeout: Duration,
+    ) -> Result<Vec<u8>, ReadError> {
         let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, self.port));
         let tcp = TcpStream::connect_timeout(&addr, TIMEOUT).map_err(|e| {
             ReadError::Unreachable(format!("cannot connect through the tunnel: {e}"))
         })?;
-        let _ = tcp.set_read_timeout(Some(TIMEOUT));
+        let _ = tcp.set_read_timeout(Some(timeout));
         let _ = tcp.set_write_timeout(Some(TIMEOUT));
-        let mut req = format!(
-            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAccept: application/json\r\nUser-Agent: Telepad\r\nConnection: close\r\n",
-            self.port
-        );
-        if let Some(t) = token {
-            req.push_str("X-API-Key: ");
-            req.push_str(t.expose());
-            req.push_str("\r\n");
-        }
-        req.push_str("\r\n");
+        let req = request_bytes(method, path, self.port, token, body);
         let raw = if self.https {
-            self.tls(tcp, req.as_bytes())?
+            self.tls(tcp, &req)?
         } else {
-            exchange(tcp, req.as_bytes())
-                .map_err(|e| ReadError::Unreachable(format!("no answer: {e}")))?
+            exchange(tcp, &req).map_err(|e| ReadError::Unreachable(format!("no answer: {e}")))?
         };
         let (code, body) = parse_response(&raw).map_err(ReadError::Other)?;
+        let msg = || api_message(&body).map_or(String::new(), |m| format!(": {m}"));
         match code {
             200..=299 => Ok(body),
-            401 | 403 => Err(ReadError::Rejected),
+            401 => Err(ReadError::Rejected),
+            // A read refused means the token cannot see it at all; an
+            // action refused is a permission of this user in Portainer.
+            403 if method == "GET" => Err(ReadError::Rejected),
+            403 => Err(ReadError::Other(format!(
+                "Portainer refused this for your user (403){}",
+                msg()
+            ))),
             _ => Err(ReadError::Other(format!(
-                "Portainer answered {code} for {path}{}",
-                api_message(&body).map_or(String::new(), |m| format!(": {m}"))
+                "Portainer answered {code} for {method} {}{}",
+                path.split('?').next().unwrap_or(path),
+                msg()
             ))),
         }
     }
@@ -396,6 +500,35 @@ impl Client {
             }
         })
     }
+}
+
+/// The HTTP/1.1 request text. The token travels only in `X-API-Key`.
+fn request_bytes(
+    method: &str,
+    path: &str,
+    port: u16,
+    token: Option<&Secret>,
+    body: Option<&[u8]>,
+) -> Vec<u8> {
+    let mut req = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nUser-Agent: Telepad\r\nConnection: close\r\n"
+    );
+    if let Some(t) = token {
+        req.push_str("X-API-Key: ");
+        req.push_str(t.expose());
+        req.push_str("\r\n");
+    }
+    let body = body.unwrap_or(&[]);
+    if method != "GET" {
+        if !body.is_empty() {
+            req.push_str("Content-Type: application/json\r\n");
+        }
+        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    req.push_str("\r\n");
+    let mut out = req.into_bytes();
+    out.extend_from_slice(body);
+    out
 }
 
 /// Send `req`, read until the server closes (a TLS close without
@@ -588,6 +721,297 @@ pub fn parse_stacks(body: &[u8]) -> Result<Vec<Stack>, ReadError> {
         .collect())
 }
 
+/// A stack variable (`Env` of a Portainer stack).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvVar {
+    pub name: String,
+    pub value: String,
+}
+
+/// A stack as the editor needs it (#173).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StackDetail {
+    pub id: i64,
+    pub name: String,
+    pub kind: i64,
+    pub env_id: i64,
+    pub active: Option<bool>,
+    pub env: Vec<EnvVar>,
+    /// Repository URL of a git-based stack (edited in Portainer).
+    pub git: Option<String>,
+    pub updated: Option<i64>,
+    /// The compose file.
+    pub file: String,
+}
+
+/// `/api/stacks/{id}`.
+pub fn parse_stack_detail(body: &[u8]) -> Result<StackDetail, ReadError> {
+    let v = json(body)?;
+    if !v.is_object() {
+        return Err(ReadError::Other("no stack in the answer".into()));
+    }
+    let env = v
+        .get("Env")
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .map(|e| EnvVar {
+                    name: text(e, "name"),
+                    value: text(e, "value"),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let git = v
+        .get("GitConfig")
+        .filter(|g| !g.is_null())
+        .map(|g| text(g, "URL"));
+    Ok(StackDetail {
+        id: int(&v, "Id").unwrap_or_default(),
+        name: text(&v, "Name"),
+        kind: int(&v, "Type").unwrap_or_default(),
+        env_id: int(&v, "EndpointId").unwrap_or_default(),
+        active: int(&v, "Status").map(|x| x == 1),
+        env,
+        git,
+        updated: int(&v, "UpdateDate").filter(|t| *t > 0),
+        file: String::new(),
+    })
+}
+
+/// `/api/stacks/{id}/file`.
+pub fn parse_stack_file(body: &[u8]) -> Result<String, ReadError> {
+    let v = json(body)?;
+    v.get("StackFileContent")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| ReadError::Other("no StackFileContent in the answer".into()))
+}
+
+/// A container of a stack (#173), from Docker's `/containers/json`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct StackContainer {
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    /// running, exited, paused, created, restarting, dead.
+    pub state: String,
+    pub status: String,
+    pub ports: String,
+}
+
+/// Docker's container list (through Portainer's proxy).
+pub fn parse_containers(body: &[u8]) -> Result<Vec<StackContainer>, ReadError> {
+    let v = json(body)?;
+    let list = v
+        .as_array()
+        .ok_or_else(|| ReadError::Other("no list of containers".into()))?;
+    let mut out: Vec<StackContainer> = list
+        .iter()
+        .map(|c| {
+            let name = c
+                .get("Names")
+                .and_then(Value::as_array)
+                .and_then(|n| n.first())
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim_start_matches('/')
+                .to_string();
+            let mut ports: Vec<String> = c
+                .get("Ports")
+                .and_then(Value::as_array)
+                .map(|ps| {
+                    ps.iter()
+                        .filter_map(|p| {
+                            let private = p.get("PrivatePort").and_then(Value::as_u64)?;
+                            let proto = p.get("Type").and_then(Value::as_str).unwrap_or("tcp");
+                            Some(match p.get("PublicPort").and_then(Value::as_u64) {
+                                Some(public) => format!("{public}->{private}/{proto}"),
+                                None => format!("{private}/{proto}"),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            ports.sort();
+            ports.dedup();
+            StackContainer {
+                id: text(c, "Id"),
+                name,
+                image: text(c, "Image"),
+                state: text(c, "State"),
+                status: text(c, "Status"),
+                ports: ports.join(", "),
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// Docker's container list of one stack: compose project or swarm stack label.
+pub fn containers_path(s: &Stack) -> String {
+    let label = if s.kind == 1 {
+        "com.docker.stack.namespace"
+    } else {
+        "com.docker.compose.project"
+    };
+    let filters = format!("{{\"label\":[\"{label}={}\"]}}", s.name);
+    format!(
+        "/api/endpoints/{}/docker/containers/json?all=1&filters={}",
+        s.env,
+        percent_encode(&filters)
+    )
+}
+
+fn percent_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// What the user can do to a stack or a container (#173).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    StackStart {
+        id: i64,
+        env: i64,
+    },
+    StackStop {
+        id: i64,
+        env: i64,
+    },
+    StackDelete {
+        id: i64,
+        env: i64,
+    },
+    Container {
+        env: i64,
+        id: String,
+        op: ContainerOp,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerOp {
+    Start,
+    Stop,
+    Kill,
+    Restart,
+    Pause,
+    Resume,
+    /// `volumes`: also its anonymous volumes (`v=1`).
+    Remove {
+        volumes: bool,
+    },
+}
+
+impl ContainerOp {
+    pub fn title(self) -> &'static str {
+        match self {
+            ContainerOp::Start => "Start",
+            ContainerOp::Stop => "Stop",
+            ContainerOp::Kill => "Kill",
+            ContainerOp::Restart => "Restart",
+            ContainerOp::Pause => "Pause",
+            ContainerOp::Resume => "Resume",
+            ContainerOp::Remove { .. } => "Remove",
+        }
+    }
+
+    /// The actions that fit a container in `state` (Docker's State).
+    pub fn for_state(state: &str) -> Vec<ContainerOp> {
+        use ContainerOp::*;
+        let rm = Remove { volumes: false };
+        match state {
+            "running" => vec![Stop, Restart, Pause, Kill, rm],
+            "paused" => vec![Resume, Kill, rm],
+            "restarting" => vec![Stop, Kill, rm],
+            _ => vec![Start, rm],
+        }
+    }
+
+    /// Asks first (and Remove offers the volume option).
+    pub fn risky(self) -> bool {
+        matches!(self, ContainerOp::Kill | ContainerOp::Remove { .. })
+    }
+}
+
+impl Action {
+    /// Method and path (with query) of the request.
+    pub fn request(&self) -> (&'static str, String) {
+        match self {
+            Action::StackStart { id, env } => {
+                ("POST", format!("/api/stacks/{id}/start?endpointId={env}"))
+            }
+            Action::StackStop { id, env } => {
+                ("POST", format!("/api/stacks/{id}/stop?endpointId={env}"))
+            }
+            Action::StackDelete { id, env } => (
+                "DELETE",
+                format!("/api/stacks/{id}?endpointId={env}&external=false"),
+            ),
+            Action::Container { env, id, op } => {
+                let base = format!("/api/endpoints/{env}/docker/containers/{id}");
+                match op {
+                    ContainerOp::Remove { volumes } => (
+                        "DELETE",
+                        format!("{base}?force=true&v={}", if *volumes { 1 } else { 0 }),
+                    ),
+                    ContainerOp::Start => ("POST", format!("{base}/start")),
+                    ContainerOp::Stop => ("POST", format!("{base}/stop")),
+                    ContainerOp::Kill => ("POST", format!("{base}/kill")),
+                    ContainerOp::Restart => ("POST", format!("{base}/restart")),
+                    ContainerOp::Pause => ("POST", format!("{base}/pause")),
+                    ContainerOp::Resume => ("POST", format!("{base}/unpause")),
+                }
+            }
+        }
+    }
+}
+
+/// The editor's Update the stack (#173).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StackUpdate {
+    pub id: i64,
+    pub env: i64,
+    pub file: String,
+    pub vars: Vec<EnvVar>,
+    pub prune: bool,
+    /// Re-pull image and redeploy.
+    pub repull: bool,
+}
+
+impl StackUpdate {
+    /// Portainer's update payload (`PullImage` too, for versions before 2.36).
+    pub fn body(&self) -> String {
+        serde_json::json!({
+            "StackFileContent": self.file,
+            "Env": self.vars,
+            "Prune": self.prune,
+            "RepullImageAndRedeploy": self.repull,
+            "PullImage": self.repull,
+        })
+        .to_string()
+    }
+}
+
+/// Why Telepad does not offer changes for a stack, if it does not.
+pub fn stack_locked(s: &Stack, env: Option<&Environment>) -> Option<&'static str> {
+    if s.kind == 3 {
+        return Some("Kubernetes stacks are changed in Portainer");
+    }
+    if env.is_some_and(|e| matches!(e.kind, 4 | 7)) {
+        return Some("Edge environments are changed in Portainer");
+    }
+    None
+}
+
 /// SHA-256 of a DER certificate as `AB:CD:…`.
 pub fn fingerprint(der: &[u8]) -> String {
     use sha2::Digest;
@@ -745,6 +1169,163 @@ mod tests {
         assert_eq!(stacks[2].kind_name(), "Swarm");
         // Environment variables are not kept anywhere.
         assert!(!format!("{stacks:?}").contains("hunter2"));
+    }
+
+    #[test]
+    fn actions_build_the_documented_requests() {
+        // #173: Portainer's stack routes and Docker's container routes
+        // through Portainer's proxy; nothing else is ever called.
+        let r = |a: Action| a.request();
+        assert_eq!(
+            r(Action::StackStart { id: 11, env: 2 }),
+            ("POST", "/api/stacks/11/start?endpointId=2".into())
+        );
+        assert_eq!(
+            r(Action::StackStop { id: 11, env: 2 }),
+            ("POST", "/api/stacks/11/stop?endpointId=2".into())
+        );
+        assert_eq!(
+            r(Action::StackDelete { id: 11, env: 2 }),
+            (
+                "DELETE",
+                "/api/stacks/11?endpointId=2&external=false".into()
+            )
+        );
+        let c = |op| Action::Container {
+            env: 5,
+            id: "abc".into(),
+            op,
+        };
+        assert_eq!(
+            r(c(ContainerOp::Resume)),
+            (
+                "POST",
+                "/api/endpoints/5/docker/containers/abc/unpause".into()
+            )
+        );
+        assert_eq!(
+            r(c(ContainerOp::Kill)),
+            ("POST", "/api/endpoints/5/docker/containers/abc/kill".into())
+        );
+        assert_eq!(
+            r(c(ContainerOp::Remove { volumes: false })),
+            (
+                "DELETE",
+                "/api/endpoints/5/docker/containers/abc?force=true&v=0".into()
+            )
+        );
+        assert_eq!(
+            r(c(ContainerOp::Remove { volumes: true })).1,
+            "/api/endpoints/5/docker/containers/abc?force=true&v=1"
+        );
+        // Actions that fit the state.
+        use ContainerOp::*;
+        assert_eq!(
+            ContainerOp::for_state("running"),
+            [Stop, Restart, Pause, Kill, Remove { volumes: false }]
+        );
+        assert_eq!(ContainerOp::for_state("paused")[0], Resume);
+        assert_eq!(ContainerOp::for_state("exited")[0], Start);
+        // The request text: token only in X-API-Key, JSON body with its length.
+        let u = StackUpdate {
+            id: 11,
+            env: 2,
+            file: "services:\n  web:\n    image: nginx\n".into(),
+            vars: vec![EnvVar {
+                name: "MODE".into(),
+                value: "dev".into(),
+            }],
+            prune: false,
+            repull: true,
+        };
+        let body = u.body();
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            v["StackFileContent"],
+            "services:\n  web:\n    image: nginx\n"
+        );
+        assert_eq!(v["Env"][0]["name"], "MODE");
+        assert_eq!(v["Env"][0]["value"], "dev");
+        assert_eq!(
+            (v["Prune"].as_bool(), v["RepullImageAndRedeploy"].as_bool()),
+            (Some(false), Some(true))
+        );
+        let raw = request_bytes(
+            "PUT",
+            "/api/stacks/11?endpointId=2",
+            4000,
+            Some(&Secret::new("ptr_x")),
+            Some(body.as_bytes()),
+        );
+        let text = String::from_utf8(raw).unwrap();
+        assert!(text.starts_with("PUT /api/stacks/11?endpointId=2 HTTP/1.1\r\n"));
+        assert!(text.contains("X-API-Key: ptr_x\r\n"));
+        assert!(text.contains(&format!("Content-Length: {}\r\n", body.len())));
+        assert!(text.ends_with(&body));
+        let raw = request_bytes("POST", "/api/stacks/1/stop?endpointId=2", 1, None, None);
+        assert!(
+            String::from_utf8(raw)
+                .unwrap()
+                .contains("Content-Length: 0\r\n")
+        );
+    }
+
+    #[test]
+    fn parses_a_stack_its_file_and_its_containers() {
+        let d = parse_stack_detail(&fixture("stack.json")).unwrap();
+        assert_eq!(
+            (d.id, d.name.as_str(), d.kind, d.env_id),
+            (11, "shop", 2, 1)
+        );
+        assert_eq!(d.active, Some(true));
+        assert_eq!(d.env.len(), 2);
+        assert_eq!(
+            (d.env[0].name.as_str(), d.env[0].value.as_str()),
+            ("MODE", "dev")
+        );
+        assert_eq!(d.git, None);
+        assert_eq!(d.updated, Some(1_763_050_000));
+        let git =
+            parse_stack_detail(br#"{"Id":3,"GitConfig":{"URL":"https://git.example/app.git"}}"#)
+                .unwrap();
+        assert_eq!(git.git.as_deref(), Some("https://git.example/app.git"));
+        assert_eq!(
+            parse_stack_file(br#"{"StackFileContent":"services: {}\n"}"#).unwrap(),
+            "services: {}\n"
+        );
+        let cs = parse_containers(&fixture("containers.json")).unwrap();
+        assert_eq!(cs.len(), 2);
+        assert_eq!(
+            (
+                cs[0].name.as_str(),
+                cs[0].state.as_str(),
+                cs[0].ports.as_str()
+            ),
+            ("shop-db-1", "exited", "")
+        );
+        assert_eq!(cs[1].ports, "8080->80/tcp");
+        let stack = Stack {
+            id: 11,
+            name: "shop".into(),
+            kind: 2,
+            env: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            containers_path(&stack),
+            "/api/endpoints/1/docker/containers/json?all=1&filters=%7B%22label%22%3A%5B%22com.docker.compose.project%3Dshop%22%5D%7D"
+        );
+        let swarm = Stack {
+            kind: 1,
+            ..stack.clone()
+        };
+        assert!(containers_path(&swarm).contains("com.docker.stack.namespace"));
+        let k8s = Stack {
+            kind: 3,
+            ..stack.clone()
+        };
+        assert!(stack_locked(&k8s, None).is_some());
+        assert!(stack_locked(&stack, None).is_none());
     }
 
     #[test]

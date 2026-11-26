@@ -121,6 +121,7 @@ fn page(
         Win::SetHosts(id) => sets::set_hosts_page(ui, m, d, id, out),
         Win::Portainers => portainer::portainers_page(ui, m, d, out),
         Win::Portainer(id) => portainer::portainer_page(ui, m, d, id, out),
+        Win::PtStack(id) => portainer::stack_editor_page(ui, m, d, id, out),
         Win::Docker => {
             ui.horizontal(|ui| search_box(ui, d));
             ui.add_space(4.0);
