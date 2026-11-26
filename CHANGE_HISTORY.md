@@ -2,6 +2,11 @@
 
 Newest first.
 
+## [2026-11-26] — feat(editor): colour schemes and a language picker for syntax highlighting
+- Issue #183 addressed on Windows
+- Files: telepad-gui `editor_theme.rs` (new: 11 schemes — Dark Modern, Dark, Light Modern, Light, Monokai, Solarized Dark / Light, Red, Tomorrow Night Blue, Quiet Light, High Contrast; `apply`, `current`, `set`), `views/text_editor.rs` (editor drawn with the scheme, `scheme_menu` / `scheme_list`, `lang_menu` with Auto detect, embedded editor: language and scheme), `views/panels.rs` (☰ ▸ Settings ▸ Editor colours), `views/portainer.rs`, `app.rs`, `icons.rs` (PALETTE); telepad-core `store.rs` (`UiPrefs::editor_scheme`, setting `ui_editor_scheme`); telepad-app `msg.rs` / `update.rs` / `state.rs` (`Msg::SetEditorScheme`), tests; manual
+- Verified: fmt, clippy, tests (every scheme: text and line numbers ≥ 4.5 : 1, every token ≥ 3 : 1, selection visible, dark flag matches; follow / chosen / unknown key; saved setting round trip; SetEditorScheme saves once); GUI: picker in the Portainer stack editor, Monokai applied, language Shell then Auto detect (YAML), Monokai kept after a restart, ☰ ▸ Settings ▸ Editor colours; owner's setting put back to Follow app theme
+
 ## [2026-11-26] — feat(editor): change indentation — tabs / spaces, size 2 / 4 / 8, convert and re-indent
 - Issue #182 addressed on Windows
 - Files: telepad-core `files/text.rs` (`Indent`, `Indent::detect`, `convert_indent`), telepad-app `editor.rs` (`EdTab::indent`, `EdMsg::SetIndent` / `ConvertIndent`, `indent_allowed`), `tests_editor.rs`; telepad-gui `views/text_editor.rs` (status bar / embedded header menu, Tab uses the tab's indent, embedded indent re-detected when the text is replaced); manual

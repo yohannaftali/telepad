@@ -1254,6 +1254,17 @@ full path). Opening a file that already has a tab switches to it.
   characters are selected), the indentation (*Spaces: 2* or *Tab size: 4*, found in the file),
   the language, the line endings (**LF** or **CRLF**) and the encoding (**UTF-8**, or **UTF-8
   with BOM**).
+- **Colour scheme** (#183): the palette button in the status bar (also in the Portainer stack
+  editor's header and ☰ ▸ Settings ▸ **Editor colours**) picks the editor's colours for every
+  editor: **Follow app theme** (the default: Dark Modern in the dark theme, Light Modern in the
+  light one), **Dark Modern**, **Dark (Visual Studio)**, **Light Modern**, **Light (Visual
+  Studio)**, **Monokai**, **Solarized Dark**, **Solarized Light**, **Red**, **Tomorrow Night
+  Blue**, **Quiet Light** or **High Contrast**. It sets the background, text, line numbers,
+  current line, selection, find matches and syntax colours; the choice is saved. Colours that
+  were too faint in the original themes are a little stronger, so text stays readable.
+- **Language** (#183): the language box (YAML, Shell, …) chooses the syntax colours of the tab;
+  **Auto detect** goes back to the language found from the file name and first line. Only the
+  colours change, never the file.
 - **Indentation** (#182): click *Spaces: 4* (also in the Portainer stack editor's header):
   - **Indent using spaces** / **Indent using tabs** and **Size 2 / 4 / 8** change only what Tab
     and Shift+Tab insert; the text stays as it is.

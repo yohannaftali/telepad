@@ -5,6 +5,7 @@
 )]
 
 mod app;
+mod editor_theme;
 mod icons;
 mod runtime;
 mod table;

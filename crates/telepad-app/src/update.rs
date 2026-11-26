@@ -74,6 +74,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             d.group_by_status = ui_prefs.group_by_status;
             d.overview_cards = ui_prefs.overview_cards;
             d.theme = ui_prefs.theme;
+            d.editor_scheme = ui_prefs.editor_scheme.clone();
             m.ws_legacy = ui_prefs.workspace.clone();
             m.ws.sidebar_collapsed = ui_prefs.sidebar_collapsed;
             match prefs {
@@ -463,6 +464,12 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         Msg::SetTheme(theme) => {
             if d.theme != theme {
                 d.theme = theme;
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(m)));
+            }
+        }
+        Msg::SetEditorScheme(key) => {
+            if d.editor_scheme != key {
+                d.editor_scheme = key;
                 fx.push(Effect::SaveUiPrefs(d.ui_prefs(m)));
             }
         }

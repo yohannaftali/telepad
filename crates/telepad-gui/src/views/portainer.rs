@@ -1329,6 +1329,7 @@ pub fn stack_editor_page(
         &mut dr.file,
         &saved,
         editable,
+        out,
     );
     close_question(ui, e, dr, id, out);
 }

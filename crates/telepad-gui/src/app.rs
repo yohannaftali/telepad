@@ -105,6 +105,7 @@ impl eframe::App for TelepadApp {
             self.applied_theme = Some(want);
         }
         crate::widgets::set_dark_mode(root.style().visuals.dark_mode);
+        crate::editor_theme::set(&self.state.drafts.editor_scheme);
         // Ages ("12s ago"), timers and spinners move without input.
         root.ctx().request_repaint_after(Duration::from_secs(1));
 

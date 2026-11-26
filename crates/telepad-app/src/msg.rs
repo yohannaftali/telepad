@@ -156,6 +156,8 @@ pub enum Msg {
     /// Overview as cards (true) or table.
     SetOverviewCards(bool),
     SetTheme(telepad_core::store::ThemePref),
+    /// Editor colour scheme (#183) by key; empty = follow the app theme.
+    SetEditorScheme(String),
     /// Overview order chosen in the card view's "Sort by" picker.
     SetSort(crate::table::Sort),
     /// Overview header clicked.

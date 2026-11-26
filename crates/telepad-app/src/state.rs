@@ -162,6 +162,8 @@ pub struct Drafts {
     pub overview_cards: bool,
     /// System / Light / Dark. Saved in the database.
     pub theme: ThemePref,
+    /// Editor colour scheme key (#183); empty = follow the app theme.
+    pub editor_scheme: String,
     /// "How it runs" window.
     pub run_info: Option<RunInfoView>,
     /// "Import from pasted text" window.
@@ -428,6 +430,7 @@ impl Default for Drafts {
             group_by_status: false,
             overview_cards: false,
             theme: ThemePref::System,
+            editor_scheme: String::new(),
             run_info: None,
             paste: None,
             keys: None,
@@ -821,6 +824,7 @@ impl Drafts {
             theme: self.theme,
             sidebar_collapsed: ws.sidebar_collapsed,
             workspace: m.ws_legacy.clone(),
+            editor_scheme: self.editor_scheme.clone(),
         }
     }
 }

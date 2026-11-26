@@ -8,6 +8,8 @@ use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily, ImageSo
 pub const TERMINAL: &str = "\u{eae8}";
 pub const MONITOR: &str = "\u{e32e}";
 pub const EDIT: &str = "\u{e3b4}";
+/// Editor colour scheme (#183).
+pub const PALETTE: &str = "\u{e6c8}";
 pub const CLONE: &str = "\u{e1ca}";
 pub const COPY: &str = "\u{e198}";
 pub const TRASH: &str = "\u{e4a6}";
