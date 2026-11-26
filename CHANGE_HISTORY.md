@@ -2,6 +2,11 @@
 
 Newest first.
 
+## [2026-11-26] — fix(ui): grey secondary text too faint — lighter in the dark theme, darker in the light theme
+- Issue #181 addressed on Windows
+- Files: telepad-gui `widgets.rs` (dark text #dde1e7, dark weak #aeb6c2, light weak #475569, palette grey; test: weak text ≥ 4.5 : 1 and normal text ≥ 7 : 1 on window, panel, stripe, input, code, button and title fills, weak still distinct), `views/docker.rs`, `docker_overview.rs`, `files.rs` (hard-coded greys → palette grey); manual
+- Verified: fmt, clippy, tests; screenshots in the light and dark themes (Portainer page header, tables)
+
 ## [2026-11-26] — feat(editor): colour schemes (Dark Modern, Light Modern, Monokai, Solarized, Red, …) and a language picker for syntax highlighting
 - Issue #183 created on GitHub
 - Scope: editor (text_editor.rs, syntax.rs, settings)

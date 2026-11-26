@@ -301,7 +301,9 @@ theme uses a blue-grey (slate) background, sidebar and top bar behind white wind
 border, and blue-grey buttons, input boxes, window title bars and table headers, so every
 layer stands apart (#167); the window in front has a darker blue-grey title bar. The dark
 theme uses dark blue for the title bar of the window in front, the table headers and the
-selection (#167).
+selection (#167). Text is near white in the dark theme and near black in the light one;
+secondary text (hints, "updated … ago", notes, status lines) is a lighter / darker grey that
+still meets a 4.5 : 1 contrast on every background (#181).
 
 ## Hosts
 
