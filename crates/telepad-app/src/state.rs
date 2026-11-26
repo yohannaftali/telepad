@@ -120,6 +120,8 @@ pub struct Model {
     /// Open stack editors (#173).
     pub pt_editors: Vec<crate::portainer::StackEditor>,
     pub pt_editors_next: crate::portainer::EditorId,
+    /// A host page's Open stack waiting for the Portainers' reads (#176).
+    pub pt_pending_open: Option<(String, String)>,
 }
 
 /// A key added to / revoked from several hosts.

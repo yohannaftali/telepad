@@ -1964,7 +1964,7 @@ impl Runtime {
             PtEffect::Containers {
                 p,
                 host,
-                page,
+                editor,
                 stack,
             } => {
                 let s = self.ssh.clone()?;
@@ -1972,11 +1972,7 @@ impl Runtime {
                     let result = token_conn(&s, &host, &p)
                         .and_then(|c| c.stack_containers(&stack))
                         .map_err(|e| e.to_string());
-                    Msg::Portainer(PtMsg::ContainersLoaded {
-                        page,
-                        stack: stack.id,
-                        result,
-                    })
+                    Msg::Portainer(PtMsg::StackContainers { editor, result })
                 });
                 None
             }
@@ -1999,7 +1995,7 @@ impl Runtime {
             PtEffect::Act {
                 p,
                 host,
-                page,
+                origin,
                 act,
                 title,
             } => {
@@ -2021,7 +2017,8 @@ impl Runtime {
                     );
                     Msg::Portainer(PtMsg::Acted {
                         portainer: p.name,
-                        page,
+                        origin,
+                        act,
                         title,
                         result,
                     })
