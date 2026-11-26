@@ -513,3 +513,75 @@ fn a_failed_save_keeps_the_window_open() {
             .any(|e| matches!(e, FmEffect::Close(_)))
     );
 }
+
+#[test]
+fn indentation_is_detected_set_and_converted_without_saving() {
+    // #182
+    use telepad_core::files::text::Indent;
+    let sp = |size| Indent { tabs: false, size };
+    let (mut s, id) = window(Mode::Sftp);
+    let tab = open_compose(&mut s, id, "a:\n    b: 1\n    c:\n        d: 2\n");
+    let t = |s: &State| editor(s).tabs.iter().find(|t| t.id == tab).unwrap().indent;
+    assert_eq!(t(&s), sp(4));
+    // Indent using 2 spaces: only what Tab inserts, the text is unchanged.
+    ed(&mut s, id, EdMsg::SetIndent(tab, sp(2)));
+    assert_eq!(t(&s), sp(2));
+    assert_eq!(
+        edraft(&mut s, id).texts[&tab],
+        "a:\n    b: 1\n    c:\n        d: 2\n"
+    );
+    // Re-indent 4 → 2 is done from what the tab says (back to 4 first).
+    ed(&mut s, id, EdMsg::SetIndent(tab, sp(4)));
+    let fx = ed(
+        &mut s,
+        id,
+        EdMsg::ConvertIndent {
+            tab,
+            to: sp(2),
+            sel: None,
+        },
+    );
+    assert!(fx.is_empty(), "nothing is written before Save");
+    assert_eq!(
+        edraft(&mut s, id).texts[&tab],
+        "a:\n  b: 1\n  c:\n    d: 2\n"
+    );
+    assert_eq!(t(&s), sp(2));
+    let dirty = {
+        let tb = editor(&s).tabs[0].clone();
+        edraft(&mut s, id).dirty(&tb)
+    };
+    assert!(dirty);
+    // YAML refuses tabs, both ways.
+    let tabs = Indent {
+        tabs: true,
+        size: 2,
+    };
+    ed(&mut s, id, EdMsg::SetIndent(tab, tabs));
+    ed(
+        &mut s,
+        id,
+        EdMsg::ConvertIndent {
+            tab,
+            to: tabs,
+            sel: None,
+        },
+    );
+    assert_eq!(t(&s), sp(2));
+    assert!(!edraft(&mut s, id).texts[&tab].contains('\t'));
+    // Another language may use tabs; only the selected lines change.
+    ed(&mut s, id, EdMsg::SetLang(tab, Lang::Plain));
+    ed(
+        &mut s,
+        id,
+        EdMsg::ConvertIndent {
+            tab,
+            to: tabs,
+            sel: Some(3..9),
+        },
+    );
+    assert_eq!(
+        edraft(&mut s, id).texts[&tab],
+        "a:\n\tb: 1\n  c:\n    d: 2\n"
+    );
+}

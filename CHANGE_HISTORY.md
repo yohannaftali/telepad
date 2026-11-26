@@ -2,6 +2,36 @@
 
 Newest first.
 
+## [2026-11-26] — feat(editor): colour schemes and a language picker for syntax highlighting
+- Issue #183 addressed on Windows
+- Files: telepad-gui `editor_theme.rs` (new: 11 schemes — Dark Modern, Dark, Light Modern, Light, Monokai, Solarized Dark / Light, Red, Tomorrow Night Blue, Quiet Light, High Contrast; `apply`, `current`, `set`), `views/text_editor.rs` (editor drawn with the scheme, `scheme_menu` / `scheme_list`, `lang_menu` with Auto detect, embedded editor: language and scheme), `views/panels.rs` (☰ ▸ Settings ▸ Editor colours), `views/portainer.rs`, `app.rs`, `icons.rs` (PALETTE); telepad-core `store.rs` (`UiPrefs::editor_scheme`, setting `ui_editor_scheme`); telepad-app `msg.rs` / `update.rs` / `state.rs` (`Msg::SetEditorScheme`), tests; manual
+- Verified: fmt, clippy, tests (every scheme: text and line numbers ≥ 4.5 : 1, every token ≥ 3 : 1, selection visible, dark flag matches; follow / chosen / unknown key; saved setting round trip; SetEditorScheme saves once); GUI: picker in the Portainer stack editor, Monokai applied, language Shell then Auto detect (YAML), Monokai kept after a restart, ☰ ▸ Settings ▸ Editor colours; owner's setting put back to Follow app theme
+
+## [2026-11-26] — feat(editor): change indentation — tabs / spaces, size 2 / 4 / 8, convert and re-indent
+- Issue #182 addressed on Windows
+- Files: telepad-core `files/text.rs` (`Indent`, `Indent::detect`, `convert_indent`), telepad-app `editor.rs` (`EdTab::indent`, `EdMsg::SetIndent` / `ConvertIndent`, `indent_allowed`), `tests_editor.rs`; telepad-gui `views/text_editor.rs` (status bar / embedded header menu, Tab uses the tab's indent, embedded indent re-detected when the text is replaced); manual
+- Verified: fmt, clippy, tests (core: tabs ↔ spaces, 4 → 2, 2 → 4, partial runs, CRLF, selection; app: set, convert, unsaved, YAML refuses tabs, selected lines); GUI: Portainer stack editor menu (tabs off for YAML), Re-indent 2 → 4, Reload brings back the text and Spaces: 2. Undo after a conversion goes through egui's undo history (not one strict step when typed right after)
+
+## [2026-11-26] — fix(ui): grey secondary text too faint — lighter in the dark theme, darker in the light theme
+- Issue #181 addressed on Windows
+- Files: telepad-gui `widgets.rs` (dark text #dde1e7, dark weak #aeb6c2, light weak #475569, palette grey; test: weak text ≥ 4.5 : 1 and normal text ≥ 7 : 1 on window, panel, stripe, input, code, button and title fills, weak still distinct), `views/docker.rs`, `docker_overview.rs`, `files.rs` (hard-coded greys → palette grey); manual
+- Verified: fmt, clippy, tests; screenshots in the light and dark themes (Portainer page header, tables)
+
+## [2026-11-26] — feat(editor): colour schemes (Dark Modern, Light Modern, Monokai, Solarized, Red, …) and a language picker for syntax highlighting
+- Issue #183 created on GitHub
+- Scope: editor (text_editor.rs, syntax.rs, settings)
+- Labels: enhancement
+
+## [2026-11-26] — feat(editor): change indentation — tabs / spaces, size 2 / 4 / 8, convert and re-indent
+- Issue #182 created on GitHub
+- Scope: editor (files/text.rs, editor.rs, text_editor.rs)
+- Labels: enhancement
+
+## [2026-11-26] — fix(ui): grey secondary text too faint — lighter in the dark theme, darker in the light theme
+- Issue #181 created on GitHub
+- Scope: ui (widgets.rs theme visuals)
+- Labels: bug
+
 ## [2026-11-26] — Tested and merged: #180 Update Telepad on a database from a newer Telepad, compatible newer schemas
 - Issue #180 addressed on Windows: `store::NewerSchema` error (also preference.db, history.db, update.db), read-only check before opening for writing, `schema_meta.min_compatible` written on open (telepad.db minimum 5: schema 6 is additive), compatible newer files open without migrating or rewriting the version, status-bar note; fatal screen with Update Telepad (default release source, SHA-256 check, Restart now), Open the database folder, Copy the message; `telepad-check` prints the same advice; Replace import deletes only hosts missing from the import (kept hosts never cascade Portainers / unknown tables)
 - Files: telepad-core `store.rs`, `history.rs`, `prefs.rs`, `strategy.rs`, `lib.rs`; telepad-app `msg.rs`, `state.rs`, `update.rs`, `tests.rs`; telepad-gui `views/mod.rs`, `views/panels.rs`, `runtime.rs`; telepad-check; manual

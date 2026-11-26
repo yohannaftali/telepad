@@ -1523,11 +1523,11 @@ fn mark_style(m: Diff, side: Side) -> (&'static str, Color32) {
         (Diff::OnlyLeft, Side::Local) | (Diff::OnlyRight, Side::Remote)
     );
     match m {
-        Diff::Same => (EQUALS, Color32::GRAY),
+        Diff::Same => (EQUALS, crate::widgets::pal().grey),
         _ if only_here => (PLUS, green()),
         _ if newer_here => (CARET_UP, Color32::from_rgb(70, 140, 230)),
         Diff::Different => (NOT_EQUALS, usage_color(80.0)),
-        _ => (CARET_DOWN, Color32::GRAY),
+        _ => (CARET_DOWN, crate::widgets::pal().grey),
     }
 }
 

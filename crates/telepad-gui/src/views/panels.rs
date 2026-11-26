@@ -59,6 +59,10 @@ fn hosts_menu(ui: &mut egui::Ui, theme: ThemePref, out: &mut Vec<Msg>) {
                 }
             }
         });
+        // Editor colour scheme (#183).
+        ui.menu_button(il(icons::PALETTE, "Editor colours"), |ui| {
+            super::text_editor::scheme_list(ui, crate::editor_theme::chosen_key(), out);
+        });
         ui.separator();
         if ui
             .button(il(icons::CLOCK, "Update Strategy…"))

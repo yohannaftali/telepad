@@ -2,7 +2,7 @@
 //! (compose project). A stack deployed on several hosts shows once, with one
 //! block per host for its compose / Portainer controls.
 
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use telepad_app::{Model, Msg, StackRow, docker_stacks};
 use telepad_core::model::Container;
 
@@ -76,7 +76,7 @@ fn stack(
     let color = if running == total {
         usage_color(0.0)
     } else if running == 0 {
-        Color32::GRAY
+        crate::widgets::pal().grey
     } else {
         usage_color(80.0)
     };

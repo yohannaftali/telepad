@@ -145,6 +145,8 @@ pub struct UiPrefs {
     /// Inner windows of the workspace (#77), as written by the app's
     /// `Workspace::save`; empty = default layout.
     pub workspace: String,
+    /// Editor colour scheme (#183) by its key; empty = follow the app theme.
+    pub editor_scheme: String,
 }
 
 impl Default for UiPrefs {
@@ -156,6 +158,7 @@ impl Default for UiPrefs {
             theme: ThemePref::System,
             sidebar_collapsed: false,
             workspace: String::new(),
+            editor_scheme: String::new(),
         }
     }
 }
@@ -603,6 +606,7 @@ PRAGMA user_version = {SCHEMA_VERSION};"
                 .map_or(d.theme, |v| ThemePref::parse(&v)),
             sidebar_collapsed: flag("ui_sidebar_collapsed", d.sidebar_collapsed)?,
             workspace: self.setting("ui_workspace")?.unwrap_or_default(),
+            editor_scheme: self.setting("ui_editor_scheme")?.unwrap_or_default(),
         })
     }
 
@@ -615,6 +619,7 @@ PRAGMA user_version = {SCHEMA_VERSION};"
             ("ui_theme", p.theme.as_str()),
             ("ui_sidebar_collapsed", flag(p.sidebar_collapsed)),
             ("ui_workspace", p.workspace.as_str()),
+            ("ui_editor_scheme", p.editor_scheme.as_str()),
         ];
         let tx = self.conn.unchecked_transaction()?;
         for (k, v) in rows {
@@ -1923,6 +1928,7 @@ mod tests {
             theme: ThemePref::Light,
             sidebar_collapsed: true,
             workspace: "0,0,700,500|0|0|overview|overview;docker".into(),
+            editor_scheme: "solarized-dark".into(),
         };
         s.set_ui_prefs(&p).unwrap();
         assert_eq!(s.ui_prefs().unwrap(), p);

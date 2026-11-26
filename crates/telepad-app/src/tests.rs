@@ -1269,6 +1269,14 @@ fn theme_choice_is_saved_once_per_change() {
     assert!(matches!(&fx[..], [Effect::SaveUiPrefs(p)] if p.theme == ThemePref::Light));
     assert_eq!(ThemePref::parse("dark"), ThemePref::Dark);
     assert_eq!(ThemePref::parse("bogus"), ThemePref::System);
+    // The editor colour scheme (#183): follows the app theme by default,
+    // saved with the other view settings when changed.
+    assert_eq!(s.drafts.editor_scheme, "");
+    let fx = update(&mut s, Msg::SetEditorScheme("monokai".into()), t0);
+    assert!(
+        matches!(&fx[..], [Effect::SaveUiPrefs(p)] if p.editor_scheme == "monokai" && p.theme == ThemePref::Light)
+    );
+    assert!(update(&mut s, Msg::SetEditorScheme("monokai".into()), t0).is_empty());
 }
 
 #[test]

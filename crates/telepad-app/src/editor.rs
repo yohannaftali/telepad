@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use telepad_core::files::edit::{SaveError, Stamp};
 use telepad_core::files::syntax::Lang;
-use telepad_core::files::text::{self, Doc, FindOpts, MAX_EDIT};
+use telepad_core::files::text::{self, Doc, FindOpts, Indent, MAX_EDIT, convert_indent};
 use telepad_core::files::{Kind, local_join, sftp};
 
 use crate::files::{FileDraft, FileSession, FmEffect, Mode, Side, Status};
@@ -41,6 +41,8 @@ pub struct EdTab {
     pub path: String,
     pub name: String,
     pub lang: Lang,
+    /// What Tab inserts (#182): detected on load, changed from the status bar.
+    pub indent: Indent,
     pub state: TabState,
     pub crlf: bool,
     pub mixed: bool,
@@ -179,6 +181,15 @@ pub enum EdMsg {
     /// The editor window's close button.
     CloseWindow,
     SetLang(TabId, Lang),
+    /// Indent using tabs / spaces of a size (#182): only what Tab inserts.
+    SetIndent(TabId, Indent),
+    /// Rewrite the indentation of the text (only the lines of `sel` when
+    /// given) to `to` (#182). Not saved until Save.
+    ConvertIndent {
+        tab: TabId,
+        to: Indent,
+        sel: Option<std::ops::Range<usize>>,
+    },
     /// Leave the side-by-side compare (#131); both tabs stay open.
     EndCompare,
 }
@@ -241,6 +252,7 @@ pub(crate) fn update(
                 id: tab,
                 side,
                 lang: Lang::detect(&path, ""),
+                indent: Indent::default(),
                 path,
                 name,
                 state,
@@ -279,6 +291,7 @@ pub(crate) fn update(
                 id: tab,
                 side,
                 lang: Lang::detect(&path, ""),
+                indent: Indent::default(),
                 path,
                 name,
                 state: TabState::Loading,
@@ -305,6 +318,7 @@ pub(crate) fn update(
                         t.lang = Lang::detect(&t.path, doc.text.lines().next().unwrap_or(""));
                     }
                     t.state = TabState::Ready;
+                    t.indent = Indent::detect(&doc.text);
                     t.crlf = doc.crlf;
                     t.mixed = doc.mixed;
                     t.bom = doc.bom;
@@ -471,8 +485,30 @@ pub(crate) fn update(
                 t.lang = lang;
             }
         }
+        EdMsg::SetIndent(tab, to) => {
+            if let Some(t) = e.tab_mut(tab)
+                && indent_allowed(t.lang, to)
+            {
+                t.indent = to;
+            }
+        }
+        EdMsg::ConvertIndent { tab, to, sel } => {
+            if let Some(t) = e.tab_mut(tab)
+                && t.state == TabState::Ready
+                && indent_allowed(t.lang, to)
+                && let Some(text) = dr.texts.get_mut(&tab)
+            {
+                *text = convert_indent(text, sel, t.indent, to);
+                t.indent = to;
+            }
+        }
     }
     false
+}
+
+/// Tabs are not valid YAML indentation (#182).
+pub fn indent_allowed(lang: Lang, to: Indent) -> bool {
+    !(to.tabs && lang == Lang::Yaml)
 }
 
 /// Write the tab's text (`check`: only if the file is still as loaded).

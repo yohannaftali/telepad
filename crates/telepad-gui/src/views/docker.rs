@@ -308,7 +308,7 @@ pub fn docker_stacks(
         let color = if running == containers.len() {
             usage_color(0.0)
         } else if running == 0 {
-            Color32::GRAY
+            crate::widgets::pal().grey
         } else {
             usage_color(80.0)
         };
@@ -419,7 +419,7 @@ pub fn container_table(
                     let dot = if c.running() {
                         usage_color(0.0)
                     } else {
-                        Color32::GRAY
+                        crate::widgets::pal().grey
                     };
                     let (rect, _) =
                         ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());

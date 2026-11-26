@@ -12,15 +12,16 @@ use eframe::egui::{
     self, Color32, Key, KeyboardShortcut, Modifiers, RichText,
     text::{CCursor, CCursorRange, LayoutJob, TextFormat},
 };
-use telepad_app::editor::{Answer, Bar, EdDraft, EdMsg, EdTab, TabState, Unsaved};
+use telepad_app::editor::{Answer, Bar, EdDraft, EdMsg, EdTab, TabState, Unsaved, indent_allowed};
 use telepad_app::files::{FileSession, FmMsg, Side};
 use telepad_app::workspace::{Win, WsMsg};
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::db::human_size;
 use telepad_core::files::syntax::{self, Lang, Tok};
-use telepad_core::files::text::{self, FindOpts};
+use telepad_core::files::text::{self, FindOpts, Indent};
 use telepad_core::files::time_text;
 
+use crate::editor_theme;
 use crate::icons::{self, label as il};
 use crate::widgets::{Act, act_text, usage_color};
 
@@ -274,7 +275,7 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
         }
     });
     egui::Panel::bottom(("ed-status", id)).show(ui, |ui| status(ui, s, t, dr, out));
-    let fill = ui.visuals().extreme_bg_color;
+    let fill = editor_theme::current(ui.visuals().dark_mode).bg;
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(fill))
         .show(ui, |ui| match &t.state {
@@ -394,7 +395,7 @@ fn compare_view(
     let (last, force): Sync = ui.ctx().data(|m| m.get_temp(key)).unwrap_or_default();
     let mut now = [egui::Vec2::ZERO; 2];
     let mut row_h = 14.0f32;
-    let fill = ui.visuals().extreme_bg_color;
+    let fill = editor_theme::current(ui.visuals().dark_mode).bg;
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(fill))
         .show(ui, |ui| {
@@ -933,24 +934,28 @@ fn status(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, dr: &EdDraft, out: &mut
                 ));
             }
             ui.separator();
-            egui::ComboBox::from_id_salt(("ed-lang", id, t.id))
-                .selected_text(t.lang.name())
-                .show_ui(ui, |ui| {
-                    for l in Lang::ALL {
-                        if ui.selectable_label(l == t.lang, l.name()).clicked() {
-                            send(out, id, EdMsg::SetLang(t.id, l));
-                        }
-                    }
-                });
+            scheme_menu(ui, out);
             ui.separator();
-            let unit = text::indent_unit(txt);
-            ui.label(if unit == "\t" {
-                "Tab".to_string()
-            } else {
-                format!("Spaces: {}", unit.len())
-            });
+            let detected = Lang::detect(&t.path, txt.lines().next().unwrap_or(""));
+            if let Some(l) = lang_menu(ui, ("ed-lang", id, t.id), t.lang, detected) {
+                send(out, id, EdMsg::SetLang(t.id, l));
+            }
             ui.separator();
             let cur = cursor_of(ui.ctx(), id, t.id).unwrap_or(0..0);
+            match indent_menu(ui, t.indent, t.lang, !cur.is_empty()) {
+                Some(IndentPick::Use(to)) => send(out, id, EdMsg::SetIndent(t.id, to)),
+                Some(IndentPick::Convert(to)) => send(
+                    out,
+                    id,
+                    EdMsg::ConvertIndent {
+                        tab: t.id,
+                        to,
+                        sel: (!cur.is_empty()).then(|| cur.clone()),
+                    },
+                ),
+                None => {}
+            }
+            ui.separator();
             let (l, c) = text::line_col(txt, cur.end);
             let sel = if cur.is_empty() {
                 String::new()
@@ -962,32 +967,156 @@ fn status(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, dr: &EdDraft, out: &mut
     });
 }
 
-fn colour(t: Tok, dark: bool, plain: Color32) -> Color32 {
-    let rgb = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
-    // VS Code's Dark+ / Light+ colours.
-    match (t, dark) {
-        (Tok::Plain, _) => plain,
-        (Tok::Comment, true) => rgb(0x6A9955),
-        (Tok::Comment, false) => rgb(0x008000),
-        (Tok::Str, true) => rgb(0xCE9178),
-        (Tok::Str, false) => rgb(0xA31515),
-        (Tok::Num, true) => rgb(0xB5CEA8),
-        (Tok::Num, false) => rgb(0x098658),
-        (Tok::Keyword, true) => rgb(0x569CD6),
-        (Tok::Keyword, false) => rgb(0x0000FF),
-        (Tok::Key, true) => rgb(0x9CDCFE),
-        (Tok::Key, false) => rgb(0x0451A5),
-        (Tok::Heading, true) => rgb(0x4EC9B0),
-        (Tok::Heading, false) => rgb(0x800000),
-        (Tok::Var, true) => rgb(0x4FC1FF),
-        (Tok::Var, false) => rgb(0x001080),
+/// The language used for syntax colours (#183): every language, and Auto
+/// detect (from the name / first line). Only the colours change, not the file.
+fn lang_menu(
+    ui: &mut egui::Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    cur: Lang,
+    detected: Lang,
+) -> Option<Lang> {
+    let mut pick = None;
+    egui::ComboBox::from_id_salt(salt)
+        .selected_text(cur.name())
+        .show_ui(ui, |ui| {
+            if ui
+                .selectable_label(false, format!("Auto detect ({})", detected.name()))
+                .clicked()
+            {
+                pick = Some(detected);
+            }
+            ui.separator();
+            for l in Lang::ALL {
+                if ui.selectable_label(l == cur, l.name()).clicked() {
+                    pick = Some(l);
+                }
+            }
+        })
+        .response
+        .on_hover_text("Syntax highlighting: the language of this text (the file is not changed)");
+    pick
+}
+
+/// The editor colour scheme (#183), for every editor; saved.
+pub fn scheme_menu(ui: &mut egui::Ui, out: &mut Vec<Msg>) {
+    let chosen = editor_theme::chosen_key();
+    ui.menu_button(il(icons::PALETTE, editor_theme::name_of(chosen)), |ui| {
+        scheme_list(ui, chosen, out);
+    })
+    .response
+    .on_hover_text("Editor colour scheme");
+}
+
+/// The schemes as selectable rows (also in ☰ ▸ Settings).
+pub fn scheme_list(ui: &mut egui::Ui, chosen: &str, out: &mut Vec<Msg>) {
+    if ui
+        .selectable_label(chosen.is_empty(), "Follow app theme (Dark / Light Modern)")
+        .clicked()
+    {
+        out.push(Msg::SetEditorScheme(String::new()));
+        ui.close();
     }
+    ui.separator();
+    for s in &editor_theme::SCHEMES {
+        let swatch = RichText::new("■ ").color(s.keyword).background_color(s.bg);
+        let row = ui.horizontal(|ui| {
+            ui.label(swatch);
+            ui.selectable_label(chosen == s.key, s.name)
+        });
+        if row.inner.clicked() {
+            out.push(Msg::SetEditorScheme(s.key.to_string()));
+            ui.close();
+        }
+    }
+}
+
+/// A choice in the indentation menu (#182).
+enum IndentPick {
+    /// Only what Tab inserts.
+    Use(Indent),
+    /// Rewrite the text's indentation.
+    Convert(Indent),
+}
+
+/// The "Spaces: 4" status item and its menu (#182).
+fn indent_menu(ui: &mut egui::Ui, cur: Indent, lang: Lang, sel: bool) -> Option<IndentPick> {
+    let mut pick = None;
+    let no_tabs = !indent_allowed(lang, Indent { tabs: true, ..cur });
+    ui.menu_button(cur.label(), |ui| {
+        let what = if sel {
+            "the selected lines"
+        } else {
+            "the file"
+        };
+        ui.label(RichText::new("Tab inserts").weak());
+        if ui.radio(!cur.tabs, "Indent using spaces").clicked() {
+            pick = Some(IndentPick::Use(Indent { tabs: false, ..cur }));
+        }
+        let tabs = ui.add_enabled(
+            !no_tabs,
+            egui::RadioButton::new(cur.tabs, "Indent using tabs"),
+        );
+        let tabs = if no_tabs {
+            tabs.on_disabled_hover_text("Tabs are not valid YAML indentation")
+        } else {
+            tabs
+        };
+        if tabs.clicked() {
+            pick = Some(IndentPick::Use(Indent { tabs: true, ..cur }));
+        }
+        ui.horizontal(|ui| {
+            ui.label(if cur.tabs { "Tab size" } else { "Size" });
+            for n in Indent::SIZES {
+                if ui.selectable_label(cur.size == n, n.to_string()).clicked() {
+                    pick = Some(IndentPick::Use(Indent { size: n, ..cur }));
+                }
+            }
+        });
+        ui.separator();
+        ui.label(RichText::new(format!("Change {what} (not saved until Save)")).weak());
+        if ui
+            .add_enabled(cur.tabs, egui::Button::new("Convert indentation to spaces"))
+            .clicked()
+        {
+            pick = Some(IndentPick::Convert(Indent { tabs: false, ..cur }));
+        }
+        let to_tabs = ui.add_enabled(
+            !cur.tabs && !no_tabs,
+            egui::Button::new("Convert indentation to tabs"),
+        );
+        if no_tabs {
+            to_tabs
+                .clone()
+                .on_disabled_hover_text("Tabs are not valid YAML indentation");
+        }
+        if to_tabs.clicked() {
+            pick = Some(IndentPick::Convert(Indent { tabs: true, ..cur }));
+        }
+        ui.horizontal(|ui| {
+            ui.label("Re-indent to");
+            for n in Indent::SIZES {
+                if ui
+                    .add_enabled(n != cur.size, egui::Button::new(n.to_string()))
+                    .on_hover_text(format!("Each level from {} to {n} columns", cur.size))
+                    .clicked()
+                {
+                    pick = Some(IndentPick::Convert(Indent { size: n, ..cur }));
+                }
+            }
+        });
+        if pick.is_some() {
+            ui.close();
+        }
+    })
+    .response
+    .on_hover_text("Indentation: tabs or spaces, size, convert, re-indent");
+    pick
 }
 
 /// Coloured layout of the text (spans cached while the text is unchanged).
 fn layout(ui: &egui::Ui, txt: &str, lang: Lang, font: &egui::FontId) -> LayoutJob {
-    let dark = ui.visuals().dark_mode;
-    let plain = ui.visuals().text_color();
+    let scheme = editor_theme::current(ui.visuals().dark_mode);
+    let plain = scheme.text;
     let mut job = LayoutJob::default();
     job.wrap.max_width = f32::INFINITY;
     if txt.len() > COLOUR_LIMIT || lang == Lang::Plain {
@@ -1011,7 +1140,7 @@ fn layout(ui: &egui::Ui, txt: &str, lang: Lang, font: &egui::FontId) -> LayoutJo
         job.append(
             &txt[r.clone()],
             0.0,
-            TextFormat::simple(font.clone(), colour(*tok, dark, plain)),
+            TextFormat::simple(font.clone(), scheme.colour(*tok)),
         );
     }
     job
@@ -1060,6 +1189,9 @@ fn code(
 ) -> (egui::Vec2, f32) {
     let eid = edit_id(win, t.id);
     let ctx = ui.ctx().clone();
+    // The editor colour scheme (#183); `ui` is the editor's own frame.
+    let scheme = editor_theme::current(ui.visuals().dark_mode);
+    scheme.apply(ui.visuals_mut());
     let Some(buf) = dr.texts.get_mut(&t.id) else {
         return (egui::Vec2::ZERO, 14.0);
     };
@@ -1073,7 +1205,7 @@ fn code(
             && let Some(r) = st.cursor.char_range()
         {
             let (a, b) = (r.primary.index.0, r.secondary.index.0);
-            let unit = text::indent_unit(buf);
+            let unit = t.indent.unit();
             let (new, sel) = text::indent(buf, a.min(b)..a.max(b), &unit, out);
             *buf = new;
             st.cursor.set_char_range(Some(CCursorRange::two(
@@ -1169,15 +1301,7 @@ fn code(
             }
             if let Some(r) = cur_rect {
                 let line = egui::Rect::from_x_y_ranges(clip.x_range(), r.y_range());
-                shapes.push(egui::Shape::rect_filled(
-                    line,
-                    0.0,
-                    if v.dark_mode {
-                        Color32::from_white_alpha(12)
-                    } else {
-                        Color32::from_black_alpha(14)
-                    },
-                ));
+                shapes.push(egui::Shape::rect_filled(line, 0.0, scheme.current_line));
             }
             if let Some((q, o)) = &find {
                 let m = matches(&ctx, buf.as_str(), q, *o);
@@ -1343,11 +1467,30 @@ pub fn embedded(
     text: &mut String,
     saved: &str,
     editable: bool,
+    out: &mut Vec<Msg>,
 ) {
     const TAB: u64 = 1;
     let slot = egui::Id::unique(("telepad-embedded-ed", win));
     let mut dr: EdDraft = ui.data(|m| m.get_temp(slot)).unwrap_or_default();
     let before = text.clone();
+    // The chosen indentation, with the text it was last shown with: a text
+    // replaced from outside (Reload, another stack) is detected again.
+    let indent_slot = slot.with("indent");
+    let hash = |t: &str| {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        t.hash(&mut h);
+        h.finish()
+    };
+    let indent: Indent = ui
+        .data(|m| m.get_temp::<(Indent, u64)>(indent_slot))
+        .filter(|(_, h)| *h == hash(text))
+        .map_or_else(|| Indent::detect(text), |(i, _)| i);
+    let mut indent_to = indent;
+    // The language for the colours (#183): chosen here, else the caller's.
+    let lang_slot = slot.with("lang");
+    let given = lang;
+    let lang: Lang = ui.data(|m| m.get_temp(lang_slot)).unwrap_or(given);
     dr.texts.insert(TAB, std::mem::take(text));
     let t = EdTab {
         id: TAB,
@@ -1355,6 +1498,7 @@ pub fn embedded(
         path: name.to_string(),
         name: name.to_string(),
         lang,
+        indent,
         state: TabState::Ready,
         crlf: false,
         mixed: false,
@@ -1410,7 +1554,26 @@ pub fn embedded(
     ui.horizontal(|ui| {
         ui.label(RichText::new(il(icons::CODE, name)).monospace().weak());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(lang.name()).weak());
+            if let Some(l) = lang_menu(ui, ("ed-emb-lang", win), lang, given) {
+                ui.data_mut(|m| m.insert_temp(lang_slot, l));
+            }
+            scheme_menu(ui, out);
+            if editable {
+                let sel = cursor_of(ui.ctx(), win, TAB).unwrap_or(0..0);
+                match indent_menu(ui, indent, lang, !sel.is_empty()) {
+                    Some(IndentPick::Use(to)) => {
+                        indent_to = to;
+                    }
+                    Some(IndentPick::Convert(to)) => {
+                        if let Some(txt) = dr.texts.get_mut(&TAB) {
+                            let r = (!sel.is_empty()).then_some(sel);
+                            *txt = text::convert_indent(txt, r, indent, to);
+                        }
+                        indent_to = to;
+                    }
+                    None => {}
+                }
+            }
             if !editable {
                 ui.label(RichText::new("read-only").weak());
             }
@@ -1430,7 +1593,7 @@ pub fn embedded(
     if dr.bar != Bar::None {
         find_bar(ui, win, &t, &mut dr);
     }
-    let fill = ui.visuals().extreme_bg_color;
+    let fill = editor_theme::current(ui.visuals().dark_mode).bg;
     egui::Frame::new().fill(fill).show(ui, |ui| {
         code(ui, win, &t, &mut dr, None, None);
     });
@@ -1438,5 +1601,9 @@ pub fn embedded(
     if !editable {
         *text = before;
     }
-    ui.data_mut(|m| m.insert_temp(slot, dr));
+    let shown = (indent_to, hash(text));
+    ui.data_mut(|m| {
+        m.insert_temp(slot, dr);
+        m.insert_temp(indent_slot, shown);
+    });
 }

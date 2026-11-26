@@ -301,7 +301,9 @@ theme uses a blue-grey (slate) background, sidebar and top bar behind white wind
 border, and blue-grey buttons, input boxes, window title bars and table headers, so every
 layer stands apart (#167); the window in front has a darker blue-grey title bar. The dark
 theme uses dark blue for the title bar of the window in front, the table headers and the
-selection (#167).
+selection (#167). Text is near white in the dark theme and near black in the light one;
+secondary text (hints, "updated … ago", notes, status lines) is a lighter / darker grey that
+still meets a 4.5 : 1 contrast on every background (#181).
 
 ## Hosts
 
@@ -1249,9 +1251,30 @@ full path). Opening a file that already has a tab switches to it.
 - **Tabs**: a tab with changes that are not saved shows **●**; **×** (or a middle click,
   or Ctrl+W) closes it.
 - **Status bar**: *Saved* / *Not saved* / *Saving…*, then `Ln 12, Col 5` (and how many
-  characters are selected), the indentation (*Spaces: 2* or *Tab*, from the file), the
-  language, the line endings (**LF** or **CRLF**) and the encoding (**UTF-8**, or **UTF-8 with
-  BOM**).
+  characters are selected), the indentation (*Spaces: 2* or *Tab size: 4*, found in the file),
+  the language, the line endings (**LF** or **CRLF**) and the encoding (**UTF-8**, or **UTF-8
+  with BOM**).
+- **Colour scheme** (#183): the palette button in the status bar (also in the Portainer stack
+  editor's header and ☰ ▸ Settings ▸ **Editor colours**) picks the editor's colours for every
+  editor: **Follow app theme** (the default: Dark Modern in the dark theme, Light Modern in the
+  light one), **Dark Modern**, **Dark (Visual Studio)**, **Light Modern**, **Light (Visual
+  Studio)**, **Monokai**, **Solarized Dark**, **Solarized Light**, **Red**, **Tomorrow Night
+  Blue**, **Quiet Light** or **High Contrast**. It sets the background, text, line numbers,
+  current line, selection, find matches and syntax colours; the choice is saved. Colours that
+  were too faint in the original themes are a little stronger, so text stays readable.
+- **Language** (#183): the language box (YAML, Shell, …) chooses the syntax colours of the tab;
+  **Auto detect** goes back to the language found from the file name and first line. Only the
+  colours change, never the file.
+- **Indentation** (#182): click *Spaces: 4* (also in the Portainer stack editor's header):
+  - **Indent using spaces** / **Indent using tabs** and **Size 2 / 4 / 8** change only what Tab
+    and Shift+Tab insert; the text stays as it is.
+  - **Convert indentation to spaces / to tabs** rewrites the leading whitespace of every line
+    (only the selected lines when text is selected); a rest that is not a whole level (6 spaces
+    at size 4) stays as spaces.
+  - **Re-indent to 2 / 4 / 8** rescales every indentation level (4 → 2 halves it, 2 → 4
+    doubles it); text after the indentation is never touched.
+  - Conversions mark the tab *Not saved* and are undone with Ctrl+Z; nothing is written before
+    Save. YAML files cannot use tabs (not valid YAML), so those choices are off there.
 
 | Key | Does |
 |---|---|

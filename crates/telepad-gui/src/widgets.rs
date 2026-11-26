@@ -70,7 +70,7 @@ pub const DARK: Palette = Palette {
     blue: Color32::from_rgb(0x5a, 0xa2, 0xf0),
     cyan: Color32::from_rgb(0x2c, 0xc0, 0xe8),
     purple: Color32::from_rgb(0xb3, 0x92, 0xec),
-    grey: Color32::from_rgb(0x9a, 0x9a, 0x9a),
+    grey: Color32::from_rgb(0xb4, 0xbc, 0xc8),
     bar: [
         Color32::from_rgb(0xa8, 0x2a, 0x2a),
         Color32::from_rgb(0x8a, 0x50, 0x00),
@@ -105,7 +105,7 @@ pub const LIGHT: Palette = Palette {
     blue: Color32::from_rgb(0x1d, 0x4e, 0xd8),
     cyan: Color32::from_rgb(0x0e, 0x60, 0x7a),
     purple: Color32::from_rgb(0x6d, 0x28, 0xd9),
-    grey: Color32::from_rgb(0x5f, 0x5f, 0x5f),
+    grey: Color32::from_rgb(0x4b, 0x55, 0x63),
     bar: [
         Color32::from_rgb(0xfe, 0xca, 0xca),
         Color32::from_rgb(0xfc, 0xd3, 0x4d),
@@ -155,6 +155,8 @@ pub fn light_visuals() -> egui::Visuals {
     let w = &mut v.widgets;
     w.noninteractive.bg_stroke = egui::Stroke::new(1.0, c(0xbfcadb));
     w.noninteractive.fg_stroke = egui::Stroke::new(1.0, c(0x1e293b));
+    // Secondary ("weak") text near black, not a faded grey (#181).
+    v.weak_text_color = Some(c(LIGHT_WEAK));
     for (st, fill, border, text) in [
         (&mut w.inactive, 0xd5deea, 0x93a3ba, 0x15202f),
         (&mut w.hovered, 0xc3d1e4, 0x64789a, 0x0b1320),
@@ -169,10 +171,21 @@ pub fn light_visuals() -> egui::Visuals {
     v
 }
 
+/// Text colours of the themes (#181): normal and secondary ("weak") text.
+const DARK_TEXT: u32 = 0xdde1e7;
+const DARK_WEAK: u32 = 0xaeb6c2;
+const LIGHT_WEAK: u32 = 0x475569;
+
 /// Telepad's dark theme: egui's own, with a dark blue selection instead of
 /// its teal one (#167), so selected rows and focused titles read navy.
 pub fn dark_visuals() -> egui::Visuals {
     let mut v = egui::Visuals::dark();
+    // egui draws text at grey 140 and weak text at 60 % of it: hard to read.
+    // Near-white text and a light weak grey instead (#181).
+    let c = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
+    v.widgets.noninteractive.fg_stroke.color = c(DARK_TEXT);
+    v.widgets.inactive.fg_stroke.color = c(0xe4e7ec);
+    v.weak_text_color = Some(c(DARK_WEAK));
     v.selection.bg_fill = Color32::from_rgb(0x1e, 0x3f, 0x8a);
     v.selection.stroke = egui::Stroke::new(1.0, Color32::from_rgb(0xe6, 0xee, 0xff));
     v
@@ -1051,7 +1064,37 @@ mod tests {
             assert!(r >= 4.5, "button text contrast {r:.2}");
         }
         assert!(contrast(v.widgets.noninteractive.fg_stroke.color, v.panel_fill) >= 4.5);
-        assert!(contrast(v.weak_text_color(), v.window_fill) >= 3.0);
+    }
+
+    #[test]
+    fn weak_text_is_readable_and_still_secondary() {
+        // #181: WCAG AA (4.5 : 1) on every surface it sits on, and visibly
+        // different from normal text.
+        for (theme, v, p) in [
+            ("dark", dark_visuals(), &DARK),
+            ("light", light_visuals(), &LIGHT),
+        ] {
+            let weak = v.weak_text_color();
+            let surfaces = [
+                ("window", v.window_fill),
+                ("panel", v.panel_fill),
+                ("faint stripe", v.faint_bg_color),
+                ("extreme", v.extreme_bg_color),
+                ("code", v.code_bg_color),
+                ("button", v.widgets.inactive.weak_bg_fill),
+                ("title", p.title[1]),
+            ];
+            for (what, bg) in surfaces {
+                let r = contrast(weak, bg);
+                assert!(r >= 4.5, "{theme} weak text on {what}: {r:.2}");
+                let r = contrast(v.text_color(), bg);
+                assert!(r >= 7.0, "{theme} text on {what}: {r:.2}");
+                let r = contrast(p.grey, bg);
+                assert!(r >= 4.5, "{theme} grey on {what}: {r:.2}");
+            }
+            let r = contrast(v.text_color(), weak);
+            assert!(r >= 1.25, "{theme} weak too close to normal text: {r:.2}");
+        }
     }
 
     #[test]
