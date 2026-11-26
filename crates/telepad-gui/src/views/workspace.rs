@@ -803,14 +803,13 @@ fn title_bar(
     {
         out.push(close_msg(active));
     }
-    let (max_icon, max_tip) = if g.maximized {
-        (icons::CORNERS_IN, "Restore size")
+    let max_icon = if g.maximized {
+        icons::CORNERS_IN
     } else {
-        (icons::CORNERS_OUT, "Maximize")
+        icons::CORNERS_OUT
     };
-    let max = ui
-        .add(egui::Button::new(max_icon).frame(false))
-        .on_hover_text(format!("{max_tip} · hover for snap layouts"));
+    // No tooltip: the snap layouts show under it on hover (#168).
+    let max = ui.add(egui::Button::new(max_icon).frame(false));
     // Snap layouts on the maximize button (#168, Windows 11 style).
     if let Some(z) = layout_flyout(&ctx, live_id, &max) {
         let from = g.rect.unwrap_or_else(|| rel(win_rect, area));
