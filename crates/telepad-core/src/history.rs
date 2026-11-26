@@ -12,6 +12,7 @@ use crate::store::StoreError;
 
 pub const HISTORY_FILE: &str = "history.db";
 const HISTORY_VERSION: i32 = 1;
+const MIN_COMPATIBLE_HISTORY: i32 = 1;
 /// Kept at most this long …
 pub const KEEP_DAYS: i64 = 90;
 /// … and at most this many entries.
@@ -125,6 +126,7 @@ pub fn history_path(db: &Path, cli: Option<&str>) -> PathBuf {
 pub struct History {
     conn: Connection,
     permission_warning: Option<String>,
+    newer_schema: Option<i32>,
 }
 
 impl History {
@@ -135,14 +137,27 @@ impl History {
         {
             std::fs::create_dir_all(dir)?;
         }
+        let check = crate::store::check_newer_schema(path, "version", HISTORY_VERSION)?;
         let conn = Connection::open(path)?;
         let permission_warning = crate::platform::restrict_db_files(path).err();
+        if let crate::store::SchemaCheck::CompatibleNewer(found) = check {
+            let h = History {
+                conn,
+                permission_warning,
+                newer_schema: Some(found),
+            };
+            h.trim(now)?;
+            return Ok(h);
+        }
         let v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if v > HISTORY_VERSION {
-            return Err(StoreError::Invalid(format!(
-                "{} was written by a newer Telepad (version {v})",
-                path.display()
-            )));
+            return Err(StoreError::NewerSchema(crate::store::NewerSchema {
+                path: path.to_path_buf(),
+                kind: "version",
+                found: v,
+                supported: HISTORY_VERSION,
+                min_compatible: None,
+            }));
         }
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS entries (
@@ -167,12 +182,18 @@ impl History {
              CREATE INDEX IF NOT EXISTS entries_target ON entries(target);",
         )?;
         conn.pragma_update(None, "user_version", HISTORY_VERSION)?;
+        crate::store::write_min_schema(&conn, MIN_COMPATIBLE_HISTORY)?;
         let h = History {
             conn,
             permission_warning,
+            newer_schema: None,
         };
         h.trim(now)?;
         Ok(h)
+    }
+
+    pub fn newer_schema(&self) -> Option<i32> {
+        self.newer_schema
     }
 
     /// Why the file stays readable by others (#110), if it does.
@@ -526,8 +547,24 @@ mod tests {
             let c = Connection::open(&p).unwrap();
             c.pragma_update(None, "user_version", 99).unwrap();
         }
-        assert!(History::open(&p, 1).is_err());
+        let err = History::open(&p, 1).err().unwrap();
+        assert!(matches!(err, StoreError::NewerSchema(_)), "{err:?}");
         let _ = std::fs::remove_file(&p);
+
+        let compat = temp("compat");
+        {
+            let h = History::open(&compat, 1).unwrap();
+            h.conn.pragma_update(None, "user_version", 3).unwrap();
+        }
+        let h = History::open(&compat, 1).unwrap();
+        assert_eq!(h.newer_schema(), Some(3));
+        let v: i32 = h
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 3);
+        drop(h);
+        let _ = std::fs::remove_file(&compat);
     }
 
     #[test]

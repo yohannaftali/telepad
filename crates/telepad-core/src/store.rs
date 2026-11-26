@@ -10,7 +10,51 @@ use crate::config::{self, Access, HostEntry, HostSet, Inventory, SetKind};
 use crate::update::UpdateConfig;
 
 const SCHEMA_VERSION: i32 = 6;
+/// Oldest schema version that can safely open a database created/upgraded by
+/// this build (#180). Schema 6 (`portainers`) is additive, so v5 builds
+/// compatible with this mechanism can open v6 files without losing data.
+const MIN_COMPATIBLE_SCHEMA: i32 = 5;
 const JSON_FORMAT: &str = "telepad/hosts";
+
+/// A SQLite file written by a newer Telepad whose minimum compatible schema
+/// exceeds what this build supports (#180).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewerSchema {
+    pub path: PathBuf,
+    pub kind: &'static str,
+    pub found: i32,
+    pub supported: i32,
+    pub min_compatible: Option<i32>,
+}
+
+impl std::fmt::Display for NewerSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} was written by a newer Telepad ({} {})",
+            self.path.display(),
+            self.kind,
+            self.found
+        )
+    }
+}
+
+impl NewerSchema {
+    /// Plain explanation shown on the fatal screen and printed by `telepad-check`.
+    pub fn explanation(&self) -> String {
+        format!(
+            "{} was upgraded by a newer Telepad ({} {}). This copy is Telepad {} \
+             (supports up to {} {}) and cannot open it. Your data is unchanged — \
+             update Telepad to open it.",
+            self.path.display(),
+            self.kind,
+            self.found,
+            crate::update::CURRENT_VERSION,
+            self.kind,
+            self.supported
+        )
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -20,6 +64,8 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
     #[error("JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("{} was written by a newer Telepad ({} {})", .0.path.display(), .0.kind, .0.found)]
+    NewerSchema(NewerSchema),
     #[error("{0}")]
     Invalid(String),
 }
@@ -28,6 +74,7 @@ pub struct Store {
     conn: Connection,
     path: PathBuf,
     permission_warning: Option<String>,
+    newer_schema: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,10 +220,99 @@ struct JsonFile {
     inventory: Inventory,
 }
 
+/// Result of checking an existing database before opening it for writing (#180).
+pub(crate) enum SchemaCheck {
+    /// At or below `supported` (or a new file): normal open / migration applies.
+    Normal,
+    /// Newer than `supported`, but `min_compatible <= supported`: open without
+    /// migrating or overwriting `user_version` / `min_compatible`.
+    CompatibleNewer(i32),
+}
+
+fn read_min_schema(conn: &Connection) -> Option<i32> {
+    conn.query_row(
+        "SELECT value FROM schema_meta WHERE key = 'min_compatible'",
+        [],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|s| s.trim().parse::<i32>().ok())
+}
+
+pub(crate) fn write_min_schema(conn: &Connection, min: i32) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_meta (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );",
+    )?;
+    conn.execute(
+        "INSERT OR REPLACE INTO schema_meta(key, value) VALUES('min_compatible', ?1)",
+        params![min.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Peek at an existing SQLite file read-only first so an incompatible newer
+/// database is never opened for writing, migrated down, or touched (#180).
+pub(crate) fn check_newer_schema(
+    path: &Path,
+    kind: &'static str,
+    supported: i32,
+) -> Result<SchemaCheck, StoreError> {
+    if path == Path::new(":memory:")
+        || !path.is_file()
+        || std::fs::metadata(path).is_ok_and(|m| m.len() == 0)
+    {
+        return Ok(SchemaCheck::Normal);
+    }
+    let flags =
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let Ok(ro) = Connection::open_with_flags(path, flags) else {
+        return Ok(SchemaCheck::Normal);
+    };
+    let v: i32 = ro.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if v <= supported {
+        return Ok(SchemaCheck::Normal);
+    }
+    let min_compatible = read_min_schema(&ro);
+    if min_compatible.is_some_and(|min| supported >= min) {
+        Ok(SchemaCheck::CompatibleNewer(v))
+    } else {
+        Err(StoreError::NewerSchema(NewerSchema {
+            path: path.to_path_buf(),
+            kind,
+            found: v,
+            supported,
+            min_compatible,
+        }))
+    }
+}
+
 impl Store {
     pub fn open(path: &Path) -> Result<Self, StoreError> {
+        let check = check_newer_schema(path, "schema", SCHEMA_VERSION)?;
         let conn = Connection::open(path)?;
         let permission_warning = crate::platform::restrict_db_files(path).err();
+        if let SchemaCheck::CompatibleNewer(found) = check {
+            conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            return Ok(Self {
+                conn,
+                path: path.to_path_buf(),
+                permission_warning,
+                newer_schema: Some(found),
+            });
+        }
+        let mut v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if v > SCHEMA_VERSION {
+            return Err(StoreError::NewerSchema(NewerSchema {
+                path: path.to_path_buf(),
+                kind: "schema",
+                found: v,
+                supported: SCHEMA_VERSION,
+                min_compatible: read_min_schema(&conn),
+            }));
+        }
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA foreign_keys = ON;
@@ -202,7 +338,6 @@ impl Store {
                  value TEXT NOT NULL
              );",
         )?;
-        let mut v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if v == 1 {
             // v2: hosts.access ('ssh' | 'rdp')
             conn.execute_batch(
@@ -276,16 +411,27 @@ COMMIT;"
 PRAGMA user_version = {SCHEMA_VERSION};"
             ))?;
         } else if v > SCHEMA_VERSION {
-            return Err(StoreError::Invalid(format!(
-                "{} was written by a newer Telepad (schema {v})",
-                path.display()
-            )));
+            return Err(StoreError::NewerSchema(NewerSchema {
+                path: path.to_path_buf(),
+                kind: "schema",
+                found: v,
+                supported: SCHEMA_VERSION,
+                min_compatible: read_min_schema(&conn),
+            }));
         }
+        write_min_schema(&conn, MIN_COMPATIBLE_SCHEMA)?;
         Ok(Self {
             conn,
             path: path.to_path_buf(),
             permission_warning,
+            newer_schema: None,
         })
+    }
+
+    /// Set when the database has a newer schema than this build but declared a
+    /// compatible minimum schema (#180).
+    pub fn newer_schema(&self) -> Option<i32> {
+        self.newer_schema
     }
 
     /// Why the database file stays readable by others (#110), if it does.
@@ -976,24 +1122,50 @@ PRAGMA user_version = {SCHEMA_VERSION};"
         let summary = self.preview_import(inv, mode)?;
         let tx = self.conn.transaction()?;
         if mode == ImportMode::Replace {
-            tx.execute("DELETE FROM hosts", [])?;
+            // Delete only hosts absent from the import so kept hosts never
+            // trigger ON DELETE CASCADE on Portainers / unknown tables (#180).
+            let existing_aliases: Vec<String> = {
+                let mut st = tx.prepare("SELECT alias FROM hosts")?;
+                st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+            };
+            for alias in existing_aliases {
+                if !inv.hosts.iter().any(|h| h.alias == alias) {
+                    tx.execute("DELETE FROM hosts WHERE alias = ?1", params![alias])?;
+                }
+            }
         }
         // New hosts go after the existing ones, in imported order; an updated
-        // host keeps its place (the conflict update leaves sort_order alone).
-        let last: i64 =
+        // host keeps its place in Merge mode, or takes the imported order in Replace.
+        let last: i64 = if mode == ImportMode::Replace {
+            0
+        } else {
             tx.query_row("SELECT COALESCE(MAX(sort_order), 0) FROM hosts", [], |r| {
                 r.get(0)
-            })?;
+            })?
+        };
+        let upsert_sql = if mode == ImportMode::Replace {
+            "INSERT INTO hosts(alias, hostname, user, port, identity_file, description, options,
+             monitored, sort_order, access, grp, cluster)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(alias) DO UPDATE SET hostname=excluded.hostname, user=excluded.user,
+               port=excluded.port, identity_file=excluded.identity_file,
+               description=excluded.description, options=excluded.options,
+               monitored=excluded.monitored, sort_order=excluded.sort_order,
+               access=excluded.access, grp=excluded.grp, cluster=excluded.cluster,
+               updated_at=CURRENT_TIMESTAMP"
+        } else {
+            "INSERT INTO hosts(alias, hostname, user, port, identity_file, description, options,
+             monitored, sort_order, access, grp, cluster)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(alias) DO UPDATE SET hostname=excluded.hostname, user=excluded.user,
+               port=excluded.port, identity_file=excluded.identity_file,
+               description=excluded.description, options=excluded.options,
+               monitored=excluded.monitored, access=excluded.access,
+               grp=excluded.grp, cluster=excluded.cluster, updated_at=CURRENT_TIMESTAMP"
+        };
         for (i, h) in inv.hosts.iter().enumerate() {
             tx.execute(
-                "INSERT INTO hosts(alias, hostname, user, port, identity_file, description, options,
-                 monitored, sort_order, access, grp, cluster)
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                 ON CONFLICT(alias) DO UPDATE SET hostname=excluded.hostname, user=excluded.user,
-                   port=excluded.port, identity_file=excluded.identity_file,
-                   description=excluded.description, options=excluded.options,
-                   monitored=excluded.monitored, access=excluded.access,
-                   grp=excluded.grp, cluster=excluded.cluster, updated_at=CURRENT_TIMESTAMP",
+                upsert_sql,
                 params![
                     h.alias,
                     h.hostname,
@@ -2024,5 +2196,89 @@ mod tests {
             .unwrap();
         s.delete_host(id).unwrap();
         assert!(s.portainers().unwrap().is_empty());
+    }
+
+    #[test]
+    fn compatible_and_incompatible_newer_schemas() {
+        let dir = std::env::temp_dir().join(format!("telepad-schema-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let compat = dir.join("compat.db");
+        let incompat = dir.join("incompat.db");
+        for p in [&compat, &incompat] {
+            for ext in ["", "-wal", "-shm"] {
+                let _ = std::fs::remove_file(format!("{}{ext}", p.display()));
+            }
+        }
+
+        // Compatible newer schema (e.g. schema 7 with min_compatible = 6) + extra table.
+        {
+            let mut s = Store::open(&compat).unwrap();
+            s.import(&sample(), ImportMode::Merge).unwrap();
+            s.save_portainer(
+                None,
+                &crate::portainer::Portainer {
+                    name: "Main".into(),
+                    alias: "web".into(),
+                    port: 9443,
+                    https: true,
+                    fingerprint: "AA".into(),
+                },
+            )
+            .unwrap();
+            s.conn
+                .execute_batch(
+                    "PRAGMA journal_mode = DELETE;
+                     CREATE TABLE future_extras (id INTEGER PRIMARY KEY, note TEXT);
+                     INSERT INTO future_extras(note) VALUES('keep me');
+                     PRAGMA user_version = 7;",
+                )
+                .unwrap();
+            write_min_schema(&s.conn, SCHEMA_VERSION).unwrap();
+        }
+        let mut s = Store::open(&compat).unwrap();
+        assert_eq!(s.newer_schema(), Some(7));
+        let v: i32 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 7, "schema version untouched on compatible open");
+        assert_eq!(
+            read_min_schema(&s.conn),
+            Some(SCHEMA_VERSION),
+            "min_compatible untouched"
+        );
+        // Replace import without portainers keeps existing host's portainer and unknown table.
+        let mut only_web = Inventory {
+            hosts: vec![HostEntry::new("web")],
+            ..Default::default()
+        };
+        only_web.hosts[0].hostname = "10.0.0.22".into();
+        s.import(&only_web, ImportMode::Replace).unwrap();
+        assert_eq!(s.portainers().unwrap().len(), 1);
+        let kept: String = s
+            .conn
+            .query_row("SELECT note FROM future_extras", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, "keep me");
+        drop(s);
+
+        // Incompatible newer schema (min_compatible = 99) is never opened for writing.
+        {
+            let s = Store::open(&incompat).unwrap();
+            s.conn
+                .execute_batch("PRAGMA journal_mode = DELETE; PRAGMA user_version = 99;")
+                .unwrap();
+            write_min_schema(&s.conn, 99).unwrap();
+        }
+        let err = Store::open(&incompat).err().unwrap();
+        assert!(matches!(
+            err,
+            StoreError::NewerSchema(ref n) if n.found == 99 && n.supported == SCHEMA_VERSION && n.min_compatible == Some(99)
+        ));
+        assert!(
+            !incompat.with_file_name("incompat.db-wal").exists(),
+            "incompatible DB never opened for writing"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

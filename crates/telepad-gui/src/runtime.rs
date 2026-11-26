@@ -221,6 +221,7 @@ impl Runtime {
                     prefs: rt.open_prefs(ws.store.path(), cli_prefs, &ws.store),
                     strategy: rt.open_strategy(ws.store.path(), cli_update_db),
                 };
+                let newer_schema = ws.store.newer_schema();
                 let history_error = rt.open_history(ws.store.path(), cli_history).err();
                 // Database files others can read (#110): said once, not fatal.
                 let mut notes: Vec<String> = ws
@@ -233,6 +234,9 @@ impl Runtime {
                 rt.ssh = Some(ssh);
                 rt.ws = Some(ws);
                 rt.dispatch(state, started);
+                if let Some(v) = newer_schema {
+                    rt.dispatch(state, Msg::NewerDb(v));
+                }
                 if let Some(e) = history_error {
                     rt.dispatch(state, Msg::Notice(format!("History is not kept: {e}")));
                 }
@@ -243,7 +247,8 @@ impl Runtime {
                     rt.dispatch(state, Msg::SelectAlias(alias));
                 }
             }
-            Err(e) => rt.dispatch(state, Msg::Fatal(e)),
+            Err(telepad_core::OpenError::NewerSchema(n)) => rt.dispatch(state, Msg::FatalNewer(n)),
+            Err(telepad_core::OpenError::Other(e)) => rt.dispatch(state, Msg::Fatal(e)),
         }
         rt
     }
@@ -664,6 +669,7 @@ impl Runtime {
                 None
             }
             Effect::OpenUrl(url) => platform::open_url(&url).err().map(Msg::Notice),
+            Effect::OpenFolder(dir) => platform::open_folder(&dir).err().map(Msg::Notice),
             Effect::Relaunch => match relaunch() {
                 Ok(()) => {
                     self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -684,7 +690,10 @@ impl Runtime {
         store: &store::Store,
     ) -> Result<WorkspacePrefs, String> {
         let path = prefs::prefs_path(db, cli);
-        let p = Prefs::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let p = Prefs::open(&path).map_err(|e| match e {
+            store::StoreError::NewerSchema(n) => n.explanation(),
+            other => format!("{}: {other}", path.display()),
+        })?;
         self.permission_notes
             .extend(p.permission_warning().map(str::to_string));
         let legacy = store.ui_prefs().map(|u| u.workspace).unwrap_or_default();
@@ -712,7 +721,10 @@ impl Runtime {
     /// and start its writer thread.
     fn open_strategy(&mut self, db: &Path, cli: Option<&str>) -> Result<strategy::Loaded, String> {
         let path = strategy::strategy_path(db, cli);
-        let u = UpdateDb::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let u = UpdateDb::open(&path).map_err(|e| match e {
+            store::StoreError::NewerSchema(n) => n.explanation(),
+            other => format!("{}: {other}", path.display()),
+        })?;
         self.permission_notes
             .extend(u.permission_warning().map(str::to_string));
         let loaded = u.load(unix_now()).map_err(|e| e.to_string())?;
@@ -760,8 +772,10 @@ impl Runtime {
     /// its thread.
     fn open_history(&mut self, db: &Path, cli: Option<&str>) -> Result<(), String> {
         let path = history::history_path(db, cli);
-        let h = history::History::open(&path, unix_now())
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let h = history::History::open(&path, unix_now()).map_err(|e| match e {
+            store::StoreError::NewerSchema(n) => n.explanation(),
+            other => format!("{}: {other}", path.display()),
+        })?;
         self.permission_notes
             .extend(h.permission_warning().map(str::to_string));
         let (htx, hrx) = mpsc::channel::<HistCmd>();

@@ -1723,6 +1723,7 @@ also pauses automatic installs until the next start.
 | `no common SSH algorithm (legacy host)` | Add e.g. `KexAlgorithms +diffie-hellman-group1-sha1` under **Other ssh options**. |
 | Sensors: `ipmitool not installed` / `sudo rule missing` | Use **Set up BMC access…** on that host. |
 | Update check: `cannot reach GitHub` | No internet or a proxy blocks `api.github.com`; Telepad keeps working without updates. |
+| `Database from a newer Telepad` / `was upgraded by a newer Telepad` | A newer Telepad upgraded the database schema beyond what this copy supports. Your data is unchanged; click **Update Telepad** on that screen (or download the latest release) and restart. Newer databases with additive changes still open with a status-bar note (`database from a newer Telepad (schema n): some features need an update`) without touching the newer data. |
 
 ## Command line
 
