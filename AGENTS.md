@@ -228,8 +228,11 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
   host names — never real inventory.
 - Conventional commits: `feat(collector): ...`, `fix(ui): ...`, referencing the issue (`#12`).
 - Docs live in `README.md` (overview, install, quick start), `docs/USER_MANUAL.md` (every screen,
-  button and message), `CONTRIBUTING.md` (build, workflow, releasing) and `SECURITY.md`. A change
-  to the UI or behaviour updates the manual in the same PR.
+  button and message), `docs/DEVELOPER_GUIDE.md` (how the code works: MVU, inner windows, the table
+  component, the editor, authorization and the Portainer API), `CONTRIBUTING.md` (build, workflow,
+  releasing) and `SECURITY.md`. A change to the UI or behaviour updates the manual in the same PR;
+  a change to a component the guide explains updates the guide. Manual screenshots come from a demo
+  lab (made-up hosts, keys and stacks), never the real inventory; no version-labelled sections.
 
 ## Configuration
 
@@ -366,6 +369,8 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #173 | feat(portainer): manage stacks and their containers through the Portainer API — start / stop / delete, stack editor with env variables and update, container actions | closed | 2026-11-26 |
 | #176 | feat(portainer): Stack page with Containers and Editor tabs, opened by double-click on a stack or Open stack on the host page | closed | 2026-11-26 |
 | #180 | fix(store): Update Telepad on a database from a newer Telepad, and open newer but compatible schemas | closed | 2026-11-26 |
-| #181 | fix(ui): grey secondary text too faint — lighter in the dark theme, darker in the light theme | ready-for-review | 2026-11-26 |
-| #182 | feat(editor): change indentation — tabs / spaces, size 2 / 4 / 8, convert and re-indent | ready-for-review | 2026-11-26 |
-| #183 | feat(editor): colour schemes (Dark Modern, Light Modern, Monokai, Solarized, Red, …) and a language picker for syntax highlighting | ready-for-review | 2026-11-26 |
+| #181 | fix(ui): grey secondary text too faint — lighter in the dark theme, darker in the light theme | closed | 2026-11-26 |
+| #182 | feat(editor): change indentation — tabs / spaces, size 2 / 4 / 8, convert and re-indent | closed | 2026-11-26 |
+| #183 | feat(editor): colour schemes (Dark Modern, Light Modern, Monokai, Solarized, Red, …) and a language picker for syntax highlighting | closed | 2026-11-26 |
+| #187 | docs: refresh README and user manual — no version tour, new screenshots, more detail on groups, clusters, Swarm, Kubernetes, Portainer, containers, keys, Host Management | ready-for-review | 2026-11-26 |
+| #188 | docs: developer guide — how the egui UI is built (tables, searchable dropdown, pagination, editor) and how authorization and outside APIs work | ready-for-review | 2026-11-26 |

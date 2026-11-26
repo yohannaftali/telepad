@@ -2,7 +2,10 @@
 
 Issues and pull requests are welcome. This page covers building from source, the
 rules every change keeps, and how releases are made. The architecture and full list
-of conventions are in [AGENTS.md](AGENTS.md) (written for humans and coding agents alike).
+of conventions are in [AGENTS.md](AGENTS.md) (written for humans and coding agents alike);
+how the code works — the Model–View–Update core, the egui window and table components, the
+editor, and how Telepad authorizes against hosts, databases and Portainer — is walked through
+in the [developer guide](docs/DEVELOPER_GUIDE.md).
 
 ## Reporting a bug
 

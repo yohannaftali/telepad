@@ -1,9 +1,13 @@
 # Telepad user manual
 
 How to use Telepad once it is [installed](../README.md#install). For a first run see the
-[quick start](../README.md#quick-start).
+[quick start](../README.md#quick-start). How the code works is in the
+[developer guide](DEVELOPER_GUIDE.md).
 
-**Contents:** [How Telepad works](#how-telepad-works) · [Window layout](#window-layout) · [Workspaces](#workspaces) · [Overview](#overview) · [My Computer](#my-computer) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Files](#files-upload--download--manage--edit) · [Authorized keys](#authorized-keys-list-add-revoke) · [Database browser](#database-browser-mariadb--mysql--postgresql) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
+Every screenshot comes from a demo lab with made-up host names, keys and stacks on
+loopback and documentation addresses.
+
+**Contents:** [How Telepad works](#how-telepad-works) · [Window layout](#window-layout) · [Workspaces](#workspaces) · [Tables](#tables) · [Overview](#overview) · [Groups and clusters](#groups-and-clusters) · [Portainers](#portainers) · [Docker / Podman](#docker--podman) · [Kubernetes and Docker Swarm](#kubernetes-and-docker-swarm) · [Container management at a glance](#container-management-at-a-glance) · [My Computer](#my-computer) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Host Management](#host-management-compare-with-an-openssh-config) · [Files](#files-upload--download--manage--edit) · [Authorized keys](#authorized-keys-list-add-revoke) · [Database browser](#database-browser-mariadb--mysql--postgresql) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
 
 ## How Telepad works
 
@@ -84,6 +88,8 @@ back to the front if it is already open. Each window has a title bar:
   The same layouts show when you hover the **Maximize** button; click a part to snap the
   window there. Dragging a snapped window away gives it back the size it had before the
   first snap. Snapped places are saved with the workspace like any other place.
+
+  ![Snap layouts on the Maximize button of a file window](images/snap-layouts.png)
 - **− (Minimize)** puts it in the strip at the bottom; click it there (or pick it in the
   window picker) to bring it back. Anything that leads to a window that is already open —
   **Edit** / F4 / double-click on a file (editor), **Open files…**, **Open database…**,
@@ -126,10 +132,12 @@ picker):
 | Entry | What it does |
 |---|---|
 | **&lt;none&gt;** | Closes every window. Nothing is saved while it is current, so the other workspaces stay as they were |
-| **&lt;own&gt;** | The default workspace (your layout from before 0.9.2 is in it) |
+| **&lt;own&gt;** | The default workspace (a layout saved by an older Telepad is moved into it once) |
 | a custom workspace | Its windows, as you left them. The red trash icon at the end of its row deletes it (after a question; if it was the current one, Telepad goes back to &lt;own&gt;). Only the saved set of windows goes — hosts and files are not touched |
 | **Save** (foot of the list) | Saves the windows of the current workspace now. Not needed normally: every change (open, close, move, resize, tabs, minimize, maximize, Arrange) is saved automatically within a second. Not available on &lt;none&gt; |
 | **Add…** (foot of the list) | A new workspace with the windows that are open now; it becomes the current one. Its name: 1–40 characters on one line, not &lt;none&gt; / &lt;own&gt;, not used yet (case does not matter) |
+
+![The workspace list](images/workspaces.png)
 
 Picking another workspace closes the windows of the current one and opens the windows
 of the one you picked. The current workspace is remembered for the next start. The
@@ -147,10 +155,12 @@ flowchart LR
 
 ![Leaving a workspace: one question lists what would be lost](images/workspace-leave.png)
 
-1. The **workspace** dropdown: picking another workspace (here `<none>`) starts the check.
-2. What would be lost, grouped by window.
-3. **Yes**: drop it and switch.
-4. **Back** (or Escape): stay, nothing changes.
+In the picture, Host Management has one change that was not applied and `<none>` was picked:
+
+- The question names the workspace you picked (here `<none>`).
+- What would be lost, grouped by window (here: Host Management, 1 change not applied).
+- **Yes**: drop it and switch.
+- **Back** (or Escape): stay, nothing changes.
 
 #### Before leaving: what is lost
 
@@ -182,14 +192,6 @@ progress and results. When the last transfer ends, the background window closes 
 status bar says so.
 
 #### What comes back
-
-![Coming back: file, editor and database windows reopened](images/workspace-restored.png)
-
-1. The workspace you came back to.
-2. The file window, at its saved folders (its transfers still running).
-3. The editor, with its files read again from the host.
-4. The database window, connected again with the saved password, at its database.
-5. Its SQL log, read back from `history.db`.
 
 | Window | Saved | When it comes back |
 |---|---|---|
@@ -293,6 +295,10 @@ window narrower than 768 points. In a narrow window the footer wraps onto a seco
 - In the **database Data grid**, Export as CSV / Excel opens the Export dialog (all
   filtered rows from the server, #139); PDF and JSON take the rows loaded in the grid.
 
+![The value list of the Group column: search, Clear filter and the values](images/table-values.png)
+
+![After picking Data: the box holds =Data, the funnel is blue, three hosts are left](images/table-filtered.png)
+
 ## Theme
 
 **☰ → Settings → Theme** switches between **System** (follows the Windows / macOS / desktop
@@ -305,11 +311,15 @@ selection (#167). Text is near white in the dark theme and near black in the lig
 secondary text (hints, "updated … ago", notes, status lines) is a lighter / darker grey that
 still meets a 4.5 : 1 contrast on every background (#181).
 
+![The Hosts page in the light theme](images/hosts-light.png)
+
 ## Hosts
 
-Telepad 0.9 has no host list on the left any more: the hosts are in **Overview — all
-hosts** (table or cards). Click a host there to open its window; right-click for Edit /
-Clone / Delete.
+The hosts are on the **Hosts** page (table or cards, below). Click a host there to open its
+window; right-click for its menu (Open SSH / RDP, Files, databases, Pause updates, Group,
+Cluster, Edit, Clone, Delete, then the table's Filter by / exports).
+
+![The right-click menu of a host](images/host-menu.png)
 
 **Reorder hosts:** drag a host by its **⋮⋮** handle in the overview table and drop it on the
 upper or lower half of another host; a line shows where it will land. The order is saved in
@@ -326,6 +336,8 @@ group or cluster, click the **Group** or **Cluster** column title (A to Z, again
 third time back to inventory order; hosts without one stay last), or pick it under **Sort by**
 in the cards view (#157).
 
+![The Hosts page as a table (dark theme)](images/hosts-dark.png)
+
 ## Groups and clusters
 
 Hosts can be put into **groups** (e.g. *Office*, *Lab*) and, separately, **clusters**
@@ -334,6 +346,8 @@ cluster, and the two do not depend on each other — one host can be in group *O
 cluster *Web* while another is in group *Lab* and the same cluster *Web*. These clusters are
 your own labels; the [Kubernetes and Docker Swarm](#kubernetes-and-docker-swarm) pages show
 the clusters Telepad finds on the hosts and do not change.
+
+![Groups: name, description, hosts, down, flags, and the row buttons](images/groups.png)
 
 **Groups** and **Clusters** (sidebar, below My Computer) list them with their description and
 how many hosts each has, how many are down and how many have flags. The last row, **Ungrouped**
@@ -359,10 +373,56 @@ workspace. The Hosts - [name] window stays open. **Add hosts…** lists the othe
 current group / cluster: tick some and **Add** moves them here. These pages come back with the
 [workspace](#workspaces) (saved as group:<name> / cluster:<name>).
 
+![Hosts - Data: the hosts of one group, with ← Back, Add hosts… and the group's description](images/group-hosts.png)
+
 Other ways to set a host's group or cluster: right-click a host ▸ **Group: …** / **Cluster: …**
 (pick one, or *Ungrouped* / *No cluster* to take it out), or the **Group** / **Cluster** lists
 in the host editor. Changing it reads nothing from the host again. Cards show the group and
 cluster under the address.
+
+**Columns of the Groups / Clusters table**
+
+| Column | Shows |
+|---|---|
+| Group / Cluster | the name; the drag handle on the left |
+| Description | what you typed (optional) |
+| Hosts | how many hosts are in it |
+| Down | how many of them failed their last check (red when not 0) |
+| Flags | how many of them have a maintenance flag (end of life, reboot, updates, cluster problem) |
+| (buttons) | **⌃ / ⌄**, **Edit**, **Delete**; *fixed* on Ungrouped / No cluster |
+
+**An example.** Six web, database and CI machines: groups *Web*, *Data* and *CI* say what each
+machine is for (and who looks after it), clusters *shop-prod* and *ci-lab* say which machines
+work together. *db-01* is in group *Data* and cluster *shop-prod*; *backup-01* is in group
+*Data* and no cluster. Then:
+
+- **Groups ▸ Data** opens *Hosts - Data* with db-01, backup-01 and legacy-01; its Down column
+  says at a glance that one of them is down.
+- On the Hosts page, the Group column's value list (the funnel, [Tables](#tables)) or `=Web` in
+  its filter box shows one group without leaving the page; `>0` under Down on the Groups page
+  lists the groups with a problem.
+- The Docker / Podman, Docker Swarm and Kubernetes pages are not split by group: they show what
+  runs on the hosts, whatever their labels.
+
+**Where they are kept.** Groups and clusters are saved in `telepad.db` (with their description
+and order) and travel with the hosts:
+
+- **Export** (JSON) writes them with the hosts; **Import** (JSON) brings them back.
+- In an OpenSSH config (export, Host Management, first-run import) a host's group and cluster
+  are comment lines above its `Host` line, which `ssh` ignores:
+
+  ```
+  # VM 03
+  # Shop database
+  # telepad: group Data
+  # telepad: cluster shop-prod
+  Host db-01
+    HostName 192.0.2.13
+  ```
+
+  Host Management lists a different group / cluster as a difference (**Group**, **Cluster**)
+  like any other field.
+- A group or cluster that no host uses any more stays in the list until you delete it.
 
 ## Portainers
 
@@ -382,6 +442,21 @@ token** (Portainer 2.11 or later: *My account ▸ Access tokens ▸ Add access t
 OS password store (Windows Credential Manager, macOS Keychain, Linux Secret Service) under
 "Telepad Portainer" — never in `telepad.db`, an export or the logs.
 
+**Setting up a Portainer, step by step**
+
+1. In Portainer: *My account ▸ Access tokens ▸ Add access token*, give it a description
+   (e.g. *telepad*) and copy the token (`ptr_…`; Portainer shows it once). The token acts as
+   your Portainer user: Telepad can do exactly what that user may do.
+2. In Telepad: **Portainers ▸ Add Portainer…**. Give it a name, pick the **Host** it runs on
+   (hosts that run a `portainer/portainer` container are listed first with their port), check
+   **Port** and **HTTPS** (9443 with HTTPS is Portainer's default; 9000 without), paste the
+   token.
+3. **Test** reads Portainer through the tunnel with these settings and shows its version and
+   how many environments and stacks it has, without saving anything. Fix the port or token
+   until it says OK, then **Save**.
+
+![Add Portainer: name, host, port, HTTPS, a hidden token, and a successful Test](images/portainer-add.png)
+
 **Portainers page**
 
 | Column / control | What it shows / does |
@@ -398,6 +473,8 @@ OS password store (Windows Credential Manager, macOS Keychain, Linux Secret Serv
 Each Portainer is read when the Portainers page or its own page opens and on **Refresh**; there
 is no background polling.
 
+![The Portainers page: one Portainer, read OK](images/portainers.png)
+
 **HTTPS certificate.** Portainer's certificate is usually self-signed. Telepad trusts it on the
 first read and remembers its SHA-256 fingerprint (like SSH's first connect). If Portainer later
 shows a different certificate, the read is refused with *The HTTPS certificate changed (was …,
@@ -406,6 +483,8 @@ renewed certificate). Changing a Portainer's host, port or HTTPS forgets the fin
 
 **Portainer - [name]** (one page per Portainer, several can be open; an open one comes to the
 front; they come back with the [workspace](#workspaces) as portainer:<name>):
+
+![Portainer - Main: its environment and the stacks in it](images/portainer-page.png)
 
 - The header: **Refresh**, **Open in Portainer** (its web UI at the host's address), host,
   port, Portainer version and when it was read. An error shows above the tables, with **Edit…**
@@ -444,6 +523,10 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
     and **Remove** ask first (Remove can also remove the container's anonymous volumes, off by
     default). Swarm service tasks have no container actions (scale or update the service in
     Portainer). They are read when the page opens, on **Refresh** and after every action.
+
+    ![The Stack page, Containers tab](images/stack-containers.png)
+
+    ![Kill asks first; Remove too](images/stack-confirm.png)
   - **Editor**: the stack editor below (**Edit** on the Portainers page opens this tab). Switching
     tabs keeps unsaved edits (the tab shows ● then).
 - **Stack editor** (the Stack page's **Editor** tab): the
@@ -453,6 +536,8 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
   previous match, Esc closes the bar. **Variables (n)…** opens the stack's variables on their
   own page (below). **Re-pull image and redeploy** and **Prune services** are Portainer's update
   options.
+
+  ![The Stack page, Editor tab: the compose file, Variables, Update the stack…](images/stack-editor.png)
 - **Variables** page ("Variables - [name]", from the editor's **Variables (n)…**): one row per
   variable, name and value (values hidden unless **Show values** is ticked); **Add variable**,
   ✕ removes one. **Import .env file…** reads `NAME=value` lines from a file you pick (up to
@@ -463,6 +548,9 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
   with spaces) takes nothing and names the line. **Compose file** goes back to the editor. The
   variables are sent with the editor's **Update the stack**; closing the page keeps the edits,
   closing the editor closes the page.
+
+  ![The Variables page: values hidden until Show values](images/stack-variables.png)
+
   **Update the stack…** first checks the names (no spaces or `=`, no duplicates) and shows a
   review: whether the compose file changed (with its line diff) and which variables were added
   (+), changed (~) or removed (−) — names only. **Update the stack** then sends it and Portainer redeploys the stack (`docker compose up`): containers
@@ -475,6 +563,32 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
   **Discard** / **Keep editing**. Git-based stacks are shown read-only with a note: edit and
   redeploy them in Portainer. Stack variable values are read only for the editor and are
   never logged.
+
+  ![The review before Update the stack: what changed, and Portainer's redeploy warning](images/stack-review.png)
+
+**What Telepad can change in Portainer** (everything else is read-only):
+
+| You click | Telepad sends (with your token, through the tunnel) | Asks first | Logged in `history.db` |
+|---|---|---|---|
+| Stack **Start** / **Stop** | `POST /api/stacks/{id}/start` / `stop` | yes | yes |
+| Stack **Delete** | `DELETE /api/stacks/{id}` | yes, type the stack name | yes |
+| **Update the stack** | `PUT /api/stacks/{id}` (compose file, variables, Re-pull, Prune) | review screen; stops if the stack changed since you opened it | yes (variable names only) |
+| Container **Start** / **Stop** / **Restart** / **Pause** / **Resume** | `POST …/docker/containers/{id}/start` … through Portainer's Docker proxy | no | yes |
+| Container **Kill** / **Remove** | `POST …/kill` / `DELETE …/containers/{id}` | yes (Remove: anonymous volumes off by default) | yes |
+
+Reads are `GET` only: `/api/status`, `/api/endpoints`, `/api/stacks`, a stack and its file,
+and the containers of a stack. Portainer's own roles apply: a user who may not change a stack
+gets Portainer's *403*, shown as it is.
+
+**Status messages**
+
+| Status | What to do |
+|---|---|
+| *no token* | **Edit** and paste a token (a token in the password store went missing, e.g. a new Windows profile) |
+| *unreachable* | the host is down, the port or HTTPS setting is wrong, or Portainer is not running; hover for ssh's or Portainer's message |
+| *token rejected* | the token was deleted or expired in Portainer: make a new one and **Edit** |
+| *certificate changed* | Portainer shows another certificate than the one pinned: **Accept new certificate** only if you know it was renewed |
+| *too old* | Portainer before 2.11 has no access tokens: upgrade Portainer |
 
 Both tables have the usual sort, filter row, value lists and exports ([Tables](#tables)).
 Registered Portainers (without tokens) are part of the JSON export / import; they follow a
@@ -492,6 +606,17 @@ shows image, status, container IPs and published ports, and its **☰** menu has
 [Docker actions](#docker-actions). Click a stack name to fold it. The search box filters by
 stack, container, image or host.
 
+![Docker / Podman: stacks across hosts, Portainer stacks with Open stack, compose stacks with the Compose menu](images/docker.png)
+
+The header counts stacks, containers, running containers and hosts with Docker or Podman. Each
+stack line says how it is managed, which decides what you can do with it:
+
+| Stack line says | Managed by | What Telepad offers |
+|---|---|---|
+| *docker compose in /path (file)* | a compose project on that host | the **Compose** menu (Logs, Up, Restart, Stop, Down) and each container's ☰ — all in a terminal that shows the command first |
+| *Portainer stack #n* | a Portainer | **Open stack** (its Stack page, through your registered Portainer) and **Open in Portainer**; the terminal actions are off, so Portainer stays the one that manages it |
+| *Standalone containers* | nothing (`docker run`) | each container's ☰ |
+
 ### Kubernetes and Docker Swarm
 
 **Kubernetes** and **Docker Swarm** in the sidebar list every cluster Telepad found on your
@@ -501,6 +626,31 @@ workloads / services and stacks, problems in red, and the confirmed actions of
 [Swarm and Kubernetes](#swarm-and-kubernetes). When no host reported a cluster the page
 says so ("No Kubernetes cluster found on your hosts"). Nothing new runs on the hosts: the
 pages use what the regular refresh collected.
+
+![Docker Swarm: the manager it was reached from, nodes, services with replicas and ports, stacks](images/swarm.png)
+
+**What a host needs to show a cluster**
+
+- **Docker Swarm**: the host is a swarm **manager** and its login can run `docker` (directly,
+  or with `sudo -n` when a sudoers rule allows it without a password). A worker shows only
+  its role.
+- **Kubernetes**: `kubectl`, `k3s kubectl` or `microk8s kubectl` works for the login with
+  its own kubeconfig (or through `sudo -n`). Telepad reads nodes, deployments, statefulsets,
+  daemonsets and pods with `get … -o json` — read-only.
+- Both are read in the 6-hourly tier with addresses and ports (see
+  [Update Strategy](#update-strategy)); **Refresh** on a host reads it now.
+
+**Reading the Swarm page**: *Reached from* names the manager(s) that reported the cluster.
+**Nodes** shows status (*Ready* / *Down*), availability (*Active* / *Pause* / *Drain*), manager
+status (*Leader* / *Reachable*) and engine version. **Services** shows the stack a service
+belongs to, its mode, replicas running / wanted (green when complete, red when not), image and
+published ports. **Stacks** lists the stacks and how many services each has. A missing replica
+or a node that is down also raises the red **cluster** flag on the Hosts page.
+
+**Reading the Kubernetes page**: nodes and whether they are ready; deployments, statefulsets
+and daemonsets with ready / wanted pods; and problem pods (not running, waiting for a reason
+such as `CrashLoopBackOff` or `ImagePullBackOff`, or restarted 5 times or more) with their
+namespace and reason.
 
 ### Table
 
@@ -561,6 +711,8 @@ Unreachable hosts show their error instead of the bars. The search box filters t
 **Sort by** picks the order (the same columns as the table, including Group and Cluster, or
 inventory order) and the arrow button next to it reverses it.
 
+![The Hosts page as cards](images/hosts-cards.png)
+
 ### Maintenance flags
 
 The **Flags** column, the cards and the host's **Maintenance**
@@ -576,6 +728,22 @@ section show what needs doing on a host (hover for details):
 Update counts come from the host's local package cache, so they are only as fresh as the
 host's last `apt update` / `dnf makecache`. Releases not in the table show "unknown"
 support. Sort by **Flags** to see the most urgent hosts first.
+
+## Container management at a glance
+
+Telepad changes containers in two ways, depending on who manages them. Nothing is ever changed
+by a refresh or in the background.
+
+| Where | Through | For | Confirmation |
+|---|---|---|---|
+| Host page and Docker / Podman page: container ☰, **Compose** menu | a terminal on the host (`docker` / `docker compose`, `sudo` asks there if needed) | compose stacks and standalone containers | the terminal prints the command and waits for Enter; Kill / Remove / Down need `yes` |
+| Swarm / Kubernetes ☰ | a terminal on the manager | services, nodes, stacks, workloads | the same |
+| Stack page (Portainers) | the Portainer API with your token | stacks deployed by Portainer and their containers | Start / Stop / Delete / Kill / Remove ask in Telepad; Update shows a review |
+
+A Portainer stack is never changed from the terminal menus (that would bypass Portainer and
+confuse its view of the stack); a compose stack outside Portainer is never sent to
+Portainer. See [Docker actions](#docker-actions), [Swarm and Kubernetes](#swarm-and-kubernetes)
+and [Portainers](#portainers).
 
 ## My Computer
 
@@ -616,6 +784,10 @@ The header shows the status, OS logo, alias and `user@address`. Below it are the
 buttons (**Open MariaDB / MySQL :3306** …, see [Database browser](#database-browser-mariadb--mysql--postgresql))
 and **Log info** (SSH hosts, see [Log info](#log-info-ssh-logins)). On a narrow window the buttons (and the top bar) wrap onto a second line instead
 of being cut off. Below that:
+
+![A host page: header buttons, System, Maintenance, Usage](images/host-page.png)
+
+![Further down: Docker stacks and the ports in use with the container behind each port](images/host-docker.png)
 
 - **System**: OS, kernel, architecture, uptime, CPU model and cores, load average.
 - **Usage**: CPU, Memory and Swap bars.
@@ -897,12 +1069,15 @@ set); the host is up if either answers. **RDP** opens Remote Desktop (`mstsc` on
 
 ![Remote Desktop settings in the host editor](images/rdp-settings.png)
 
-1. **Save Remote Desktop settings for this host** (untick to forget them).
-2. **Import .rdp…** / **Export .rdp…**
-3. **Display**: full screen, a window of a set size, or fit the window.
-4. **Bring along**: clipboard, printers, drives.
-5. **RD Gateway**, used always or when needed.
-6. **Server check** and the note that no password is stored.
+In the editor's **Remote Desktop settings** section:
+
+- **Save Remote Desktop settings for this host** (untick to forget them).
+- **Import .rdp…** / **Export .rdp…**
+- **Display**: full screen, a window of a set size, or fit the window.
+- **Bring along**: clipboard, printers, drives.
+- **RD Gateway**, used always or when needed.
+- **Server check**, and the **Password**: not saved unless you click **Save in Credential
+  Manager** (Windows), never in `telepad.db`.
 
 The editor's **Remote Desktop settings** section (open for RDP-only hosts, folded for SSH
 hosts) keeps how Remote Desktop should connect, so **Open RDP** starts with them every
@@ -1010,6 +1185,8 @@ described in [Adding hosts](#adding-editing-and-removing-hosts) and
 [Import and export](#import-and-export). (**Add to Telepad…** in the toolbar below is
 different: it waits for Apply like every change in the list.)
 
+![Host Management: Telepad's hosts next to an OpenSSH config, with the differences per host](images/host-management.png)
+
 **Which file:** `~/.ssh/config` at first. **File…** picks another file, **Folder…** a folder
 (its `config` file is used); the choice is remembered. **Reload** reads the file again. A
 file that does not exist yet counts as empty and is created on Apply.
@@ -1057,7 +1234,21 @@ Changed hosts are marked **pending** and counted at the bottom. **Discard** drop
   **Reload** (your pending changes stay) and look at the preview again.
 - Telepad's changes are saved in one transaction; a renamed host keeps its place in the list.
 
+**Typical jobs**
+
+- *First start, hosts already in `~/.ssh/config`*: **Config → Telepad ▸ Merge**, look at the
+  preview, **Apply**. Telepad now has every host; the file is not touched.
+- *A colleague added hosts to Telepad and you want `ssh <alias>` to work in a terminal*: tick
+  **Only differences**, select the hosts that are only in Telepad, **→**, **Preview and
+  apply…**. The backup next to the file lets you go back.
+- *Both sides changed*: **Sync** copies the one-sided hosts and stops on every host that
+  differs until you pick a side; the **Differences** column names the fields (in the picture,
+  web-02 has another Port in the file).
+- *A host is gone*: the bin on the side where it should go, then Apply.
+
 ## Files (upload / download / manage / edit)
+
+![A file window: this computer on the left, the host on the right, the transfer panel below](images/files.png)
 
 **Open files…** in a host's window (or **Files** in the sidebar) opens a file window, WinSCP style: **This computer**
 on the left, the host on the right. It logs in as the host's normal SSH login (the same
@@ -1197,11 +1388,13 @@ The top bar of a file window has four tools that work between the two panes:
 
 ![The History tab of a file window](images/files-history.png)
 
-1. **History (_n_)** next to **Transfers**.
-2. **Filter**, **All / Uploads / Downloads**, **Not done only**.
-3. **Export…** (CSV of the lines shown) and **Clear…**.
-4. One line per action: time (UTC), what → where, result, size, duration, method.
-5. Show the local folder of a transfer in the file manager.
+In the picture (one upload done):
+
+- **History (_n_)** next to **Transfers**.
+- **Filter**, **All / Uploads / Downloads**, **Not done only**.
+- **Export…** (CSV of the lines shown) and **Clear…**.
+- One line per action: time (UTC), what → where, result, size, duration, method.
+- Show the local folder of a transfer in the file manager.
 
 The transfer panel at the bottom of a file window has two tabs: **Transfers** (what runs
 now) and **History (_n_)**: everything Telepad copied or changed on this host, also in
@@ -1234,6 +1427,8 @@ keeps working without history.
 
 ### Editor
 
+![The editor with the find bar open](images/editor.png)
+
 **Edit** / F4 or a double-click on a file opens it in the host's **Editor** window, which
 looks and works like VS Code. One editor window per file window: each file is a tab, files
 of this computer and of the host side by side (the tab's icon says which; hover it for the
@@ -1265,6 +1460,10 @@ full path). Opening a file that already has a tab switches to it.
 - **Language** (#183): the language box (YAML, Shell, …) chooses the syntax colours of the tab;
   **Auto detect** goes back to the language found from the file name and first line. Only the
   colours change, never the file.
+
+  ![The colour scheme list](images/editor-schemes.png)
+
+  ![The same compose file in Monokai](images/editor-monokai.png)
 - **Indentation** (#182): click *Spaces: 4* (also in the Portainer stack editor's header):
   - **Indent using spaces** / **Indent using tabs** and **Size 2 / 4 / 8** change only what Tab
     and Shift+Tab insert; the text stays as it is.
@@ -1275,6 +1474,8 @@ full path). Opening a file that already has a tab switches to it.
     doubles it); text after the indentation is never touched.
   - Conversions mark the tab *Not saved* and are undone with Ctrl+Z; nothing is written before
     Save. YAML files cannot use tabs (not valid YAML), so those choices are off there.
+
+  ![The indentation menu of a YAML file: tabs are off](images/editor-indent.png)
 
 | Key | Does |
 |---|---|
@@ -1343,6 +1544,8 @@ ssh-ed25519 AAAA…  budi@example.com    ← maintainer
 ssh-ed25519 AAAA…  citra@example.com   ← developer
 ```
 
+![Authorized keys by server: web-01's keys with their groups; the login keys cannot be revoked](images/authorized-keys.png)
+
 - **By server**: the servers on the left with their number of keys (**no file** when there
   is no `authorized_keys`, **failed** with the reason on hover when the host could not be
   read). Pick one to see its keys: type, comment, SHA256 fingerprint and options
@@ -1359,6 +1562,8 @@ ssh-ed25519 AAAA…  citra@example.com   ← developer
   after saving.
   Older key types (e.g. `ssh-dss`) are listed but not managed; lines that are not keys are
   counted and left alone.
+![Authorized keys by public key: each key, its group and on how many servers it is](images/authorized-by-key.png)
+
 - **By public key**: every key found, grouped by fingerprint, with its comments, its
   group(s) and the number of servers that have it (the filter also matches group names). Click it to see those servers, each with a red
   **Revoke**, and **Revoke on all _N_ servers** (not the servers Telepad logs in to with
@@ -1391,6 +1596,17 @@ After a run, the changed servers are read again, so the lists show the result.
 
    The status bar sums it up when all hosts are done.
 
+**Typical jobs**
+
+- *A new colleague*: **Add / revoke**, paste their `.pub` line, Group *Developers*, tick the
+  servers (or **Select all** after filtering, e.g. `web`), **Add key**, type `add`.
+- *Someone leaves*: **By public key**, find their comment, click it, **Revoke on all N
+  servers**, type `revoke`. Servers Telepad logs in to with that key are refused, so you
+  cannot lock Telepad out.
+- *Which servers can this key reach?* **By public key** and the number of servers; click
+  the key for the list.
+- *Tidy up a file by hand*: **By server ▸ Edit file**, edit in the [editor](#editor), Save.
+
 Add creates `~/.ssh` (mode 700) and `authorized_keys` (mode 600) when they are missing
 and never adds a key twice. Revoke removes every line with that key, whatever its comment
 or options. Other lines are never touched, and the file is rewritten through a temporary
@@ -1400,12 +1616,13 @@ copy, so a failure leaves it as it was.
 
 ![My keys: the key pairs on this computer](images/my-keys.png)
 
-1. **Generate key pair…**
-2. **Import…** a key file in another format.
-3. The keys found (click one).
-4. Its details: type, format, passphrase, fingerprint, comment, which hosts use it.
-5. **Copy public key**, **Open folder**, **Add to hosts…**
-6. **Convert / export…**
+In the picture (a key selected):
+
+- **Generate key pair…** and **Import…** (a key file in another format) at the top.
+- The keys found in `~/.ssh` and the hosts' IdentityFiles (click one).
+- Its details on the right: type, format, passphrase, fingerprint, comment, which hosts log
+  in with it and where it is authorized.
+- **Copy public key**, **Open folder**, **Add to hosts…**, **Convert / export…**
 
 The **My keys** tab lists the key pairs on this computer: every private key in `~/.ssh`
 and every **IdentityFile** of your hosts (one that is missing is listed with the reason).
@@ -1447,11 +1664,13 @@ source is never changed):
 
 ![Convert / export dialog](images/my-keys-convert.png)
 
-1. The passphrase of the key, when it has one.
-2. The format to write (here PuTTY PPK v3).
-3. Greyed out: this key type has no such form (hover for the reason).
-4. Keep the passphrase, set a new one, or none.
-5. **Save as…** opens the save dialog; the result is shown in green.
+In the dialog:
+
+- The key and its type; the passphrase field when it has one.
+- **Write as**: the format (here PuTTY PPK v3). Greyed out: this key type has no such form
+  (here PEM for an Ed25519 key; hover for the reason).
+- Keep the passphrase, set a new one, or none (a warning when the result has none).
+- **Save as…** opens the save dialog; the result is shown in green.
 
 
 ```mermaid
@@ -1640,18 +1859,11 @@ Closing the window, **Reconnect**, or quitting Telepad stops the SSH tunnel.
 
 ### SQL log
 
-![SQL log of a database window](images/sql-log.png)
-
-1. **SQL log (_n_)** and its filter.
-2. **Log SELECT too**: also log read-only statements of the Query tab.
-3. **Copy all** the SQL shown.
-4. **Export…** (CSV) and **Clear…**.
-5. Time (UTC), result, rows, milliseconds, database.
-6. A password in `IDENTIFIED BY` is written as `'***'`.
-7. Copy one statement.
-
 Like HeidiSQL, the bottom of a database window is the **SQL log**: every statement this
 connection ran that changed data or structure, also from earlier sessions, newest last.
+Its header has **SQL log (_n_)** with a filter, **Log SELECT too** (also log read-only
+statements of the Query tab), **Copy all**, **Export…** (CSV) and **Clear…**; each line has
+the time (UTC), result, rows, milliseconds, database and a copy button.
 
 | Logged | Shows |
 |---|---|
@@ -1724,6 +1936,8 @@ also pauses automatic installs until the next start.
 | Sensors: `ipmitool not installed` / `sudo rule missing` | Use **Set up BMC access…** on that host. |
 | Update check: `cannot reach GitHub` | No internet or a proxy blocks `api.github.com`; Telepad keeps working without updates. |
 | `Database from a newer Telepad` / `was upgraded by a newer Telepad` | A newer Telepad upgraded the database schema beyond what this copy supports. Your data is unchanged; click **Update Telepad** on that screen (or download the latest release) and restart. Newer databases with additive changes still open with a status-bar note (`database from a newer Telepad (schema n): some features need an update`) without touching the newer data. |
+
+![The screen of an older Telepad that finds a database from a newer one](images/newer-database.png)
 
 ## Command line
 
