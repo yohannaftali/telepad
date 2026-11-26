@@ -364,3 +364,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #171 | feat(portainer): Portainers page — register Portainer servers with an API token, per-Portainer page with environments and stacks (read-only, SSH tunnel) | closed | 2026-11-26 |
 | #173 | feat(portainer): manage stacks and their containers through the Portainer API — start / stop / delete, stack editor with env variables and update, container actions | closed | 2026-11-26 |
 | #176 | feat(portainer): Stack page with Containers and Editor tabs, opened by double-click on a stack or Open stack on the host page | closed | 2026-11-26 |
+| #180 | fix(store): explain a database written by a newer Telepad and offer Update Telepad instead of a dead end | open | 2026-11-26 |

@@ -2,6 +2,11 @@
 
 Newest first.
 
+## [2026-11-26] — fix(store): explain a database written by a newer Telepad and offer Update Telepad instead of a dead end
+- Issue #180 created on GitHub
+- Scope: store / fatal screen / update
+- Labels: bug
+
 ## [2026-11-26] — Telepad 0.9.13
 - #173 Portainer stack and container actions through the Portainer API: start / stop / delete stacks; start / stop / kill / restart / pause / resume / remove containers; the stack editor in Telepad's text editor with a Variables page (.env file or paste) and Update the stack (review, changed-stack check); every change logged in history.db
 - #176 Stack page with Containers and Editor tabs: double-click a stack on a Portainer page, or Open stack on a host page
