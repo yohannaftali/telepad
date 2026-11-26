@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-26] — Tested and merged: #173 Portainer stack and container actions, stack editor, Variables page
+- Issue #173 addressed on Windows: stack start / stop / delete, container start / stop / kill / restart / pause / resume / remove, the stack editor in Telepad's text editor, the Variables page with .env import and paste, Update the stack with review and changed-stack check, all through the Portainer API with the user's token; history.db kind `portainer`
+- Files: telepad-core `portainer.rs`, `history.rs`, `db/secret.rs`, fixtures `stack.json` / `containers.json`; telepad-app `portainer.rs`, `workspace.rs`, `state.rs`, `tests_portainer.rs`; telepad-gui `views/portainer.rs`, `views/text_editor.rs` (`embedded`), `views/workspace.rs`, `views/mod.rs`, `runtime.rs`; telepad-check `--stack`; docs (manual, README, SECURITY, AGENTS)
+- Verified: fmt, clippy, 476 tests; GUI against the owner's Portainer 2.45.4 on the dev stacks only (container restart / start / pause / resume, kill dialog, stack stop / start, delete dialog, editor find, update with a variable, 409 during deploy, Variables page paste / bad line / file dialog, unsaved close)
+- Not verified: macOS / Linux (CI), Swarm and git stacks live
+
 ## [2026-11-26] — feat(portainer): Stack page with Containers and Editor tabs, opened by double-click on a stack or Open stack on the host page
 - Issue #176 created on GitHub
 - Scope: portainer (app, gui: Portainer page, host page Docker section)
