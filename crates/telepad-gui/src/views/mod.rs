@@ -49,7 +49,11 @@ pub fn draw(root: &mut egui::Ui, m: &Model, d: &mut Drafts, now: Instant) -> Vec
 
     if let Some(f) = &m.fatal {
         egui::CentralPanel::default().show(root, |ui| {
-            ui.colored_label(usage_color(95.0), f);
+            if let Some(n) = &m.fatal_newer {
+                fatal_newer_screen(ui, m, n, &mut out);
+            } else {
+                ui.colored_label(usage_color(95.0), f);
+            }
         });
         return out;
     }
@@ -255,4 +259,102 @@ fn overview_toolbar(ui: &mut egui::Ui, d: &mut Drafts, out: &mut Vec<Msg>) {
         }
     });
     ui.add_space(4.0);
+}
+
+/// Fatal screen when `telepad.db` was upgraded by a newer Telepad (#180).
+fn fatal_newer_screen(
+    ui: &mut egui::Ui,
+    m: &Model,
+    n: &telepad_core::store::NewerSchema,
+    out: &mut Vec<Msg>,
+) {
+    use telepad_app::UpdatePhase;
+    let explanation = n.explanation();
+    ui.add_space(32.0);
+    ui.vertical_centered(|ui| {
+        egui::Frame::group(ui.style())
+            .inner_margin(egui::Margin::same(20))
+            .show(ui, |ui| {
+                ui.set_max_width(560.0);
+                ui.heading(
+                    egui::RichText::new(il(icons::WARNING, "Database from a newer Telepad"))
+                        .color(usage_color(80.0)),
+                );
+                ui.add_space(8.0);
+                ui.label(&explanation);
+                ui.add_space(12.0);
+                match &m.update.phase {
+                    UpdatePhase::Checking => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Checking GitHub for the latest Telepad…");
+                        });
+                    }
+                    UpdatePhase::Installing => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Downloading, verifying SHA-256 and installing…");
+                        });
+                    }
+                    UpdatePhase::Installed(v) => {
+                        ui.colored_label(
+                            usage_color(0.0),
+                            format!("Telepad {v} is installed. Restart to open the database."),
+                        );
+                    }
+                    UpdatePhase::Idle => {}
+                }
+                if let Some(c) = &m.update.check
+                    && !c.page_url.is_empty()
+                    && ui.link("Release page on GitHub").clicked()
+                {
+                    out.push(Msg::OpenUrl(c.page_url.clone()));
+                }
+                if let Some(e) = &m.update.error {
+                    ui.colored_label(usage_color(95.0), e);
+                }
+                ui.add_space(10.0);
+                ui.horizontal_wrapped(|ui| {
+                    match &m.update.phase {
+                        UpdatePhase::Installed(_) => {
+                            if crate::widgets::act_button(
+                                ui,
+                                true,
+                                crate::widgets::Act::Add,
+                                &il(icons::REFRESH, "Restart now"),
+                            )
+                            .clicked()
+                            {
+                                out.push(Msg::Restart);
+                            }
+                        }
+                        _ => {
+                            if crate::widgets::act_button(
+                                ui,
+                                m.update.phase == UpdatePhase::Idle,
+                                crate::widgets::Act::Add,
+                                &il(icons::IMPORT, "Update Telepad"),
+                            )
+                            .clicked()
+                            {
+                                out.push(Msg::FatalUpdate);
+                            }
+                        }
+                    }
+                    if let Some(dir) = n.path.parent().filter(|p| !p.as_os_str().is_empty())
+                        && ui
+                            .button(il(icons::FOLDER, "Open the database folder"))
+                            .clicked()
+                    {
+                        out.push(Msg::OpenFolder(dir.to_path_buf()));
+                    }
+                    if ui.button(il(icons::CLONE, "Copy the message")).clicked() {
+                        out.push(Msg::CopyText {
+                            text: explanation.clone(),
+                            notice: "Message copied to clipboard".into(),
+                        });
+                    }
+                });
+            });
+    });
 }

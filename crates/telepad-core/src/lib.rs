@@ -184,10 +184,22 @@ impl Workspace {
 pub const DB_FILE: &str = "telepad.db";
 pub const GENERATED_SSH_CONFIG: &str = "telepad.ssh_config";
 
+/// Why opening `telepad.db` failed (#180).
+#[derive(Debug, thiserror::Error)]
+pub enum OpenError {
+    #[error("{0}")]
+    NewerSchema(store::NewerSchema),
+    #[error("{0}")]
+    Other(String),
+}
+
 /// Database path: `--db` > `TELEPAD_DB` > `telepad.db` next to the OpenSSH
 /// `config` (if one is found) > next to the executable. On first run (empty database)
 /// the hosts are imported from that `config`.
-pub fn open_workspace(cli_config: Option<&str>, cli_db: Option<&str>) -> Result<Workspace, String> {
+pub fn open_workspace(
+    cli_config: Option<&str>,
+    cli_db: Option<&str>,
+) -> Result<Workspace, OpenError> {
     let config = resolve_config(cli_config);
     let db = cli_db
         .map(PathBuf::from)
@@ -204,18 +216,25 @@ pub fn open_workspace(cli_config: Option<&str>, cli_db: Option<&str>) -> Result<
     if let Some(dir) = db.parent()
         && !dir.as_os_str().is_empty()
     {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::create_dir_all(dir)
+            .map_err(|e| OpenError::Other(format!("{}: {e}", dir.display())))?;
     }
-    let mut store = store::Store::open(&db).map_err(|e| format!("{}: {e}", db.display()))?;
+    let mut store = match store::Store::open(&db) {
+        Ok(s) => s,
+        Err(store::StoreError::NewerSchema(n)) => return Err(OpenError::NewerSchema(n)),
+        Err(e) => return Err(OpenError::Other(format!("{}: {e}", db.display()))),
+    };
 
     let mut imported_from = None;
-    if store.is_empty().map_err(|e| e.to_string())?
+    if store
+        .is_empty()
+        .map_err(|e| OpenError::Other(e.to_string()))?
         && let Some(cfg) = &config
     {
-        let inv = config::load_inventory(cfg).map_err(|e| e.to_string())?;
+        let inv = config::load_inventory(cfg).map_err(|e| OpenError::Other(e.to_string()))?;
         store
             .import(&inv, store::ImportMode::Merge)
-            .map_err(|e| format!("importing {}: {e}", cfg.display()))?;
+            .map_err(|e| OpenError::Other(format!("importing {}: {e}", cfg.display())))?;
         imported_from = Some(cfg.clone());
     }
     let ssh_config = db.with_file_name(GENERATED_SSH_CONFIG);
@@ -224,7 +243,7 @@ pub fn open_workspace(cli_config: Option<&str>, cli_db: Option<&str>) -> Result<
         ssh_config,
         imported_from,
     };
-    ws.sync_ssh_config()?;
+    ws.sync_ssh_config().map_err(OpenError::Other)?;
     Ok(ws)
 }
 
@@ -234,7 +253,7 @@ pub fn open_ssh_alias(
     cli_db: Option<&str>,
     alias: &str,
 ) -> Result<(), String> {
-    let ws = open_workspace(cli_config, cli_db)?;
+    let ws = open_workspace(cli_config, cli_db).map_err(|e| e.to_string())?;
     let hosts = ws.store.hosts().map_err(|e| e.to_string())?;
     let host = hosts
         .iter()

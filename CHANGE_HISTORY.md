@@ -2,6 +2,11 @@
 
 Newest first.
 
+## [2026-11-26] — Tested and merged: #180 Update Telepad on a database from a newer Telepad, compatible newer schemas
+- Issue #180 addressed on Windows: `store::NewerSchema` error (also preference.db, history.db, update.db), read-only check before opening for writing, `schema_meta.min_compatible` written on open (telepad.db minimum 5: schema 6 is additive), compatible newer files open without migrating or rewriting the version, status-bar note; fatal screen with Update Telepad (default release source, SHA-256 check, Restart now), Open the database folder, Copy the message; `telepad-check` prints the same advice; Replace import deletes only hosts missing from the import (kept hosts never cascade Portainers / unknown tables)
+- Files: telepad-core `store.rs`, `history.rs`, `prefs.rs`, `strategy.rs`, `lib.rs`; telepad-app `msg.rs`, `state.rs`, `update.rs`, `tests.rs`; telepad-gui `views/mod.rs`, `views/panels.rs`, `runtime.rs`; telepad-check; manual
+- Verified: fmt, clippy, all tests; copies of the database in a temp folder: schema 99 (minimum 99) → fatal screen, Update Telepad checks and says 0.9.13 is the latest, `telepad-check` prints the explanation; schema 7 (minimum 5, extra table) → opens with 56 hosts and the status-bar note, afterwards still schema 7 with the extra table and its row. Builds released before this (0.9.11 and older) still show the old error
+
 ## [2026-11-26] — #180 updated: compatible open of newer schemas
 - Owner asked for a button to fix the schema; added to #180: Update Telepad stays the button, plus a stored minimum compatible schema so additive changes (like schema 6) open in older builds
 - Title now: fix(store): Update Telepad on a database from a newer Telepad, and open newer but compatible schemas

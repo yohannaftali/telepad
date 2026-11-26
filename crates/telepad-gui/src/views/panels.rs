@@ -221,6 +221,13 @@ pub fn status_bar(ui: &mut egui::Ui, m: &Model, now: Instant, out: &mut Vec<Msg>
                 out.push(Msg::StrategyOpen);
             }
         }
+        if let Some(v) = m.newer_db {
+            ui.separator();
+            ui.colored_label(
+                usage_color(80.0),
+                format!("database from a newer Telepad (schema {v}): some features need an update"),
+            );
+        }
         let bg = telepad_app::background_transfers(m);
         if bg > 0 {
             ui.separator();

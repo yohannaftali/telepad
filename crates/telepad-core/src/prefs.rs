@@ -10,6 +10,7 @@ use crate::store::StoreError;
 
 pub const PREFS_FILE: &str = "preference.db";
 const PREFS_VERSION: i32 = 1;
+const MIN_COMPATIBLE_PREFS: i32 = 1;
 pub const NONE_LABEL: &str = "<none>";
 pub const OWN_LABEL: &str = "<own>";
 pub const MAX_LABEL: usize = 40;
@@ -116,6 +117,7 @@ pub struct Prefs {
     conn: Connection,
     path: PathBuf,
     permission_warning: Option<String>,
+    newer_schema: Option<i32>,
 }
 
 impl Prefs {
@@ -125,13 +127,26 @@ impl Prefs {
         {
             std::fs::create_dir_all(dir)?;
         }
+        let check = crate::store::check_newer_schema(path, "version", PREFS_VERSION)?;
         let conn = Connection::open(path)?;
+        let permission_warning = crate::platform::restrict_db_files(path).err();
+        if let crate::store::SchemaCheck::CompatibleNewer(found) = check {
+            return Ok(Self {
+                conn,
+                path: path.to_path_buf(),
+                permission_warning,
+                newer_schema: Some(found),
+            });
+        }
         let v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if v > PREFS_VERSION {
-            return Err(StoreError::Invalid(format!(
-                "{} was written by a newer Telepad (version {v})",
-                path.display()
-            )));
+            return Err(StoreError::NewerSchema(crate::store::NewerSchema {
+                path: path.to_path_buf(),
+                kind: "version",
+                found: v,
+                supported: PREFS_VERSION,
+                min_compatible: None,
+            }));
         }
         conn.execute_batch(&format!(
             "PRAGMA journal_mode = WAL;
@@ -152,11 +167,17 @@ impl Prefs {
              );
              PRAGMA user_version = {PREFS_VERSION};"
         ))?;
+        crate::store::write_min_schema(&conn, MIN_COMPATIBLE_PREFS)?;
         Ok(Self {
             conn,
             path: path.to_path_buf(),
-            permission_warning: crate::platform::restrict_db_files(path).err(),
+            permission_warning,
+            newer_schema: None,
         })
+    }
+
+    pub fn newer_schema(&self) -> Option<i32> {
+        self.newer_schema
     }
 
     /// Why the file stays readable by others (#110), if it does.
@@ -341,8 +362,23 @@ mod tests {
             let c = Connection::open(&path).unwrap();
             c.execute_batch("PRAGMA user_version = 99;").unwrap();
         }
-        let e = Prefs::open(&path).err().unwrap().to_string();
-        assert!(e.contains("newer Telepad"), "{e}");
+        let err = Prefs::open(&path).err().unwrap();
+        assert!(matches!(err, StoreError::NewerSchema(_)), "{err:?}");
+        assert!(err.to_string().contains("newer Telepad"), "{err}");
+
+        // Compatible newer schema opens without touching user_version.
+        let compat = temp("compat.db");
+        {
+            let db = Prefs::open(&compat).unwrap();
+            db.conn.execute_batch("PRAGMA user_version = 5;").unwrap();
+        }
+        let db = Prefs::open(&compat).unwrap();
+        assert_eq!(db.newer_schema(), Some(5));
+        let v: i32 = db
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 5);
     }
 
     #[test]
