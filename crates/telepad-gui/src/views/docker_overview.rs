@@ -143,7 +143,7 @@ fn stack(
                     } else {
                         &h.entry.hostname
                     };
-                    stack_controls(ui, r, row.name, &manager, i, address, out);
+                    stack_controls(ui, r, row.name, &manager, i, &h.entry.alias, address, out);
                 }
             });
             ui.indent(("docker-overview-body", row.name, i), |ui| {

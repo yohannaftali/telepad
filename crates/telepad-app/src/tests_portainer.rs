@@ -344,56 +344,74 @@ fn page_with_stack(s: &mut State) -> crate::portainer::PtPageId {
 
 #[test]
 fn stack_actions_ask_first_and_read_again_after() {
-    // #173
+    // #173, from the Portainer page and from a Stack page (#176).
+    use crate::portainer::{Origin, StackTab};
     use telepad_core::portainer::{Action, ContainerOp};
     let mut s = started(Instant::now(), "");
     let page = page_with_stack(&mut s);
-    // Choosing a stack lists its containers through the Portainer.
+    // A single click only selects; the Stack page lists the containers.
+    assert!(
+        pt(
+            &mut s,
+            PtMsg::SelectStack {
+                page,
+                stack: Some(11)
+            }
+        )
+        .is_empty()
+    );
+    assert_eq!(s.model.pt_pages[0].stack, Some(11));
     let fx = pt(
         &mut s,
-        PtMsg::SelectStack {
-            page,
-            stack: Some(11),
+        PtMsg::OpenStack {
+            portainer: "Main".into(),
+            stack: 11,
+            tab: StackTab::Containers,
         },
     );
+    let ed = s.model.pt_editors[0].id;
     assert!(
-        matches!(&fx[..], [PtEffect::Containers { stack, page: p, .. }] if stack.name == "shop" && *p == page)
+        fx.iter()
+            .any(|e| matches!(e, PtEffect::LoadStack { stack: 11, .. }))
     );
-    assert!(s.model.pt_pages[0].loading_containers);
+    assert!(fx.iter().any(
+        |e| matches!(e, PtEffect::Containers { stack, editor, .. } if stack.name == "shop" && *editor == ed)
+    ));
+    assert!(s.model.pt_editors[0].loading_containers);
     pt(
         &mut s,
-        PtMsg::ContainersLoaded {
-            page,
-            stack: 11,
+        PtMsg::StackContainers {
+            editor: ed,
             result: Ok(vec![]),
         },
     );
-    assert_eq!(s.model.pt_pages[0].containers, Some(Ok(vec![])));
+    assert_eq!(s.model.pt_editors[0].containers, Some(Ok(vec![])));
     // Stop asks first; No runs nothing.
     let stop = Action::StackStop { id: 11, env: 1 };
-    let ask = |act: Action, type_name: &str| PtMsg::Ask {
-        page,
+    let ask = |origin: Origin, act: Action, type_name: &str| PtMsg::Ask {
+        origin,
         act,
         title: "Stop stack shop".into(),
         type_name: type_name.into(),
     };
-    assert!(pt(&mut s, ask(stop.clone(), "")).is_empty());
+    assert!(pt(&mut s, ask(Origin::Page(page), stop.clone(), "")).is_empty());
     assert!(s.drafts.pt.confirm.is_some());
     assert!(pt(&mut s, PtMsg::ConfirmNo).is_empty());
     assert!(s.drafts.pt.confirm.is_none());
-    // Yes runs it, through the Portainer's host.
-    pt(&mut s, ask(stop.clone(), ""));
+    // Yes runs it, through the Portainer's host; the page shows it busy.
+    pt(&mut s, ask(Origin::Page(page), stop.clone(), ""));
     let fx = pt(&mut s, PtMsg::ConfirmYes);
     assert!(
         matches!(&fx[..], [PtEffect::Act { act, host, .. }] if *act == stop && host.alias == "docker1")
     );
     assert!(s.model.pt_pages[0].busy.is_some());
-    // Done: the Portainer and the shown containers are read again.
+    // Done: the Portainer and the open Stack page's containers are read again.
     let fx = pt(
         &mut s,
         PtMsg::Acted {
             portainer: "Main".into(),
-            page,
+            origin: Origin::Page(page),
+            act: stop.clone(),
             title: "Stop stack shop".into(),
             result: Ok(()),
         },
@@ -401,25 +419,27 @@ fn stack_actions_ask_first_and_read_again_after() {
     assert!(s.model.pt_pages[0].busy.is_none());
     assert_eq!(reads(&fx), ["Main"]);
     assert!(fx.iter().any(|e| matches!(e, PtEffect::Containers { .. })));
-    // Delete needs the name typed.
-    let del = Action::StackDelete { id: 11, env: 1 };
-    pt(&mut s, ask(del.clone(), "shop"));
-    s.drafts.pt.confirm.as_mut().unwrap().typed = "sho".into();
-    assert!(pt(&mut s, PtMsg::ConfirmYes).is_empty());
-    assert!(s.drafts.pt.confirm.is_some(), "still asking");
-    s.drafts.pt.confirm.as_mut().unwrap().typed = "shop".into();
-    assert!(
-        matches!(&pt(&mut s, PtMsg::ConfirmYes)[..], [PtEffect::Act { act, .. }] if *act == del)
-    );
-    // Container restart runs at once; remove asks, with the volume option.
+    // From the Stack page: its own busy line; container restart runs at
+    // once, remove asks with the volume option.
     let c = |op| Action::Container {
         env: 1,
         id: "abc".into(),
         op,
     };
-    let fx = pt(&mut s, ask(c(ContainerOp::Restart), ""));
-    assert!(matches!(&fx[..], [PtEffect::Act { .. }]));
-    assert!(pt(&mut s, ask(c(ContainerOp::Remove { volumes: false }), "")).is_empty());
+    let fx = pt(&mut s, ask(Origin::Stack(ed), c(ContainerOp::Restart), ""));
+    assert!(matches!(&fx[..], [PtEffect::Act { origin: Origin::Stack(e), .. }] if *e == ed));
+    assert!(s.model.pt_editors[0].busy.is_some());
+    assert!(
+        pt(
+            &mut s,
+            ask(
+                Origin::Stack(ed),
+                c(ContainerOp::Remove { volumes: false }),
+                ""
+            )
+        )
+        .is_empty()
+    );
     pt(&mut s, PtMsg::ConfirmVolumes(true));
     assert!(matches!(
         &pt(&mut s, PtMsg::ConfirmYes)[..],
@@ -431,6 +451,126 @@ fn stack_actions_ask_first_and_read_again_after() {
             ..
         }]
     ));
+    // Delete needs the name typed; once done, its Stack page closes.
+    let del = Action::StackDelete { id: 11, env: 1 };
+    pt(&mut s, ask(Origin::Stack(ed), del.clone(), "shop"));
+    s.drafts.pt.confirm.as_mut().unwrap().typed = "sho".into();
+    assert!(pt(&mut s, PtMsg::ConfirmYes).is_empty());
+    assert!(s.drafts.pt.confirm.is_some(), "still asking");
+    s.drafts.pt.confirm.as_mut().unwrap().typed = "shop".into();
+    assert!(
+        matches!(&pt(&mut s, PtMsg::ConfirmYes)[..], [PtEffect::Act { act, .. }] if *act == del)
+    );
+    pt(
+        &mut s,
+        PtMsg::Acted {
+            portainer: "Main".into(),
+            origin: Origin::Stack(ed),
+            act: del,
+            title: "Delete stack shop".into(),
+            result: Ok(()),
+        },
+    );
+    assert!(s.model.pt_editors.is_empty());
+    assert!(!s.model.ws.is_open(Win::PtStack(ed)));
+}
+
+#[test]
+fn a_host_page_opens_the_stack_in_the_portainer_that_manages_it() {
+    // #176: by host + stack name; read first when needed; several → choose.
+    use crate::portainer::{StackRef, StackTab};
+    let mut s = started(Instant::now(), "");
+    loaded(&mut s);
+    // Not read yet: the Portainers are read, then the page opens.
+    let fx = pt(
+        &mut s,
+        PtMsg::OpenStackFor {
+            alias: "docker1".into(),
+            name: "shop".into(),
+        },
+    );
+    assert_eq!(reads(&fx), ["Main", "Lab"]);
+    assert!(s.model.pt_editors.is_empty());
+    done(&mut s, "Main", Ok((with_stack(), None)));
+    assert!(s.model.pt_editors.is_empty(), "waits for every read");
+    let fx = done(&mut s, "Lab", Ok((snapshot(), None)));
+    assert_eq!(s.model.pt_editors.len(), 1);
+    let e = &s.model.pt_editors[0];
+    assert_eq!(
+        (e.portainer.as_str(), e.stack_id, e.tab),
+        ("Main", 11, StackTab::Containers)
+    );
+    assert_eq!(e.env_name, "local");
+    assert!(fx.iter().any(|x| matches!(x, PtEffect::Containers { .. })));
+    // Known now: opens at once (raises the same page), even by another case.
+    let ed = e.id;
+    s.model.ws.open(Win::Overview);
+    assert!(
+        pt(
+            &mut s,
+            PtMsg::OpenStackFor {
+                alias: "docker1".into(),
+                name: "SHOP".into()
+            }
+        )
+        .is_empty()
+    );
+    assert_eq!(s.model.ws.focused, Some(Win::PtStack(ed)));
+    // Another host has no such stack.
+    assert!(crate::portainer::stack_refs(&s.model, "docker2", "shop").is_empty());
+    pt(
+        &mut s,
+        PtMsg::OpenStackFor {
+            alias: "docker2".into(),
+            name: "shop".into(),
+        },
+    );
+    assert_eq!(s.model.pt_editors.len(), 1);
+    // Two Portainers manage the same host: the user picks.
+    done(&mut s, "Lab", Ok((with_stack(), None)));
+    let lab_host = s
+        .model
+        .portainers
+        .iter()
+        .position(|r| r.p.name == "Lab")
+        .unwrap();
+    s.model.portainers[lab_host].p.alias = "docker1".into();
+    assert_eq!(
+        crate::portainer::stack_refs(&s.model, "docker1", "shop").len(),
+        2
+    );
+    pt(
+        &mut s,
+        PtMsg::OpenStackFor {
+            alias: "docker1".into(),
+            name: "shop".into(),
+        },
+    );
+    let choices = s.drafts.pt.choose.clone().unwrap();
+    assert_eq!(choices.len(), 2);
+    let lab: StackRef = choices.into_iter().find(|c| c.portainer == "Lab").unwrap();
+    pt(&mut s, PtMsg::ChooseStack(Some(lab)));
+    assert!(s.drafts.pt.choose.is_none());
+    assert_eq!(s.model.pt_editors.len(), 2);
+    assert_eq!(s.model.pt_editors[1].portainer, "Lab");
+    // Tabs keep the edits.
+    let ed2 = s.model.pt_editors[1].id;
+    s.drafts.pt.editors.get_mut(&ed2).unwrap().file = "edited".into();
+    pt(
+        &mut s,
+        PtMsg::SetTab {
+            editor: ed2,
+            tab: StackTab::Editor,
+        },
+    );
+    pt(
+        &mut s,
+        PtMsg::SetTab {
+            editor: ed2,
+            tab: StackTab::Containers,
+        },
+    );
+    assert_eq!(s.drafts.pt.editors[&ed2].file, "edited");
 }
 
 #[test]
@@ -438,14 +578,37 @@ fn the_stack_editor_reviews_updates_and_handles_a_changed_stack() {
     // #173
     use telepad_core::portainer::{EnvVar, StackDetail};
     let mut s = started(Instant::now(), "");
-    let page = page_with_stack(&mut s);
-    let fx = pt(&mut s, PtMsg::EditStack { page, stack: 11 });
-    assert!(matches!(&fx[..], [PtEffect::LoadStack { stack: 11, .. }]));
+    let _page = page_with_stack(&mut s);
+    let fx = pt(
+        &mut s,
+        PtMsg::OpenStack {
+            portainer: "Main".into(),
+            stack: 11,
+            tab: crate::portainer::StackTab::Editor,
+        },
+    );
+    assert!(matches!(
+        &fx[..],
+        [
+            PtEffect::LoadStack { stack: 11, .. },
+            PtEffect::Containers { .. }
+        ]
+    ));
     let ed = s.model.pt_editors[0].id;
     assert_eq!(s.model.pt_editors[0].title(), "Stack - shop");
     assert!(s.model.ws.is_open(Win::PtStack(ed)));
     // Opening it again brings the same window.
-    assert!(pt(&mut s, PtMsg::EditStack { page, stack: 11 }).is_empty());
+    assert!(
+        pt(
+            &mut s,
+            PtMsg::OpenStack {
+                portainer: "Main".into(),
+                stack: 11,
+                tab: crate::portainer::StackTab::Editor
+            }
+        )
+        .is_empty()
+    );
     assert_eq!(s.model.pt_editors.len(), 1);
     let var = |n: &str, v: &str| EnvVar {
         name: n.into(),
@@ -551,7 +714,14 @@ fn the_stack_editor_reviews_updates_and_handles_a_changed_stack() {
     assert!(s.model.pt_editors.is_empty());
     assert!(!s.model.ws.is_open(Win::PtStack(ed)));
     // A git stack is not sent from Telepad.
-    pt(&mut s, PtMsg::EditStack { page, stack: 11 });
+    pt(
+        &mut s,
+        PtMsg::OpenStack {
+            portainer: "Main".into(),
+            stack: 11,
+            tab: crate::portainer::StackTab::Editor,
+        },
+    );
     let ed = s.model.pt_editors[0].id;
     let git = StackDetail {
         git: Some("https://git.example/shop.git".into()),
@@ -584,8 +754,15 @@ fn variables_open_as_their_own_page_and_come_from_a_file_or_paste() {
     // #173: the Variables page, .env import and paste.
     use telepad_core::portainer::{EnvVar, StackDetail};
     let mut s = started(Instant::now(), "");
-    let page = page_with_stack(&mut s);
-    pt(&mut s, PtMsg::EditStack { page, stack: 11 });
+    let _page = page_with_stack(&mut s);
+    pt(
+        &mut s,
+        PtMsg::OpenStack {
+            portainer: "Main".into(),
+            stack: 11,
+            tab: crate::portainer::StackTab::Editor,
+        },
+    );
     let ed = s.model.pt_editors[0].id;
     let detail = StackDetail {
         id: 11,
@@ -681,7 +858,14 @@ fn variables_open_as_their_own_page_and_come_from_a_file_or_paste() {
     pt(&mut s, PtMsg::EditorDiscard(ed));
     assert!(!s.model.ws.is_open(Win::PtVars(ed)));
     // Git stacks: no import or paste.
-    pt(&mut s, PtMsg::EditStack { page, stack: 11 });
+    pt(
+        &mut s,
+        PtMsg::OpenStack {
+            portainer: "Main".into(),
+            stack: 11,
+            tab: crate::portainer::StackTab::Editor,
+        },
+    );
     let ed = s.model.pt_editors[0].id;
     pt(
         &mut s,

@@ -5,8 +5,8 @@
 
 use eframe::egui::{self, RichText};
 use telepad_app::portainer::{
-    EditorDraft, EditorId, PtMsg, PtPageId, PtRow, PtStatus, StackEditor, editor_dirty,
-    suggestions, var_changes,
+    EditorDraft, EditorId, Origin, PtMsg, PtPageId, PtRow, PtStatus, StackEditor, StackTab,
+    editor_dirty, suggestions, var_changes,
 };
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::portainer::{
@@ -200,6 +200,7 @@ pub fn dialogs(ctx: &egui::Context, m: &Model, d: &mut Drafts, out: &mut Vec<Msg
     form_dialog(ctx, m, d, out);
     delete_dialog(ctx, d, out);
     confirm_dialog(ctx, d, out);
+    choose_dialog(ctx, d, out);
 }
 
 fn form_dialog(ctx: &egui::Context, m: &Model, d: &mut Drafts, out: &mut Vec<Msg>) {
@@ -616,12 +617,9 @@ pub fn portainer_page(
         Col::action(""),
     ];
     let busy = page.busy.is_some();
-    let stack_h = if page.stack.is_some() {
-        (ui.available_height() * 0.42).clamp(100.0, 420.0)
-    } else {
-        ui.available_height()
-    };
+    let stack_h = ui.available_height();
     let mut stack_click = None;
+    let mut stack_open = None;
     let mut button = false;
     ui.allocate_ui(egui::vec2(ui.available_width(), stack_h), |ui| {
         ui.set_max_height(stack_h);
@@ -665,9 +663,10 @@ pub fn portainer_page(
                                 button = true;
                                 pt(
                                     out,
-                                    PtMsg::EditStack {
-                                        page: id,
+                                    PtMsg::OpenStack {
+                                        portainer: row.p.name.clone(),
                                         stack: s.id,
+                                        tab: StackTab::Editor,
                                     },
                                 );
                             }
@@ -700,7 +699,7 @@ pub fn portainer_page(
                                 pt(
                                     out,
                                     PtMsg::Ask {
-                                        page: id,
+                                        origin: Origin::Page(id),
                                         act,
                                         title: format!("{what} stack {} on {env_name}", s.name),
                                         type_name: String::new(),
@@ -714,7 +713,7 @@ pub fn portainer_page(
                                 pt(
                                     out,
                                     PtMsg::Ask {
-                                        page: id,
+                                        origin: Origin::Page(id),
                                         act: Action::StackDelete {
                                             id: s.id,
                                             env: s.env,
@@ -759,12 +758,17 @@ pub fn portainer_page(
             }
             Ev::Menu { row: r, .. } => {
                 let s = stacks[r];
-                if ui.button(il(icons::CONTAINER, "Show containers")).clicked() {
+                if ui
+                    .button(il(icons::STACK, "Open stack"))
+                    .on_hover_text("Its Stack page: containers and editor (also a double-click)")
+                    .clicked()
+                {
                     pt(
                         out,
-                        PtMsg::SelectStack {
-                            page: id,
-                            stack: Some(s.id),
+                        PtMsg::OpenStack {
+                            portainer: row.p.name.clone(),
+                            stack: s.id,
+                            tab: StackTab::Containers,
                         },
                     );
                     ui.close();
@@ -776,9 +780,10 @@ pub fn portainer_page(
                     {
                         pt(
                             out,
-                            PtMsg::EditStack {
-                                page: id,
+                            PtMsg::OpenStack {
+                                portainer: row.p.name.clone(),
                                 stack: s.id,
+                                tab: StackTab::Editor,
                             },
                         );
                         ui.close();
@@ -790,7 +795,7 @@ pub fn portainer_page(
                         pt(
                             out,
                             PtMsg::Ask {
-                                page: id,
+                                origin: Origin::Page(id),
                                 act: Action::StackDelete {
                                     id: s.id,
                                     env: s.env,
@@ -808,26 +813,40 @@ pub fn portainer_page(
         if let Some((r, _)) = o.clicked {
             stack_click = Some(stacks[r].id);
         }
+        if let Some((r, _)) = o.double_clicked {
+            stack_open = Some(stacks[r].id);
+        }
+        for (r, resp) in &o.rows {
+            resp.clone()
+                .on_hover_text(format!("Double-click: Stack page of {}", stacks[*r].name));
+        }
         out.extend(o.msgs);
     });
-    if let Some(s) = stack_click.filter(|_| !button) {
-        let next = (page.stack != Some(s)).then_some(s);
+    // A double-click opens the stack's page (#176); a click selects it.
+    if let Some(sid) = stack_open.filter(|_| !button) {
+        pt(
+            out,
+            PtMsg::OpenStack {
+                portainer: row.p.name.clone(),
+                stack: sid,
+                tab: StackTab::Containers,
+            },
+        );
+    } else if let Some(sid) = stack_click.filter(|_| !button) {
         pt(
             out,
             PtMsg::SelectStack {
                 page: id,
-                stack: next,
+                stack: Some(sid),
             },
         );
     }
-    // The containers of the chosen stack (#173).
-    let Some(stack) = page
-        .stack
-        .and_then(|sid| snap.stacks.iter().find(|s| s.id == sid))
-    else {
-        return;
-    };
-    ui.add_space(6.0);
+}
+/// The Stack page's Containers tab (#176; actions #173).
+fn containers_tab(ui: &mut egui::Ui, d: &mut Drafts, e: &StackEditor, out: &mut Vec<Msg>) {
+    let id = e.id;
+    let stack = &e.stack;
+    let busy = e.busy.is_some();
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(il(
@@ -836,35 +855,28 @@ pub fn portainer_page(
             ))
             .strong(),
         );
-        if page.loading_containers {
+        if e.loading_containers {
             ui.spinner();
-        } else if ui
-            .small_button(icons::REFRESH)
-            .on_hover_text("Read again")
-            .clicked()
-        {
-            pt(
-                out,
-                PtMsg::SelectStack {
-                    page: id,
-                    stack: Some(stack.id),
-                },
-            );
         }
     });
-    let list = match &page.containers {
+    let list = match &e.containers {
         Some(Ok(l)) => l,
-        Some(Err(e)) => {
-            ui.colored_label(usage_color(95.0), e);
+        Some(Err(err)) => {
+            ui.colored_label(usage_color(95.0), err);
             return;
         }
         None => return,
     };
+    if list.is_empty() {
+        ui.label(RichText::new("No containers (the stack is down, or not deployed yet).").weak());
+    }
     // Swarm tasks are managed by their service: no container actions.
     let locked = if stack.kind == 1 {
         Some("Swarm service tasks: scale or update the service in Portainer")
+    } else if stack.kind == 3 || matches!(e.env_kind, 4 | 7) {
+        Some("changed in Portainer")
     } else {
-        stack_locked(stack, env)
+        None
     };
     let c_cells: Vec<Vec<String>> = list
         .iter()
@@ -887,9 +899,12 @@ pub fn portainer_page(
         Col::new("Ports"),
         Col::action(""),
     ];
-    let state = d.tables.entry(format!("pt-containers:{id}")).or_default();
+    let state = d
+        .tables
+        .entry(format!("pt-stack-containers:{id}"))
+        .or_default();
     let c_title = format!("{} containers", stack.name);
-    let spec = Spec::new(("pt-containers", id), &c_title, &c_cols)
+    let spec = Spec::new(("pt-stack-containers", id), &c_title, &c_cols)
         .kind(Kind::Fill)
         .row_h(24.0);
     let o = table::show(ui, &spec, state, &c_cells, |ui, ev| {
@@ -931,7 +946,7 @@ pub fn portainer_page(
                             pt(
                                 out,
                                 PtMsg::Ask {
-                                    page: id,
+                                    origin: Origin::Stack(id),
                                     act: Action::Container {
                                         env: stack.env,
                                         id: c.id.clone(),
@@ -949,6 +964,160 @@ pub fn portainer_page(
         }
     });
     out.extend(o.msgs);
+}
+
+/// The Stack page's header (#176): where it runs, its status and the
+/// stack actions (#173).
+fn stack_header(ui: &mut egui::Ui, m: &Model, e: &StackEditor, out: &mut Vec<Msg>) {
+    let id = e.id;
+    let s = &e.stack;
+    let row = m.pt(&e.portainer);
+    let hosts: Vec<telepad_core::config::HostEntry> =
+        m.hosts.iter().map(|h| h.entry.clone()).collect();
+    let env = row
+        .and_then(|r| r.data.as_ref())
+        .and_then(|d| d.environments.iter().find(|x| x.id == e.env_id));
+    let host_alias = match (row, env) {
+        (Some(r), Some(env)) => env_host(env, &r.p.alias, &hosts).map(|h| h.alias.clone()),
+        _ => None,
+    };
+    let base = row.and_then(|r| {
+        m.hosts
+            .iter()
+            .find(|h| h.entry.alias == r.p.alias)
+            .map(|h| r.p.web_url(&h.entry))
+    });
+    let busy = e.busy.is_some();
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(il(icons::STACK, &e.name)).strong().size(16.0));
+        let (txt, colour) = match s.state() {
+            "active" => ("active", usage_color(10.0)),
+            "deploying" => ("deploying", usage_color(80.0)),
+            "error" => ("error", usage_color(95.0)),
+            other => (other, ui.visuals().weak_text_color()),
+        };
+        ui.colored_label(colour, txt);
+        ui.label(
+            RichText::new(format!(
+                "· {} · {} · Portainer {}",
+                s.kind_name(),
+                e.env_name,
+                e.portainer
+            ))
+            .weak(),
+        );
+        if let Some(a) = &host_alias {
+            ui.label(RichText::new("· on").weak());
+            if ui
+                .link(a)
+                .on_hover_text(format!("The host page of {a}"))
+                .clicked()
+            {
+                out.push(Msg::SelectAlias(a.clone()));
+            }
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        let locked = env.map_or_else(|| stack_locked(s, None), |x| stack_locked(s, Some(x)));
+        if let Some(why) = locked {
+            table::weak(ui, why);
+        } else if s.deploying {
+            ui.spinner();
+            table::weak(ui, "Portainer is deploying it");
+        } else {
+            let (act, what, kind, icon) = if s.active == Some(false) {
+                (
+                    Action::StackStart {
+                        id: s.id,
+                        env: s.env,
+                    },
+                    "Start",
+                    Act::Add,
+                    icons::PLAY,
+                )
+            } else {
+                (
+                    Action::StackStop {
+                        id: s.id,
+                        env: s.env,
+                    },
+                    "Stop",
+                    Act::Caution,
+                    icons::STOP,
+                )
+            };
+            if act_small(ui, !busy, kind, &il(icon, what)).clicked() {
+                pt(
+                    out,
+                    PtMsg::Ask {
+                        origin: Origin::Stack(id),
+                        act,
+                        title: format!("{what} stack {} on {}", s.name, e.env_name),
+                        type_name: String::new(),
+                    },
+                );
+            }
+            if act_small(ui, !busy, Act::Danger, &il(icons::TRASH, "Delete…")).clicked() {
+                pt(
+                    out,
+                    PtMsg::Ask {
+                        origin: Origin::Stack(id),
+                        act: Action::StackDelete {
+                            id: s.id,
+                            env: s.env,
+                        },
+                        title: format!("Delete stack {} on {}", s.name, e.env_name),
+                        type_name: s.name.clone(),
+                    },
+                );
+            }
+        }
+        if ui
+            .add_enabled(
+                !e.loading_containers,
+                egui::Button::new(il(icons::REFRESH, "Refresh")).small(),
+            )
+            .on_hover_text("Read the stack and its containers again")
+            .clicked()
+        {
+            pt(out, PtMsg::RefreshStack(id));
+        }
+        if let Some(b) = &base
+            && ui
+                .add(egui::Button::new(il(icons::BROWSERS, "Open in Portainer")).small())
+                .clicked()
+        {
+            out.push(Msg::OpenUrl(stack_url(b, s)));
+        }
+        if let Some(b) = &e.busy {
+            ui.spinner();
+            ui.label(RichText::new(b).weak());
+        }
+    });
+}
+
+/// Several Portainers have the host's stack (#176): pick one.
+fn choose_dialog(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
+    let Some(list) = &d.pt.choose else { return };
+    let modal = egui::Modal::new(egui::Id::unique("pt-choose")).show(ctx, |ui| {
+        ui.set_width(420.0);
+        ui.heading(il(icons::STACK, "Which stack?"));
+        ui.label("More than one registered Portainer has this stack for the host:");
+        for r in list {
+            if ui
+                .button(format!("{} · {} (stack {})", r.portainer, r.env, r.stack))
+                .clicked()
+            {
+                pt(out, PtMsg::ChooseStack(Some(r.clone())));
+            }
+        }
+        if ui.button("Cancel").clicked() {
+            pt(out, PtMsg::ChooseStack(None));
+        }
+    });
+    if modal.should_close() {
+        pt(out, PtMsg::ChooseStack(None));
+    }
 }
 
 /// The confirmation of a stack / container action (#173).
@@ -1034,6 +1203,29 @@ pub fn stack_editor_page(
     };
     let git = e.detail.as_ref().and_then(|x| x.git.clone());
     let dirty = editor_dirty(e, dr);
+    stack_header(ui, m, e, out);
+    ui.horizontal(|ui| {
+        for (tab, label) in [
+            (StackTab::Containers, il(icons::CONTAINER, "Containers")),
+            (
+                StackTab::Editor,
+                il(icons::CODE, if dirty { "Editor ●" } else { "Editor" }),
+            ),
+        ] {
+            if ui.selectable_label(e.tab == tab, label).clicked() && e.tab != tab {
+                pt(out, PtMsg::SetTab { editor: id, tab });
+            }
+        }
+    });
+    ui.separator();
+    if e.tab == StackTab::Containers {
+        containers_tab(ui, d, e, out);
+        let Some(dr) = d.pt.editors.get_mut(&id) else {
+            return;
+        };
+        close_question(ui, e, dr, id, out);
+        return;
+    }
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(il(icons::STACK, &e.name)).strong());
         ui.label(
@@ -1138,6 +1330,17 @@ pub fn stack_editor_page(
         &saved,
         editable,
     );
+    close_question(ui, e, dr, id, out);
+}
+
+/// Closing a Stack page with unsaved edits asks first.
+fn close_question(
+    ui: &mut egui::Ui,
+    e: &StackEditor,
+    dr: &mut EditorDraft,
+    id: EditorId,
+    out: &mut Vec<Msg>,
+) {
     if dr.ask_close {
         let modal = egui::Modal::new(egui::Id::unique(("pt-ed-close", id))).show(ui.ctx(), |ui| {
             ui.set_width(420.0);

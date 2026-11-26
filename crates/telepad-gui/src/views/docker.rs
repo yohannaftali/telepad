@@ -115,12 +115,14 @@ pub fn container_items(
 }
 
 /// Compose actions for a stack, or the way to Portainer.
+#[allow(clippy::too_many_arguments)]
 pub fn stack_controls(
     ui: &mut egui::Ui,
     r: &HostReport,
     stack: &str,
     manager: &Manager,
     host: usize,
+    alias: &str,
     address: &str,
     out: &mut Vec<Msg>,
 ) {
@@ -144,22 +146,40 @@ pub fn stack_controls(
                 }
             });
         }
-        Manager::Portainer { .. } => match portainer_url(r, address) {
-            Some(url) => {
-                if ui
-                    .button(RichText::new("Open in Portainer").color(portainer_color()))
-                    .on_hover_text(format!("{url}\nPortainer stacks are changed in Portainer"))
-                    .clicked()
-                {
-                    out.push(Msg::OpenUrl(url));
-                }
+        Manager::Portainer { .. } => {
+            // Its Stack page in the registered Portainer that manages this host (#176).
+            if ui
+                .button(il(icons::STACK, "Open stack"))
+                .on_hover_text("Its Stack page in Telepad: containers and editor, through the registered Portainer that manages this host")
+                .clicked()
+            {
+                out.push(Msg::Portainer(telepad_app::portainer::PtMsg::OpenStackFor {
+                    alias: alias.to_string(),
+                    name: stack.to_string(),
+                }));
             }
-            None => {
-                ui.label(RichText::new("change it in Portainer").weak())
-                    .on_hover_text("Managed by a Portainer server elsewhere (agent on this host)");
-            }
-        },
+            portainer_link(ui, r, address, out);
+        }
         Manager::Standalone => {}
+    }
+}
+
+/// Open in Portainer, or where its stacks are changed.
+fn portainer_link(ui: &mut egui::Ui, r: &HostReport, address: &str, out: &mut Vec<Msg>) {
+    match portainer_url(r, address) {
+        Some(url) => {
+            if ui
+                .button(RichText::new("Open in Portainer").color(portainer_color()))
+                .on_hover_text(format!("{url}\nPortainer stacks are changed in Portainer"))
+                .clicked()
+            {
+                out.push(Msg::OpenUrl(url));
+            }
+        }
+        None => {
+            ui.label(RichText::new("change it in Portainer").weak())
+                .on_hover_text("Managed by a Portainer server elsewhere (agent on this host)");
+        }
     }
 }
 
@@ -317,7 +337,7 @@ pub fn docker_stacks(
                 );
                 ui.label(RichText::new(mtext).color(mcolor));
                 if let Some(host) = host {
-                    stack_controls(ui, r, stack, &manager, host, address, out);
+                    stack_controls(ui, r, stack, &manager, host, alias, address, out);
                 }
                 if resp.clicked() {
                     open = !open;
