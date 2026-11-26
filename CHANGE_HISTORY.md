@@ -2,6 +2,31 @@
 
 Newest first.
 
+## [2026-11-26] — feat(portainer): Portainers page — register Portainer servers with an API token, per-Portainer page with environments and stacks (read-only, SSH tunnel)
+- Issue #171 created on GitHub
+- Scope: portainer (core client, store, app, gui pages)
+- Labels: enhancement
+
+## [2026-11-26] — feat(ui): filter box trailing funnel icon opens a searchable value dropdown (select2 style)
+- Issue #170 created on GitHub
+- Scope: ui (table component, grid)
+- Labels: enhancement
+
+## [2026-11-26] — feat(hosts): click the Hosts - [group / cluster] title to go back to its parent page
+- Issue #169 created on GitHub
+- Scope: ui (workspace, sets)
+- Labels: enhancement
+
+## [2026-11-26] — feat(ui): Windows 11-style snap layouts when dragging inner windows
+- Issue #168 created on GitHub
+- Scope: ui (workspace)
+- Labels: enhancement
+
+## [2026-11-26] — fix(ui): light theme blue-grey palette for sidebar, buttons, headers and title bars; dark blue title and table header in dark theme
+- Issue #167 created on GitHub
+- Scope: ui (widgets, workspace, panels)
+- Labels: enhancement
+
 ## [2026-11-25] — Telepad 0.9.11
 - **Tables fill their page** (#156): every table sizes its columns like the Hosts table. Spare width goes to
   long text, columns shrink toward their titles on narrow pages, then the table scrolls sideways. A width you
