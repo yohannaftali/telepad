@@ -2,6 +2,14 @@
 
 Newest first.
 
+## [2026-11-26] — Telepad 0.9.12
+- #163 Group / Cluster cells and card links open "Hosts - [name]"
+- #167 Blue-grey (slate) light theme; navy title bar, table header and selection in the dark theme
+- #168 Snap layouts: window edges, corners, a layout picker at the top, and on the maximize button
+- #169 Back from "Hosts - [name]" to the page it was opened from
+- #170 Filter boxes: the funnel opens a searchable list of the column's values
+- #171 Portainers page and "Portainer - [name]": environments and stacks, read-only through an SSH tunnel (schema 6)
+
 ## [2026-11-25] — Telepad 0.9.11
 - **Tables fill their page** (#156): every table sizes its columns like the Hosts table. Spare width goes to
   long text, columns shrink toward their titles on narrow pages, then the table scrolls sideways. A width you
