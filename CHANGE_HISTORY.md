@@ -2,6 +2,10 @@
 
 Newest first.
 
+## [2026-11-26] — Telepad 0.9.13
+- #173 Portainer stack and container actions through the Portainer API: start / stop / delete stacks; start / stop / kill / restart / pause / resume / remove containers; the stack editor in Telepad's text editor with a Variables page (.env file or paste) and Update the stack (review, changed-stack check); every change logged in history.db
+- #176 Stack page with Containers and Editor tabs: double-click a stack on a Portainer page, or Open stack on a host page
+
 ## [2026-11-26] — feat(portainer): Stack page with Containers and Editor tabs, Open stack on host pages
 - Issue #176 addressed on Windows (stacked on #173)
 - Files: telepad-app `portainer.rs` (StackTab, Origin, StackRef, stack_refs, open_stack, OpenStackFor, pending open, chooser), `state.rs`, `tests_portainer.rs`; telepad-gui `views/portainer.rs` (stack header, tabs, containers tab, double-click, chooser), `views/docker.rs` / `docker_overview.rs` (Open stack), `runtime.rs`; docs (manual, AGENTS)
