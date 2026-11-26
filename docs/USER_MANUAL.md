@@ -420,7 +420,7 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
 
   | Button | What it does |
   |---|---|
-  | **Edit** (yellow) | Opens the stack editor (below) |
+  | **Edit** (yellow) | Opens the stack's page on its Editor tab (below) |
   | **Start** (green, inactive stacks) / **Stop** (amber, active stacks) | Asks "Start / Stop stack X on environment Y?" first; Start deploys it again (`docker compose up`); Stop takes it down: its containers are stopped and removed, its files, variables and named volumes stay |
   | **Delete** (red) | Asks first and needs the stack name typed. Portainer removes the stack's containers and networks and its files; Telepad sends no volume option, so Portainer's own default for volumes applies. Cannot be undone |
   | browser button | Opens the stack in Portainer |
@@ -431,14 +431,20 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
   stack and container buttons are disabled and the action shows next to the Stacks title.
   Portainer's own message is shown when it refuses (e.g. *403* for a user without the right
   role, *409 Stack deployment is already in progress*).
-- **Containers**: click a stack (or right-click ▸ **Show containers**) to list its containers
-  under the stacks (Docker's list through Portainer, by the compose project / swarm stack label):
-  name, image, state, status, ports and the actions that fit the state — **Start**, **Stop**,
-  **Restart**, **Pause**, **Resume** run at once; **Kill** and **Remove** ask first (Remove can
-  also remove the container's anonymous volumes, off by default). Swarm service tasks have no
-  container actions (scale or update the service in Portainer). Click the stack again to hide
-  them; the refresh button next to the title reads them again.
-- **Stack editor** (**Edit**; a window "Stack - [name]", one per stack): the
+- **Stack page** (#176): **double-click** a stack (or right-click ▸ **Open stack**) to open its
+  page, "Stack - [name]", one per stack (opening it again brings it to the front). Its header
+  shows the status, type, environment and the Telepad host it runs on (a link to its host page),
+  with **Start** / **Stop**, **Delete…**, **Refresh** and **Open in Portainer** (the same
+  confirmations as above; a deleted stack's page closes). Two tabs:
+  - **Containers** (first): the stack's containers (Docker's list through Portainer, by the
+    compose project / swarm stack label): name, image, state, status, ports and the actions that
+    fit the state — **Start**, **Stop**, **Restart**, **Pause**, **Resume** run at once; **Kill**
+    and **Remove** ask first (Remove can also remove the container's anonymous volumes, off by
+    default). Swarm service tasks have no container actions (scale or update the service in
+    Portainer). They are read when the page opens, on **Refresh** and after every action.
+  - **Editor**: the stack editor below (**Edit** on the Portainers page opens this tab). Switching
+    tabs keeps unsaved edits (the tab shows ● then).
+- **Stack editor** (the Stack page's **Editor** tab): the
   `docker-compose.yml` in Telepad's own text editor (the one of the file windows, see
   [Editor](#editor)): YAML colours, line numbers, the current line, Tab / Shift+Tab indent,
   **Find** (Ctrl+F), **Replace** (Ctrl+H), **Go to line** (Ctrl+G), F3 / Shift+F3 for the next /
@@ -709,7 +715,7 @@ directly, the command runs with `sudo` and sudo asks for your password there.
 |---|---|
 | Container ☰ | Shell (`docker exec -it`, bash if present), Logs (`logs -f --tail 200`), Start, Stop, Restart, Pause, Resume, Kill, Remove (`rm` without `-f`: stop it first; volumes are kept) — only the ones that fit the container's state |
 | Compose | Logs, Up (`up -d`), Restart, Stop, Down (`down` without `-v`: named volumes are kept), run with the stack's own folder, project name and files |
-| Portainer stack | **Open in Portainer** when the Portainer server runs on this host, otherwise "change it in Portainer": Portainer stacks are only changed in Portainer |
+| Portainer stack | **Open stack** (#176): the stack's page in Telepad (Containers / Editor), through the registered Portainer whose environment is this host; if its Portainers are not read yet they are read first, several matches ask which one, none says so (register the Portainer on the Portainers page). Then **Open in Portainer** when the Portainer server runs on this host, otherwise "change it in Portainer". The Compose menu's terminal actions stay off for Portainer stacks |
 
 **How it runs…** (container ☰) reads `docker inspect` and the stack's compose files
 (read-only) and shows a `docker run` command rebuilt from them, with **Copy** buttons.

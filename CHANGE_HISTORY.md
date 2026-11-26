@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-26] — feat(portainer): Stack page with Containers and Editor tabs, Open stack on host pages
+- Issue #176 addressed on Windows (stacked on #173)
+- Files: telepad-app `portainer.rs` (StackTab, Origin, StackRef, stack_refs, open_stack, OpenStackFor, pending open, chooser), `state.rs`, `tests_portainer.rs`; telepad-gui `views/portainer.rs` (stack header, tabs, containers tab, double-click, chooser), `views/docker.rs` / `docker_overview.rs` (Open stack), `runtime.rs`; docs (manual, AGENTS)
+- Verified: fmt, clippy, all workspace tests (new: open from a Portainer page and from a host by name, read-first, chooser, tab switch keeps edits, delete closes the page)
+- Not verified yet: GUI (screen locked)
+
 ## [2026-11-26] — Tested and merged: #173 Portainer stack and container actions, stack editor, Variables page
 - Issue #173 addressed on Windows: stack start / stop / delete, container start / stop / kill / restart / pause / resume / remove, the stack editor in Telepad's text editor, the Variables page with .env import and paste, Update the stack with review and changed-stack check, all through the Portainer API with the user's token; history.db kind `portainer`
 - Files: telepad-core `portainer.rs`, `history.rs`, `db/secret.rs`, fixtures `stack.json` / `containers.json`; telepad-app `portainer.rs`, `workspace.rs`, `state.rs`, `tests_portainer.rs`; telepad-gui `views/portainer.rs`, `views/text_editor.rs` (`embedded`), `views/workspace.rs`, `views/mod.rs`, `runtime.rs`; telepad-check `--stack`; docs (manual, README, SECURITY, AGENTS)
