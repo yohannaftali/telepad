@@ -117,6 +117,9 @@ pub struct Model {
     /// Open "Portainer - [name]" pages.
     pub pt_pages: Vec<crate::portainer::PtPage>,
     pub pt_pages_next: crate::portainer::PtPageId,
+    /// Open stack editors (#173).
+    pub pt_editors: Vec<crate::portainer::StackEditor>,
+    pub pt_editors_next: crate::portainer::EditorId,
 }
 
 /// A key added to / revoked from several hosts.

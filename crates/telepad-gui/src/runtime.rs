@@ -1913,6 +1913,32 @@ impl Runtime {
                     .and_then(|()| pc::forget_token(&name));
                 Some(Msg::Portainer(PtMsg::Saved(r)))
             }
+            PtEffect::PickEnvFile { editor } => {
+                // A native file dialog: the one blocking call allowed here.
+                let path = rfd::FileDialog::new()
+                    .set_title("Import variables from a .env file")
+                    .add_filter("Environment files", &["env", "txt"])
+                    .add_filter("All files", &["*"])
+                    .pick_file()?;
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let result = match std::fs::metadata(&path) {
+                    Ok(md) if md.len() > 1024 * 1024 => {
+                        Err("larger than 1 MiB: not a .env file?".to_string())
+                    }
+                    Ok(_) => std::fs::read(&path)
+                        .map(|b| String::from_utf8_lossy(&b).into_owned())
+                        .map_err(|e| e.to_string()),
+                    Err(e) => Err(e.to_string()),
+                };
+                Some(Msg::Portainer(PtMsg::VarsFile {
+                    editor,
+                    name,
+                    result,
+                }))
+            }
             PtEffect::Pin { name, fingerprint } => {
                 let ws = self.ws.as_mut()?;
                 match ws.store.pin_portainer(&name, &fingerprint) {
@@ -1932,6 +1958,103 @@ impl Runtime {
                         name: p.name,
                         result: Box::new(result),
                     })
+                });
+                None
+            }
+            PtEffect::Containers {
+                p,
+                host,
+                page,
+                stack,
+            } => {
+                let s = self.ssh.clone()?;
+                self.background(move || {
+                    let result = token_conn(&s, &host, &p)
+                        .and_then(|c| c.stack_containers(&stack))
+                        .map_err(|e| e.to_string());
+                    Msg::Portainer(PtMsg::ContainersLoaded {
+                        page,
+                        stack: stack.id,
+                        result,
+                    })
+                });
+                None
+            }
+            PtEffect::LoadStack {
+                p,
+                host,
+                editor,
+                stack,
+            } => {
+                let s = self.ssh.clone()?;
+                self.background(move || {
+                    let result = token_conn(&s, &host, &p).and_then(|c| c.stack(stack));
+                    Msg::Portainer(PtMsg::StackLoaded {
+                        editor,
+                        result: Box::new(result),
+                    })
+                });
+                None
+            }
+            PtEffect::Act {
+                p,
+                host,
+                page,
+                act,
+                title,
+            } => {
+                let s = self.ssh.clone()?;
+                let log = self.history.as_ref().map(|(tx, _)| tx.clone());
+                self.background(move || {
+                    let started = std::time::Instant::now();
+                    let result = token_conn(&s, &host, &p)
+                        .and_then(|c| c.act(&act))
+                        .map_err(|e| e.to_string());
+                    let (method, path) = act.request();
+                    log_portainer(
+                        &log,
+                        &p,
+                        &title,
+                        &format!("{method} {}", path_only(&path)),
+                        &result,
+                        started,
+                    );
+                    Msg::Portainer(PtMsg::Acted {
+                        portainer: p.name,
+                        page,
+                        title,
+                        result,
+                    })
+                });
+                None
+            }
+            PtEffect::Update {
+                p,
+                host,
+                editor,
+                upd,
+                expect,
+                summary,
+            } => {
+                let s = self.ssh.clone()?;
+                let log = self.history.as_ref().map(|(tx, _)| tx.clone());
+                self.background(move || {
+                    let started = std::time::Instant::now();
+                    let result =
+                        token_conn(&s, &host, &p).and_then(|c| c.update_stack(&upd, expect));
+                    // A stack changed meanwhile sent nothing: not logged.
+                    if !matches!(result, Err(pc::ReadError::Changed)) {
+                        let r = result.clone().map_err(|e| e.to_string());
+                        let title = format!(
+                            "Update stack {} (environment {}{}{})",
+                            upd.id,
+                            upd.env,
+                            if upd.repull { ", re-pull" } else { "" },
+                            if upd.prune { ", prune" } else { "" }
+                        );
+                        log_portainer(&log, &p, &title, &summary, &r, started);
+                    }
+                    Msg::Portainer(PtMsg::StackUpdated { editor, result })
                 });
                 None
             }
@@ -2274,6 +2397,54 @@ fn export(ws: &Workspace, path: &Path) -> Result<usize, String> {
     };
     std::fs::write(path, text).map_err(|e| e.to_string())?;
     Ok(inv.hosts.len())
+}
+
+/// A connection to a Portainer with its saved token (#173).
+fn token_conn(
+    s: &telepad_core::collector::SshSettings,
+    host: &telepad_core::config::HostEntry,
+    p: &telepad_core::portainer::Portainer,
+) -> Result<telepad_core::portainer::Conn, telepad_core::portainer::ReadError> {
+    use telepad_core::portainer as pc;
+    let token = match pc::load_token(&p.name) {
+        Ok(Some(t)) => t,
+        Ok(None) => return Err(pc::ReadError::NoToken),
+        Err(e) => return Err(pc::ReadError::Other(format!("password store: {e}"))),
+    };
+    pc::Conn::open(s, host, p, &token, None)
+}
+
+/// The path of a request without its query.
+fn path_only(path: &str) -> &str {
+    path.split('?').next().unwrap_or(path)
+}
+
+/// A Portainer change in `history.db` (#173): never a token or a value.
+fn log_portainer(
+    log: &Option<Sender<HistCmd>>,
+    p: &telepad_core::portainer::Portainer,
+    title: &str,
+    detail: &str,
+    result: &Result<(), String>,
+    started: std::time::Instant,
+) {
+    let Some(tx) = log else { return };
+    let (outcome, error) = match result {
+        Ok(()) => (history::Outcome::Done, String::new()),
+        Err(e) => (history::Outcome::Failed, e.clone()),
+    };
+    let _ = tx.send(HistCmd::Add(Box::new(history::Entry {
+        kind: history::Kind::Portainer,
+        host: p.alias.clone(),
+        target: format!("portainer:{}", p.name),
+        title: title.to_string(),
+        detail: detail.to_string(),
+        outcome,
+        error,
+        duration_ms: Some(started.elapsed().as_millis() as u64),
+        method: "Portainer API".into(),
+        ..Default::default()
+    })));
 }
 
 #[cfg(test)]

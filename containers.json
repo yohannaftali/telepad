@@ -1,0 +1,7 @@
+[
+ {"Id":"b2b2","Names":["/shop-web-1"],"Image":"nginx:1.27","State":"running","Status":"Up 2 hours",
+  "Ports":[{"IP":"0.0.0.0","PrivatePort":80,"PublicPort":8080,"Type":"tcp"},{"IP":"::","PrivatePort":80,"PublicPort":8080,"Type":"tcp"}],
+  "Labels":{"com.docker.compose.project":"shop"}},
+ {"Id":"a1a1","Names":["/shop-db-1"],"Image":"mariadb:11","State":"exited","Status":"Exited (0) 5 minutes ago","Ports":[],
+  "Labels":{"com.docker.compose.project":"shop"}}
+]

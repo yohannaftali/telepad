@@ -365,9 +365,13 @@ cluster under the address.
 ## Portainers
 
 **Portainers** (sidebar, #171) lists the Portainer servers you registered and opens one page
-per server with its **environments** and **stacks**. Telepad only *reads* Portainer: it sends
-`GET` requests, never changes a stack, a container or a setting there (changes stay in
-Portainer: **Open in Portainer**).
+per server with its **environments**, **stacks** and the **containers** of a stack. Reading
+happens when a page opens and on **Refresh**. Changes (#173) — start / stop / delete a stack,
+edit and update a stack, start / stop / kill / restart / pause / resume / remove a container —
+go through the Portainer API with *your* token, only after you click them (and confirm the risky
+ones), so Portainer's own permissions and activity log apply. Each change is also written to
+`history.db` (kind *portainer*: what, which stack / container, result; never a variable value
+or the token).
 
 How it connects: Telepad opens an SSH tunnel (`ssh -N -L`) to the host Portainer runs on — the
 host's normal Telepad login — and talks to `127.0.0.1:<port>` there, like the database browser.
@@ -411,10 +415,58 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
   host for its page. The browser button opens the environment in Portainer. Click a row to list
   its stacks below.
 - **Stacks** of that environment: name, type (Compose, Swarm, Kubernetes), status (active /
-  inactive), created / updated (UTC) and who created it. The browser button opens the stack in Portainer;
-  the container button (shown when Telepad sees that stack's containers on the host) opens the
-  host page with its Docker table. Stack environment variables are never read (they often hold
-  secrets).
+  inactive / *deploying* while Portainer deploys it / *error*), created / updated (UTC) and who
+  created it. Buttons per stack (#173):
+
+  | Button | What it does |
+  |---|---|
+  | **Edit** (yellow) | Opens the stack editor (below) |
+  | **Start** (green, inactive stacks) / **Stop** (amber, active stacks) | Asks "Start / Stop stack X on environment Y?" first; Start deploys it again (`docker compose up`); Stop takes it down: its containers are stopped and removed, its files, variables and named volumes stay |
+  | **Delete** (red) | Asks first and needs the stack name typed. Portainer removes the stack's containers and networks and its files; Telepad sends no volume option, so Portainer's own default for volumes applies. Cannot be undone |
+  | browser button | Opens the stack in Portainer |
+  | host button | The host page of the Telepad host it runs on (its Docker table), when Telepad sees the stack's containers there |
+
+  Kubernetes and Edge stacks show "changed in Portainer" instead of the buttons; a stack being
+  deployed shows a spinner. After an action the page reads Portainer again; while it runs the
+  stack and container buttons are disabled and the action shows next to the Stacks title.
+  Portainer's own message is shown when it refuses (e.g. *403* for a user without the right
+  role, *409 Stack deployment is already in progress*).
+- **Containers**: click a stack (or right-click ▸ **Show containers**) to list its containers
+  under the stacks (Docker's list through Portainer, by the compose project / swarm stack label):
+  name, image, state, status, ports and the actions that fit the state — **Start**, **Stop**,
+  **Restart**, **Pause**, **Resume** run at once; **Kill** and **Remove** ask first (Remove can
+  also remove the container's anonymous volumes, off by default). Swarm service tasks have no
+  container actions (scale or update the service in Portainer). Click the stack again to hide
+  them; the refresh button next to the title reads them again.
+- **Stack editor** (**Edit**; a window "Stack - [name]", one per stack): the
+  `docker-compose.yml` in Telepad's own text editor (the one of the file windows, see
+  [Editor](#editor)): YAML colours, line numbers, the current line, Tab / Shift+Tab indent,
+  **Find** (Ctrl+F), **Replace** (Ctrl+H), **Go to line** (Ctrl+G), F3 / Shift+F3 for the next /
+  previous match, Esc closes the bar. **Variables (n)…** opens the stack's variables on their
+  own page (below). **Re-pull image and redeploy** and **Prune services** are Portainer's update
+  options.
+- **Variables** page ("Variables - [name]", from the editor's **Variables (n)…**): one row per
+  variable, name and value (values hidden unless **Show values** is ticked); **Add variable**,
+  ✕ removes one. **Import .env file…** reads `NAME=value` lines from a file you pick (up to
+  1 MiB); **Paste…** takes the same lines pasted into a box. Blank lines and `#` comments are
+  skipped, `export ` is allowed, values in '…' are kept as written and in "…" may use `\n`,
+  `\t`, `\"`; an unquoted value ends at ` #`. A name that is already there gets the new value,
+  new names are added; the page says how many were added / changed. A bad line (no `=`, a name
+  with spaces) takes nothing and names the line. **Compose file** goes back to the editor. The
+  variables are sent with the editor's **Update the stack**; closing the page keeps the edits,
+  closing the editor closes the page.
+  **Update the stack…** first checks the names (no spaces or `=`, no duplicates) and shows a
+  review: whether the compose file changed (with its line diff) and which variables were added
+  (+), changed (~) or removed (−) — names only. **Update the stack** then sends it and Portainer redeploys the stack (`docker compose up`): containers
+  whose settings changed are recreated, and a service that waits for an unhealthy one may stay
+  *Created* until that one is healthy (start it from the Containers list). Portainer
+  deploys it in the background (the stack shows *deploying*; updating again before that ends
+  gives 409). If someone changed the stack in Portainer since you opened it, nothing is sent
+  and the editor says so: **Reload** (drop your edits) or **Overwrite** (send yours anyway).
+  **Reload** in the header loads it again at any time. Closing with unsaved edits asks
+  **Discard** / **Keep editing**. Git-based stacks are shown read-only with a note: edit and
+  redeploy them in Portainer. Stack variable values are read only for the editor and are
+  never logged.
 
 Both tables have the usual sort, filter row, value lists and exports ([Tables](#tables)).
 Registered Portainers (without tokens) are part of the JSON export / import; they follow a

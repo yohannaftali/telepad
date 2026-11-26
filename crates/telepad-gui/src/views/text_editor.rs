@@ -1327,3 +1327,116 @@ fn question(ui: &mut egui::Ui, s: &FileSession, dr: &EdDraft, out: &mut Vec<Msg>
         send(out, id, EdMsg::Answer(Answer::Cancel));
     }
 }
+
+/// Telepad's text editor for a text that is not a file of a file window
+/// (#173: a Portainer stack's compose file): the same code area, colours,
+/// line numbers, find / replace / go to line (Ctrl+F / H / G, F3) and
+/// indenting as the editor window. `win` keeps its state apart from other
+/// windows; `editable` = false shows the text read-only (edits are dropped).
+#[allow(clippy::too_many_arguments)]
+pub fn embedded(
+    ui: &mut egui::Ui,
+    win: u64,
+    focused: bool,
+    name: &str,
+    lang: Lang,
+    text: &mut String,
+    saved: &str,
+    editable: bool,
+) {
+    const TAB: u64 = 1;
+    let slot = egui::Id::unique(("telepad-embedded-ed", win));
+    let mut dr: EdDraft = ui.data(|m| m.get_temp(slot)).unwrap_or_default();
+    let before = text.clone();
+    dr.texts.insert(TAB, std::mem::take(text));
+    let t = EdTab {
+        id: TAB,
+        side: Side::Remote,
+        path: name.to_string(),
+        name: name.to_string(),
+        lang,
+        state: TabState::Ready,
+        crlf: false,
+        mixed: false,
+        bom: false,
+        stamp: None,
+        saved: saved.to_string(),
+        saving: None,
+        error: None,
+        conflict: None,
+        close_after_save: false,
+    };
+    if focused {
+        let sc = |m: Modifiers, k: Key| {
+            ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)))
+        };
+        let find = sc(Modifiers::COMMAND, Key::F);
+        let replace = editable && sc(Modifiers::COMMAND, Key::H);
+        if find || replace {
+            dr.bar = if replace { Bar::Replace } else { Bar::Find };
+            if let (Some(r), Some(txt)) = (cursor_of(ui.ctx(), win, TAB), dr.texts.get(&TAB))
+                && !r.is_empty()
+            {
+                let (a, b) = (
+                    text::char_to_byte(txt, r.start),
+                    text::char_to_byte(txt, r.end),
+                );
+                if !txt[a..b].contains('\n') {
+                    dr.find = txt[a..b].to_string();
+                }
+            }
+            focus_field(ui.ctx(), win, "find");
+        }
+        if sc(Modifiers::COMMAND, Key::G) {
+            dr.bar = Bar::Goto;
+            dr.goto.clear();
+            focus_field(ui.ctx(), win, "goto");
+        }
+        if dr.bar != Bar::None && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            dr.bar = Bar::None;
+            match current(ui.ctx(), win, TAB) {
+                Some(r) => select_later(ui.ctx(), win, TAB, r, true),
+                None => ui.memory_mut(|m| m.request_focus(edit_id(win, TAB))),
+            }
+            set_current(ui.ctx(), win, TAB, None);
+        }
+        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F3)) {
+            step(ui.ctx(), win, TAB, &dr, true);
+        }
+        if ui.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::F3)) {
+            step(ui.ctx(), win, TAB, &dr, false);
+        }
+    }
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(il(icons::CODE, name)).monospace().weak());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(RichText::new(lang.name()).weak());
+            if !editable {
+                ui.label(RichText::new("read-only").weak());
+            }
+            if ui
+                .add(egui::Button::new(il(icons::SEARCH, "Find")).small())
+                .on_hover_text("Find (Ctrl+F), replace (Ctrl+H), go to line (Ctrl+G)")
+                .clicked()
+            {
+                dr.bar = Bar::Find;
+                focus_field(ui.ctx(), win, "find");
+            }
+        });
+    });
+    if dr.bar == Bar::Replace && !editable {
+        dr.bar = Bar::Find;
+    }
+    if dr.bar != Bar::None {
+        find_bar(ui, win, &t, &mut dr);
+    }
+    let fill = ui.visuals().extreme_bg_color;
+    egui::Frame::new().fill(fill).show(ui, |ui| {
+        code(ui, win, &t, &mut dr, None, None);
+    });
+    *text = dr.texts.remove(&TAB).unwrap_or_default();
+    if !editable {
+        *text = before;
+    }
+    ui.data_mut(|m| m.insert_temp(slot, dr));
+}

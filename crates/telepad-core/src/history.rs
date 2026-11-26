@@ -25,6 +25,8 @@ pub enum Kind {
     Transfer,
     FileOp,
     Sql,
+    /// A stack / container action or stack update through Portainer (#173).
+    Portainer,
 }
 
 impl Kind {
@@ -33,12 +35,14 @@ impl Kind {
             Kind::Transfer => "transfer",
             Kind::FileOp => "fileop",
             Kind::Sql => "sql",
+            Kind::Portainer => "portainer",
         }
     }
     fn parse(s: &str) -> Kind {
         match s {
             "fileop" => Kind::FileOp,
             "sql" => Kind::Sql,
+            "portainer" => Kind::Portainer,
             _ => Kind::Transfer,
         }
     }
