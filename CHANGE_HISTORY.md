@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-26] — Tested and merged: #163, #167, #168, #169, #170, #171
+- Issues #163 (group / cluster links on Hosts pages and cards), #167 (blue-grey light theme, navy dark title / header / selection), #168 (snap layouts while dragging and on the maximize button), #169 (Back from Hosts - [name] to the page it was opened from), #170 (filter box funnel opens a searchable value list), #171 (Portainers page and Portainer - [name], read-only through an SSH tunnel, token in the OS password store, certificate pinned on first use; schema 6) addressed on Windows
+- Files: telepad-core `portainer.rs` (new), `store.rs`, `config.rs`, `db/secret.rs`, fixtures `tests/fixtures/portainer/`; telepad-app `portainer.rs`, `tests_portainer.rs` (new), `sets.rs`, `workspace.rs`, `grid.rs`, `update.rs`, `state.rs`, `msg.rs`; telepad-gui `views/portainer.rs` (new), `table.rs`, `widgets.rs`, `views/workspace.rs`, `overview.rs`, `cards.rs`, `runtime.rs`; telepad-check `--portainer`; docs (manual, README, SECURITY, AGENTS)
+- Verified: fmt, clippy -D warnings, 470 tests; GUI on Windows (filter value list on Hosts tables, set links in tables and cards, Back, snap by edge / picker / maximize flyout and drag-out size, light and dark theme, Portainers list / Add / Test / page) and `telepad-check --portainer` against a real Portainer 2.45.4 (5+ environments, stacks, pinned certificate); a fake token gives "Token rejected (401)"
+- Not verified: the value list on the database grid (unit-tested), macOS / Linux (CI)
+
 ## [2026-11-26] — feat(portainer): Portainers page — register Portainer servers with an API token, per-Portainer page with environments and stacks (read-only, SSH tunnel)
 - Issue #171 created on GitHub
 - Scope: portainer (core client, store, app, gui pages)

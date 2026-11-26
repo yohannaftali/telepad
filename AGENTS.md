@@ -346,10 +346,10 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #156 | fix(ui): simple tables do not fill the page like Hosts, and header title / filter heights are unbalanced | closed | 2026-11-25 |
 | #157 | feat(ui): Hosts cards with equal height and whole-card click, sortable Group / Cluster columns instead of By group, shown by default | closed | 2026-11-25 |
 | #160 | feat(hosts): reorder groups and clusters by drag and drop, like the Hosts page | closed | 2026-11-25 |
-| #163 | feat(hosts): click a host's group or cluster on the Hosts page to open its hosts page | open | 2026-11-25 |
+| #163 | feat(hosts): click a host's group or cluster on the Hosts page to open its hosts page | closed | 2026-11-26 |
 | #164 | fix(ui): table filter box is shorter than the title and data rows; make them the same height | closed | 2026-11-25 |
-| #167 | fix(ui): light theme blue-grey palette for sidebar, buttons, headers and title bars; dark blue title and table header in dark theme | open | 2026-11-26 |
-| #168 | feat(ui): Windows 11-style snap layouts when dragging inner windows | open | 2026-11-26 |
-| #169 | feat(hosts): click the Hosts - [group / cluster] title to go back to its parent page | open | 2026-11-26 |
-| #170 | feat(ui): filter box trailing funnel icon opens a searchable value dropdown (select2 style) | open | 2026-11-26 |
-| #171 | feat(portainer): Portainers page — register Portainer servers with an API token, per-Portainer page with environments and stacks (read-only, SSH tunnel) | open | 2026-11-26 |
+| #167 | fix(ui): light theme blue-grey palette for sidebar, buttons, headers and title bars; dark blue title and table header in dark theme | closed | 2026-11-26 |
+| #168 | feat(ui): Windows 11-style snap layouts when dragging inner windows | closed | 2026-11-26 |
+| #169 | feat(hosts): click the Hosts - [group / cluster] title to go back to its parent page | closed | 2026-11-26 |
+| #170 | feat(ui): filter box trailing funnel icon opens a searchable value dropdown (select2 style) | closed | 2026-11-26 |
+| #171 | feat(portainer): Portainers page — register Portainer servers with an API token, per-Portainer page with environments and stacks (read-only, SSH tunnel) | closed | 2026-11-26 |
