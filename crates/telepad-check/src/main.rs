@@ -46,6 +46,10 @@ fn main() -> ExitCode {
     }
     let ws = match open_workspace(cfg.as_deref(), db.as_deref()) {
         Ok(w) => w,
+        Err(telepad_core::OpenError::NewerSchema(n)) => {
+            eprintln!("{}", n.explanation());
+            return ExitCode::from(2);
+        }
         Err(e) => {
             eprintln!("{e}");
             return ExitCode::from(2);

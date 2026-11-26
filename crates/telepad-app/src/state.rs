@@ -37,6 +37,10 @@ pub struct Model {
     pub busy: usize,
     pub message: Option<(String, Instant)>,
     pub fatal: Option<String>,
+    /// Set when `telepad.db` was written by an incompatible newer Telepad (#180).
+    pub fatal_newer: Option<telepad_core::store::NewerSchema>,
+    /// Set when `telepad.db` is from a newer Telepad but opened compatibly (#180).
+    pub newer_db: Option<i32>,
     /// Host id + alias waiting for delete confirmation.
     pub pending_delete: Option<(i64, String)>,
     /// A PDF export above [`crate::grid::PDF_ASK_ABOVE`] rows waiting for Yes (#153).
@@ -786,6 +790,9 @@ pub struct UpdateState {
     pub window: bool,
     /// The last check was started by the user: report "up to date" too.
     pub manual: bool,
+    /// Checking from the newer-schema fatal screen: install as soon as a newer
+    /// release is found (#180).
+    pub fatal_install: bool,
 }
 
 impl UpdateState {

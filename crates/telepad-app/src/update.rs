@@ -111,7 +111,38 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 start_check(m, now, false, &mut fx);
             }
         }
-        Msg::Fatal(e) => m.fatal = Some(format!("Cannot open the host database: {e}")),
+        Msg::Fatal(e) => {
+            m.fatal = Some(format!("Cannot open the host database: {e}"));
+            m.fatal_newer = None;
+        }
+        Msg::FatalNewer(n) => {
+            m.fatal = Some(n.explanation());
+            m.fatal_newer = Some(n);
+            let cfg = UpdateConfig::default();
+            d.update_form = cfg.clone();
+            m.update.config = Some(cfg);
+        }
+        Msg::NewerDb(v) => m.newer_db = Some(v),
+        Msg::FatalUpdate => {
+            if m.update.config.is_none() {
+                let cfg = UpdateConfig::default();
+                d.update_form = cfg.clone();
+                m.update.config = Some(cfg);
+            }
+            if m.update.can_install()
+                && let Some(c) = m.update.check.clone()
+            {
+                m.update.fatal_install = false;
+                m.update.phase = UpdatePhase::Installing;
+                m.update.error = None;
+                fx.push(Effect::InstallUpdate(c));
+            } else if m.update.phase == crate::state::UpdatePhase::Idle {
+                m.update.fatal_install = true;
+                start_check(m, now, true, &mut fx);
+            }
+        }
+        Msg::OpenFolder(p) => fx.push(Effect::OpenFolder(p)),
+        Msg::CopyText { text, notice } => fx.push(Effect::CopyText { text, notice }),
         Msg::Tick { busy } => {
             m.busy = busy;
             let every = if m.update.error.is_some() {
@@ -1033,6 +1064,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         },
         Msg::UpdateChecked(r) => {
             m.update.phase = UpdatePhase::Idle;
+            let install_now = std::mem::take(&mut m.update.fatal_install);
             match r {
                 Ok(c) => {
                     m.update.error = None;
@@ -1045,13 +1077,25 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                     // Automatic install: only a newer release with a download for
                     // this OS, and not after the user chose "Later".
                     let auto = m.update.config.as_ref().is_some_and(|c| c.auto_install);
-                    if auto
-                        && !m.update.later
+                    if (install_now || (auto && !m.update.later))
                         && m.update.can_install()
                         && let Some(c) = m.update.check.clone()
                     {
                         m.update.phase = UpdatePhase::Installing;
                         fx.push(Effect::InstallUpdate(c));
+                    } else if install_now && let Some(c) = &m.update.check {
+                        m.update.error = Some(if !c.newer {
+                            format!(
+                                "Telepad {CURRENT_VERSION} is already the latest release ({}).",
+                                c.version
+                            )
+                        } else {
+                            format!(
+                                "Release {} has no {} download.",
+                                c.version,
+                                telepad_core::update::asset_name(&c.version)
+                            )
+                        });
                     }
                 }
                 Err(e) => {

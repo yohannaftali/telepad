@@ -36,6 +36,19 @@ pub enum Msg {
     },
     /// The database could not be opened; nothing else works.
     Fatal(String),
+    /// `telepad.db` was written by an incompatible newer Telepad (#180).
+    FatalNewer(telepad_core::store::NewerSchema),
+    /// `telepad.db` has a newer schema that opened compatibly (#180).
+    NewerDb(i32),
+    /// Fatal screen: check the default release source and install (#180).
+    FatalUpdate,
+    /// Open a folder in the system file manager (#180).
+    OpenFolder(PathBuf),
+    /// Copy text to the clipboard and show `notice` in the status bar.
+    CopyText {
+        text: String,
+        notice: String,
+    },
     /// Once per frame.
     Tick {
         busy: usize,
@@ -380,6 +393,8 @@ pub enum Effect {
     /// Read-only `docker inspect` + compose files → [`Msg::RunInfoLoaded`].
     FetchRunInfo(HostEntry, Box<Container>),
     OpenUrl(String),
+    /// Open a folder in the system file manager (#180).
+    OpenFolder(PathBuf),
     /// Start the new exe and close this window.
     Relaunch,
     /// Read `~/.ssh/authorized_keys` on each host (read-only), in the

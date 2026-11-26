@@ -92,6 +92,32 @@ fn fatal_and_bad_update_settings_are_reported() {
     let mut s = State::default();
     update(&mut s, Msg::Fatal("locked".into()), Instant::now());
     assert!(s.model.fatal.as_deref().unwrap().contains("locked"));
+    assert!(s.model.fatal_newer.is_none());
+
+    // Newer-schema fatal error sets default update config and lets FatalUpdate check + install.
+    let mut s = State::default();
+    let newer = telepad_core::store::NewerSchema {
+        path: "telepad.db".into(),
+        kind: "schema",
+        found: 9,
+        supported: 6,
+        min_compatible: Some(8),
+    };
+    update(&mut s, Msg::FatalNewer(newer.clone()), Instant::now());
+    assert_eq!(s.model.fatal_newer, Some(newer));
+    assert!(s.model.fatal.as_deref().unwrap().contains("schema 9"));
+    assert!(s.model.fatal.as_deref().unwrap().contains("unchanged"));
+    let fx = update(&mut s, Msg::FatalUpdate, Instant::now());
+    assert!(
+        matches!(&fx[..], [Effect::CheckUpdate(c)] if c.repo == telepad_core::update::DEFAULT_REPO)
+    );
+    let fx = update(
+        &mut s,
+        Msg::UpdateChecked(Ok(check("99.0.0", true))),
+        Instant::now(),
+    );
+    assert!(matches!(&fx[..], [Effect::InstallUpdate(_)]));
+    assert_eq!(s.model.update.phase, UpdatePhase::Installing);
 
     let mut s = State::default();
     let fx = update(
