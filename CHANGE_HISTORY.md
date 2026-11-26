@@ -2,6 +2,14 @@
 
 Newest first.
 
+## [2026-11-26] — docs: refreshed README and user manual, new developer guide
+- Issues #187 and #188 addressed (documentation only, no release)
+- README: "Tour of 0.9.3" replaced by a tour without version numbers; new screenshots; link to the developer guide
+- Manual: 30+ new screenshots from a demo lab (made-up hosts, keys, stacks on loopback / documentation addresses, a local Portainer CE and Docker-in-Docker engines); more detail on groups and clusters (columns, example, where they are kept), Docker / Podman (how each stack is managed), Docker Swarm and Kubernetes (what a host needs, how to read the pages), a new "Container management at a glance", Portainers (step-by-step setup, what Telepad can change and through which API call, status messages), Authorized keys and Host Management (typical jobs); version wording removed; stale screenshots (workspace-restored, sql-log) removed, the rest retaken
+- New docs/DEVELOPER_GUIDE.md: crates, Model–View–Update with a real end-to-end example (#183), egui as used here, inner windows and workspaces, the table component (Col / Spec / show / controlled / Output), the searchable value list, paging and continuous mode, the editor (layouter, cached spans, schemes, indentation, embedded editor, adding a language / scheme), authorization (SSH options, tunnels, OS password store services), the Portainer client (hand-written HTTP, rustls Pin verifier, token, API calls and confirmations), persistence and testing; code names checked against the source
+- Linked from README, CONTRIBUTING and AGENTS; #181–#183 rows set to closed
+- Found while taking screenshots (not fixed here): the My keys File column is too narrow to show file names
+
 ## [2026-11-26] — Telepad 0.9.14
 - #180 A database from a newer Telepad: a clear screen with Update Telepad, Open the database folder, Copy the message; newer but compatible databases open (minimum compatible schema stored)
 - #181 Readable secondary text: near white in the dark theme, near black in the light theme

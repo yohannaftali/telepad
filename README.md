@@ -239,7 +239,7 @@ The **top bar** holds the tools for those windows:
   updates 6 h, OS info 1 day by default; saved in `update.db`, which also keeps each host's
   last known OS and updates so a restart shows them at once) and **Software update…**.
 
-![Two custom workspaces, three windows tiled](docs/images/workspaces.png)
+![The workspace list: <none>, <own>, Save and Add…](docs/images/workspaces.png)
 
 | Page | What you do there |
 |---|---|
@@ -259,33 +259,68 @@ Dark:
 
 ![The Hosts page in the light theme](docs/images/hosts-light.png)
 
-### Tour of 0.9.3
+### A tour
 
-**Workspaces keep everything, and ask first.** Switching workspace (or closing Telepad)
+**Groups and clusters.** Put hosts into groups (where they are, who owns them) and,
+separately, clusters (what they serve together). Each one has a page with its own Hosts
+table; click a host's group or cluster anywhere to open it.
+
+![Groups: description, number of hosts, how many are down or flagged](docs/images/groups.png)
+
+**Every table works the same way**: sort by a click on the title, a filter box above each
+column (`>80%`, `=Data`, `!NULL`), a funnel that lists the column's values to pick one, and a
+right-click menu with Filter by, exports (CSV, Excel, PDF) and Copy as JSON.
+
+![The value list of the Group column](docs/images/table-values.png)
+
+**The host page** has the system, maintenance flags (end-of-life OS, reboot, pending
+updates), usage, disks, network, sensors, the Docker containers by stack — with each stack's
+compose menu, or **Open stack** for a Portainer stack — and the ports in use with the
+container behind each one.
+
+![Docker stacks and ports on a host page](docs/images/host-docker.png)
+
+**Docker / Podman** collects the containers of every host by stack; **Docker Swarm** and
+**Kubernetes** show the clusters found on your hosts with their nodes, services and
+problems.
+
+![Docker Swarm: nodes, services and stacks of a manager](docs/images/swarm.png)
+
+**Portainers.** Register a Portainer with an API token (kept in the system's password store)
+and Telepad reaches it through an SSH tunnel to its host. Each stack has a page with its
+containers (start, stop, restart, pause, kill, remove — the risky ones ask first) and its
+compose file in Telepad's editor, with a Variables page and a review before **Update the
+stack**.
+
+![A Portainer stack's page: containers and their actions](docs/images/stack-containers.png)
+
+![The stack's compose file in the editor](docs/images/stack-editor.png)
+
+**Files and the editor.** A file window per host, this computer on the left and the host on
+the right, over SFTP. Files open in a VS Code-like editor with colour schemes (Dark Modern,
+Light Modern, Monokai, Solarized …), a language picker and an indentation menu (tabs or
+spaces, re-indent 2 ↔ 4).
+
+![The file window of a host](docs/images/files.png)
+
+![Editor colour schemes](docs/images/editor-schemes.png)
+
+**Authorized keys** shows who can log in where, grouped by the `#` comments of
+`authorized_keys`, and adds or revokes one key on many servers at once; **My keys** creates
+and converts the key pairs on this computer.
+
+![Authorized keys, by public key](docs/images/authorized-by-key.png)
+
+**Host Management** compares Telepad's hosts with an OpenSSH config and copies, edits or
+deletes per host or all at once, with a preview and a backup before the file is written.
+
+![Host Management: Telepad next to an OpenSSH config](docs/images/host-management.png)
+
+**Workspaces keep everything, and ask first.** Leaving a workspace (or closing Telepad)
 lists what would be lost — unsaved editor text, database changes not posted, host or key
-changes not applied — in one question. **Yes** goes on, **Back** stays. File, editor and
-database windows come back when you return, at the same folders, files and database.
+changes not applied — in one question; file transfers keep running in the background.
 
 ![Leaving a workspace: one question lists what would be lost](docs/images/workspace-leave.png)
-
-**Transfers keep running** in the background while you work in another workspace, and the
-**History** tab of a file window lists every upload, download, rename, delete and save:
-
-![The History tab of a file window](docs/images/files-history.png)
-
-**SQL log** at the bottom of every database window, like HeidiSQL — passwords in
-`CREATE USER … IDENTIFIED BY` are masked:
-
-![SQL log of a database window](docs/images/sql-log.png)
-
-**My keys** (Authorized keys page): your key pairs, **Generate key pair…** and
-**Convert / export…** to PuTTY and other formats:
-
-![My keys: the key pairs on this computer](docs/images/my-keys.png)
-
-**Remote Desktop settings** per host, used by **Open RDP**:
-
-![Remote Desktop settings in the host editor](docs/images/rdp-settings.png)
 
 Make sure `ssh web01` works in a terminal first: Telepad uses exactly the same client,
 keys and options.
@@ -298,6 +333,9 @@ Everything else is in the [user manual](docs/USER_MANUAL.md).
   overview and host detail, adding and importing hosts, Remote Desktop settings, files and
   their history, Authorized keys and My keys, the database browser and its SQL log, BMC
   sensors, updates, troubleshooting, command line — with annotated screenshots
+- [Developer guide](docs/DEVELOPER_GUIDE.md): how the code is built — the egui UI (inner windows, the table
+  component with filters, value lists and paging, the editor), the Model–View–Update core, and
+  how Telepad authorizes against hosts, databases and the Portainer API
 - [Contributing](CONTRIBUTING.md): building from source, reporting bugs, making a change, releasing
 - [Security](SECURITY.md): security model and how to report a vulnerability
 - [AGENTS.md](AGENTS.md): architecture and conventions
