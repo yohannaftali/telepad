@@ -1251,9 +1251,19 @@ full path). Opening a file that already has a tab switches to it.
 - **Tabs**: a tab with changes that are not saved shows **●**; **×** (or a middle click,
   or Ctrl+W) closes it.
 - **Status bar**: *Saved* / *Not saved* / *Saving…*, then `Ln 12, Col 5` (and how many
-  characters are selected), the indentation (*Spaces: 2* or *Tab*, from the file), the
-  language, the line endings (**LF** or **CRLF**) and the encoding (**UTF-8**, or **UTF-8 with
-  BOM**).
+  characters are selected), the indentation (*Spaces: 2* or *Tab size: 4*, found in the file),
+  the language, the line endings (**LF** or **CRLF**) and the encoding (**UTF-8**, or **UTF-8
+  with BOM**).
+- **Indentation** (#182): click *Spaces: 4* (also in the Portainer stack editor's header):
+  - **Indent using spaces** / **Indent using tabs** and **Size 2 / 4 / 8** change only what Tab
+    and Shift+Tab insert; the text stays as it is.
+  - **Convert indentation to spaces / to tabs** rewrites the leading whitespace of every line
+    (only the selected lines when text is selected); a rest that is not a whole level (6 spaces
+    at size 4) stays as spaces.
+  - **Re-indent to 2 / 4 / 8** rescales every indentation level (4 → 2 halves it, 2 → 4
+    doubles it); text after the indentation is never touched.
+  - Conversions mark the tab *Not saved* and are undone with Ctrl+Z; nothing is written before
+    Save. YAML files cannot use tabs (not valid YAML), so those choices are off there.
 
 | Key | Does |
 |---|---|

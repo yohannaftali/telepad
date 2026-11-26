@@ -282,6 +282,115 @@ pub fn indent_unit(text: &str) -> String {
     }
 }
 
+/// How a tab indents (#182): tabs or spaces, and the width of one level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Indent {
+    pub tabs: bool,
+    /// Columns per level (2, 4 or 8; also a tab's width).
+    pub size: usize,
+}
+
+impl Default for Indent {
+    fn default() -> Self {
+        Indent {
+            tabs: false,
+            size: 4,
+        }
+    }
+}
+
+impl Indent {
+    pub const SIZES: [usize; 3] = [2, 4, 8];
+
+    /// What Tab inserts.
+    pub fn unit(self) -> String {
+        if self.tabs {
+            "\t".into()
+        } else {
+            " ".repeat(self.size)
+        }
+    }
+
+    pub fn label(self) -> String {
+        if self.tabs {
+            format!("Tab size: {}", self.size)
+        } else {
+            format!("Spaces: {}", self.size)
+        }
+    }
+
+    /// The file's indentation, as [`indent_unit`] finds it (tabs: width 4).
+    pub fn detect(text: &str) -> Indent {
+        let u = indent_unit(text);
+        if u == "\t" {
+            Indent {
+                tabs: true,
+                size: 4,
+            }
+        } else {
+            Indent {
+                tabs: false,
+                size: u.len(),
+            }
+        }
+    }
+}
+
+/// Rewrite the leading whitespace of each line from `from` to `to` (#182):
+/// tabs ↔ spaces and re-indent between sizes. A line's indentation in
+/// columns (tabs to the next multiple of `from.size`) is split into whole
+/// levels and a rest; the levels are rescaled to `to.size`, the rest kept as
+/// spaces. Only the lines touched by `sel` (character indexes) change when
+/// given; text after the first other character is never changed.
+pub fn convert_indent(text: &str, sel: Option<Range<usize>>, from: Indent, to: Indent) -> String {
+    let (first, last) = match sel {
+        Some(r) if r.start != r.end => {
+            let a = char_to_byte(text, r.start.min(r.end));
+            let b = char_to_byte(text, r.start.max(r.end));
+            let end = if text[..b].ends_with('\n') && b > a {
+                b - 1
+            } else {
+                b
+            };
+            (
+                text[..a].matches('\n').count(),
+                text[..end].matches('\n').count(),
+            )
+        }
+        _ => (0, usize::MAX),
+    };
+    let from_size = from.size.max(1);
+    let to_size = to.size.max(1);
+    let mut out = String::with_capacity(text.len());
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        if i < first || i > last {
+            out.push_str(line);
+            continue;
+        }
+        let lead = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let mut cols = 0;
+        for c in line[..lead].chars() {
+            cols = if c == '\t' {
+                (cols / from_size + 1) * from_size
+            } else {
+                cols + 1
+            };
+        }
+        let (levels, rest) = (cols / from_size, cols % from_size);
+        if to.tabs {
+            out.push_str(&"\t".repeat(levels));
+        } else {
+            out.push_str(&" ".repeat(levels * to_size));
+        }
+        out.push_str(&" ".repeat(rest));
+        out.push_str(&line[lead..]);
+    }
+    out
+}
+
 /// Tab / Shift+Tab on the selection `sel` (character indexes, either order).
 /// Several lines: each line (not empty ones) is indented or outdented by one
 /// unit. One line: Tab inserts the unit at the cursor, Shift+Tab outdents it.
@@ -338,6 +447,44 @@ pub fn indent(text: &str, sel: Range<usize>, unit: &str, outdent: bool) -> (Stri
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn indentation_converts_and_reindents() {
+        // #182
+        let sp = |size| Indent { tabs: false, size };
+        let tab = |size| Indent { tabs: true, size };
+        let four = "a:\n    b: 1\n        c: 2\n      d\n";
+        assert_eq!(Indent::detect(four), sp(4));
+        assert_eq!(Indent::detect("x\n\ty\n"), tab(4));
+        // 4 → 2 and back; 6 columns = 1 level + 2 kept.
+        let two = convert_indent(four, None, sp(4), sp(2));
+        assert_eq!(two, "a:\n  b: 1\n    c: 2\n    d\n");
+        assert_eq!(
+            convert_indent("  b\n    c\n", None, sp(2), sp(4)),
+            "    b\n        c\n"
+        );
+        // Spaces → tabs (a partial run stays spaces) and back.
+        let t = convert_indent(four, None, sp(4), tab(4));
+        assert_eq!(t, "a:\n\tb: 1\n\t\tc: 2\n\t  d\n");
+        assert_eq!(convert_indent(&t, None, tab(4), sp(4)), four);
+        // Mixed indentation, CRLF kept, text after the indent untouched.
+        assert_eq!(
+            convert_indent("\t  x\t y\r\n  \tz\r\n", None, tab(4), sp(2)),
+            "    x\t y\r\n  z\r\n"
+        );
+        // Only the selected lines (the line after a trailing newline is not touched).
+        let sel = 3..12; // "    b: 1\n"
+        assert_eq!(
+            convert_indent(four, Some(sel), sp(4), sp(2)),
+            "a:\n  b: 1\n        c: 2\n      d\n"
+        );
+        // Empty selection = whole text; labels and units.
+        assert_eq!(convert_indent(four, Some(5..5), sp(4), sp(2)), two);
+        assert_eq!(sp(2).label(), "Spaces: 2");
+        assert_eq!(tab(4).label(), "Tab size: 4");
+        assert_eq!(tab(8).unit(), "\t");
+        assert_eq!(sp(2).unit(), "  ");
+    }
+
     use super::*;
 
     #[test]

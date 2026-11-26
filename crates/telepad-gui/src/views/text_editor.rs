@@ -12,13 +12,13 @@ use eframe::egui::{
     self, Color32, Key, KeyboardShortcut, Modifiers, RichText,
     text::{CCursor, CCursorRange, LayoutJob, TextFormat},
 };
-use telepad_app::editor::{Answer, Bar, EdDraft, EdMsg, EdTab, TabState, Unsaved};
+use telepad_app::editor::{Answer, Bar, EdDraft, EdMsg, EdTab, TabState, Unsaved, indent_allowed};
 use telepad_app::files::{FileSession, FmMsg, Side};
 use telepad_app::workspace::{Win, WsMsg};
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::db::human_size;
 use telepad_core::files::syntax::{self, Lang, Tok};
-use telepad_core::files::text::{self, FindOpts};
+use telepad_core::files::text::{self, FindOpts, Indent};
 use telepad_core::files::time_text;
 
 use crate::icons::{self, label as il};
@@ -943,14 +943,21 @@ fn status(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, dr: &EdDraft, out: &mut
                     }
                 });
             ui.separator();
-            let unit = text::indent_unit(txt);
-            ui.label(if unit == "\t" {
-                "Tab".to_string()
-            } else {
-                format!("Spaces: {}", unit.len())
-            });
-            ui.separator();
             let cur = cursor_of(ui.ctx(), id, t.id).unwrap_or(0..0);
+            match indent_menu(ui, t.indent, t.lang, !cur.is_empty()) {
+                Some(IndentPick::Use(to)) => send(out, id, EdMsg::SetIndent(t.id, to)),
+                Some(IndentPick::Convert(to)) => send(
+                    out,
+                    id,
+                    EdMsg::ConvertIndent {
+                        tab: t.id,
+                        to,
+                        sel: (!cur.is_empty()).then(|| cur.clone()),
+                    },
+                ),
+                None => {}
+            }
+            ui.separator();
             let (l, c) = text::line_col(txt, cur.end);
             let sel = if cur.is_empty() {
                 String::new()
@@ -960,6 +967,89 @@ fn status(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, dr: &EdDraft, out: &mut
             ui.label(format!("Ln {l}, Col {c}{sel}"));
         });
     });
+}
+
+/// A choice in the indentation menu (#182).
+enum IndentPick {
+    /// Only what Tab inserts.
+    Use(Indent),
+    /// Rewrite the text's indentation.
+    Convert(Indent),
+}
+
+/// The "Spaces: 4" status item and its menu (#182).
+fn indent_menu(ui: &mut egui::Ui, cur: Indent, lang: Lang, sel: bool) -> Option<IndentPick> {
+    let mut pick = None;
+    let no_tabs = !indent_allowed(lang, Indent { tabs: true, ..cur });
+    ui.menu_button(cur.label(), |ui| {
+        let what = if sel {
+            "the selected lines"
+        } else {
+            "the file"
+        };
+        ui.label(RichText::new("Tab inserts").weak());
+        if ui.radio(!cur.tabs, "Indent using spaces").clicked() {
+            pick = Some(IndentPick::Use(Indent { tabs: false, ..cur }));
+        }
+        let tabs = ui.add_enabled(
+            !no_tabs,
+            egui::RadioButton::new(cur.tabs, "Indent using tabs"),
+        );
+        let tabs = if no_tabs {
+            tabs.on_disabled_hover_text("Tabs are not valid YAML indentation")
+        } else {
+            tabs
+        };
+        if tabs.clicked() {
+            pick = Some(IndentPick::Use(Indent { tabs: true, ..cur }));
+        }
+        ui.horizontal(|ui| {
+            ui.label(if cur.tabs { "Tab size" } else { "Size" });
+            for n in Indent::SIZES {
+                if ui.selectable_label(cur.size == n, n.to_string()).clicked() {
+                    pick = Some(IndentPick::Use(Indent { size: n, ..cur }));
+                }
+            }
+        });
+        ui.separator();
+        ui.label(RichText::new(format!("Change {what} (not saved until Save)")).weak());
+        if ui
+            .add_enabled(cur.tabs, egui::Button::new("Convert indentation to spaces"))
+            .clicked()
+        {
+            pick = Some(IndentPick::Convert(Indent { tabs: false, ..cur }));
+        }
+        let to_tabs = ui.add_enabled(
+            !cur.tabs && !no_tabs,
+            egui::Button::new("Convert indentation to tabs"),
+        );
+        if no_tabs {
+            to_tabs
+                .clone()
+                .on_disabled_hover_text("Tabs are not valid YAML indentation");
+        }
+        if to_tabs.clicked() {
+            pick = Some(IndentPick::Convert(Indent { tabs: true, ..cur }));
+        }
+        ui.horizontal(|ui| {
+            ui.label("Re-indent to");
+            for n in Indent::SIZES {
+                if ui
+                    .add_enabled(n != cur.size, egui::Button::new(n.to_string()))
+                    .on_hover_text(format!("Each level from {} to {n} columns", cur.size))
+                    .clicked()
+                {
+                    pick = Some(IndentPick::Convert(Indent { size: n, ..cur }));
+                }
+            }
+        });
+        if pick.is_some() {
+            ui.close();
+        }
+    })
+    .response
+    .on_hover_text("Indentation: tabs or spaces, size, convert, re-indent");
+    pick
 }
 
 fn colour(t: Tok, dark: bool, plain: Color32) -> Color32 {
@@ -1073,7 +1163,7 @@ fn code(
             && let Some(r) = st.cursor.char_range()
         {
             let (a, b) = (r.primary.index.0, r.secondary.index.0);
-            let unit = text::indent_unit(buf);
+            let unit = t.indent.unit();
             let (new, sel) = text::indent(buf, a.min(b)..a.max(b), &unit, out);
             *buf = new;
             st.cursor.set_char_range(Some(CCursorRange::two(
@@ -1348,6 +1438,20 @@ pub fn embedded(
     let slot = egui::Id::unique(("telepad-embedded-ed", win));
     let mut dr: EdDraft = ui.data(|m| m.get_temp(slot)).unwrap_or_default();
     let before = text.clone();
+    // The chosen indentation, with the text it was last shown with: a text
+    // replaced from outside (Reload, another stack) is detected again.
+    let indent_slot = slot.with("indent");
+    let hash = |t: &str| {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        t.hash(&mut h);
+        h.finish()
+    };
+    let indent: Indent = ui
+        .data(|m| m.get_temp::<(Indent, u64)>(indent_slot))
+        .filter(|(_, h)| *h == hash(text))
+        .map_or_else(|| Indent::detect(text), |(i, _)| i);
+    let mut indent_to = indent;
     dr.texts.insert(TAB, std::mem::take(text));
     let t = EdTab {
         id: TAB,
@@ -1355,6 +1459,7 @@ pub fn embedded(
         path: name.to_string(),
         name: name.to_string(),
         lang,
+        indent,
         state: TabState::Ready,
         crlf: false,
         mixed: false,
@@ -1411,6 +1516,22 @@ pub fn embedded(
         ui.label(RichText::new(il(icons::CODE, name)).monospace().weak());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(RichText::new(lang.name()).weak());
+            if editable {
+                let sel = cursor_of(ui.ctx(), win, TAB).unwrap_or(0..0);
+                match indent_menu(ui, indent, lang, !sel.is_empty()) {
+                    Some(IndentPick::Use(to)) => {
+                        indent_to = to;
+                    }
+                    Some(IndentPick::Convert(to)) => {
+                        if let Some(txt) = dr.texts.get_mut(&TAB) {
+                            let r = (!sel.is_empty()).then_some(sel);
+                            *txt = text::convert_indent(txt, r, indent, to);
+                        }
+                        indent_to = to;
+                    }
+                    None => {}
+                }
+            }
             if !editable {
                 ui.label(RichText::new("read-only").weak());
             }
@@ -1438,5 +1559,9 @@ pub fn embedded(
     if !editable {
         *text = before;
     }
-    ui.data_mut(|m| m.insert_temp(slot, dr));
+    let shown = (indent_to, hash(text));
+    ui.data_mut(|m| {
+        m.insert_temp(slot, dr);
+        m.insert_temp(indent_slot, shown);
+    });
 }

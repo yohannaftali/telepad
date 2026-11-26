@@ -2,6 +2,11 @@
 
 Newest first.
 
+## [2026-11-26] — feat(editor): change indentation — tabs / spaces, size 2 / 4 / 8, convert and re-indent
+- Issue #182 addressed on Windows
+- Files: telepad-core `files/text.rs` (`Indent`, `Indent::detect`, `convert_indent`), telepad-app `editor.rs` (`EdTab::indent`, `EdMsg::SetIndent` / `ConvertIndent`, `indent_allowed`), `tests_editor.rs`; telepad-gui `views/text_editor.rs` (status bar / embedded header menu, Tab uses the tab's indent, embedded indent re-detected when the text is replaced); manual
+- Verified: fmt, clippy, tests (core: tabs ↔ spaces, 4 → 2, 2 → 4, partial runs, CRLF, selection; app: set, convert, unsaved, YAML refuses tabs, selected lines); GUI: Portainer stack editor menu (tabs off for YAML), Re-indent 2 → 4, Reload brings back the text and Spaces: 2. Undo after a conversion goes through egui's undo history (not one strict step when typed right after)
+
 ## [2026-11-26] — fix(ui): grey secondary text too faint — lighter in the dark theme, darker in the light theme
 - Issue #181 addressed on Windows
 - Files: telepad-gui `widgets.rs` (dark text #dde1e7, dark weak #aeb6c2, light weak #475569, palette grey; test: weak text ≥ 4.5 : 1 and normal text ≥ 7 : 1 on window, panel, stripe, input, code, button and title fills, weak still distinct), `views/docker.rs`, `docker_overview.rs`, `files.rs` (hard-coded greys → palette grey); manual
