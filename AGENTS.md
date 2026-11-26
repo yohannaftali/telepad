@@ -363,4 +363,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #170 | feat(ui): filter box trailing funnel icon opens a searchable value dropdown (select2 style) | closed | 2026-11-26 |
 | #171 | feat(portainer): Portainers page — register Portainer servers with an API token, per-Portainer page with environments and stacks (read-only, SSH tunnel) | closed | 2026-11-26 |
 | #173 | feat(portainer): manage stacks and their containers through the Portainer API — start / stop / delete, stack editor with env variables and update, container actions | closed | 2026-11-26 |
-| #176 | feat(portainer): Stack page with Containers and Editor tabs, opened by double-click on a stack or Open stack on the host page | ready-for-review | 2026-11-26 |
+| #176 | feat(portainer): Stack page with Containers and Editor tabs, opened by double-click on a stack or Open stack on the host page | closed | 2026-11-26 |
