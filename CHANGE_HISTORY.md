@@ -6,6 +6,7 @@ Newest first.
 - Issue #176 created on GitHub
 - Scope: portainer (app, gui: Portainer page, host page Docker section)
 - Labels: enhancement
+
 ## [2026-11-26] — Telepad 0.9.12
 - #163 Group / Cluster cells and card links open "Hosts - [name]"
 - #167 Blue-grey (slate) light theme; navy title bar, table header and selection in the dark theme
