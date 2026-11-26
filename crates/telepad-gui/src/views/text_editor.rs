@@ -1328,151 +1328,115 @@ fn question(ui: &mut egui::Ui, s: &FileSession, dr: &EdDraft, out: &mut Vec<Msg>
     }
 }
 
-/// A code box with colours and line numbers for other windows (#173, the
-/// Portainer stack editor): `find` highlights its matches (any case);
-/// [`code_box_select`] selects a range in it.
-pub fn code_box(
+/// Telepad's text editor for a text that is not a file of a file window
+/// (#173: a Portainer stack's compose file): the same code area, colours,
+/// line numbers, find / replace / go to line (Ctrl+F / H / G, F3) and
+/// indenting as the editor window. `win` keeps its state apart from other
+/// windows; `editable` = false shows the text read-only (edits are dropped).
+#[allow(clippy::too_many_arguments)]
+pub fn embedded(
     ui: &mut egui::Ui,
-    eid: egui::Id,
-    buf: &mut String,
+    win: u64,
+    focused: bool,
+    name: &str,
     lang: Lang,
+    text: &mut String,
+    saved: &str,
     editable: bool,
-    find: &str,
 ) {
-    let ctx = ui.ctx().clone();
-    let mono = egui::TextStyle::Monospace.resolve(ui.style());
-    let pending = ctx.data_mut(|m| m.remove_temp::<Range<usize>>(eid.with("select")));
-    if let Some(r) = &pending {
-        let mut st = egui::TextEdit::load_state(&ctx, eid).unwrap_or_default();
-        st.cursor.set_char_range(Some(CCursorRange::two(
-            CCursor::new(r.start),
-            CCursor::new(r.end),
-        )));
-        st.store(&ctx, eid);
-        ctx.memory_mut(|m| m.request_focus(eid));
-    }
-    let lines = text::line_count(buf);
-    let digits = lines.to_string().len().max(3);
-    let char_w = ui.fonts_mut(|f| f.glyph_width(&mono, '0'));
-    let gutter = digits as f32 * char_w + 16.0;
-    let mut layouter = |ui: &egui::Ui, b: &dyn egui::TextBuffer, _wrap: f32| {
-        let job = layout(ui, b.as_str(), lang, &mono);
-        ui.fonts_mut(|f| f.layout_job(job))
+    const TAB: u64 = 1;
+    let slot = egui::Id::unique(("telepad-embedded-ed", win));
+    let mut dr: EdDraft = ui.data(|m| m.get_temp(slot)).unwrap_or_default();
+    let before = text.clone();
+    dr.texts.insert(TAB, std::mem::take(text));
+    let t = EdTab {
+        id: TAB,
+        side: Side::Remote,
+        path: name.to_string(),
+        name: name.to_string(),
+        lang,
+        state: TabState::Ready,
+        crlf: false,
+        mixed: false,
+        bom: false,
+        stamp: None,
+        saved: saved.to_string(),
+        saving: None,
+        error: None,
+        conflict: None,
+        close_after_save: false,
     };
-    egui::ScrollArea::both()
-        .id_salt(eid.with("scroll"))
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.horizontal_top(|ui| {
-                ui.add_space(gutter);
-                let under = ui.painter().add(egui::Shape::Noop);
-                let min = egui::vec2(ui.available_width(), ui.available_height().max(100.0));
-                let output = egui::TextEdit::multiline(buf)
-                    .id(eid)
-                    .code_editor()
-                    .interactive(editable)
-                    .frame(egui::Frame::NONE)
-                    .margin(egui::Margin::symmetric(4, 2))
-                    .desired_width(f32::INFINITY)
-                    .min_size(min)
-                    .layouter(&mut layouter)
-                    .show(ui);
-                let galley = &output.galley;
-                let origin = output.galley_pos;
-                let clip = ui.clip_rect();
-                let v = ui.visuals();
-                let row_h = galley
-                    .rows
-                    .first()
-                    .map_or(14.0, |r| r.rect().height())
-                    .max(1.0);
-                let mut shapes = Vec::new();
-                let q = find.trim().to_lowercase();
-                if !q.is_empty() {
-                    let low = buf.to_lowercase();
-                    if low.len() == buf.len() {
-                        for (at, _) in low.match_indices(&q) {
-                            let a = buf[..at].chars().count();
-                            let b = a + buf[at..at + q.len()].chars().count();
-                            let ra = galley
-                                .pos_from_cursor(CCursor::new(a))
-                                .translate(origin.to_vec2());
-                            let rb = galley
-                                .pos_from_cursor(CCursor::new(b))
-                                .translate(origin.to_vec2());
-                            if ra.bottom() < clip.top() || ra.top() > clip.bottom() {
-                                continue;
-                            }
-                            shapes.push(egui::Shape::rect_filled(
-                                egui::Rect::from_min_max(
-                                    ra.min,
-                                    egui::pos2(rb.max.x.max(ra.min.x + 2.0), ra.max.y),
-                                ),
-                                2.0,
-                                v.selection.bg_fill.gamma_multiply(0.55),
-                            ));
-                        }
-                    }
-                }
-                ui.painter().set(under, egui::Shape::Vec(shapes));
-                let gx = clip.left();
-                let p = ui.painter();
-                p.rect_filled(
-                    egui::Rect::from_min_max(
-                        egui::pos2(gx, clip.top()),
-                        egui::pos2(gx + gutter, clip.bottom()),
-                    ),
-                    0.0,
-                    v.extreme_bg_color,
+    if focused {
+        let sc = |m: Modifiers, k: Key| {
+            ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)))
+        };
+        let find = sc(Modifiers::COMMAND, Key::F);
+        let replace = editable && sc(Modifiers::COMMAND, Key::H);
+        if find || replace {
+            dr.bar = if replace { Bar::Replace } else { Bar::Find };
+            if let (Some(r), Some(txt)) = (cursor_of(ui.ctx(), win, TAB), dr.texts.get(&TAB))
+                && !r.is_empty()
+            {
+                let (a, b) = (
+                    text::char_to_byte(txt, r.start),
+                    text::char_to_byte(txt, r.end),
                 );
-                let first = (((clip.top() - origin.y) / row_h).floor().max(0.0)) as usize;
-                let last = ((((clip.bottom() - origin.y) / row_h).ceil()).max(0.0) as usize)
-                    .min(galley.rows.len());
-                for (i, row) in galley.rows.iter().enumerate().take(last).skip(first) {
-                    p.text(
-                        egui::pos2(gx + gutter - 6.0, origin.y + row.rect().min.y),
-                        egui::Align2::RIGHT_TOP,
-                        (i + 1).to_string(),
-                        mono.clone(),
-                        v.weak_text_color(),
-                    );
+                if !txt[a..b].contains('\n') {
+                    dr.find = txt[a..b].to_string();
                 }
-                if pending.is_some()
-                    && let Some(c) = output.cursor_range
-                {
-                    let r = galley
-                        .pos_from_cursor(c.primary)
-                        .translate(origin.to_vec2());
-                    ui.scroll_to_rect(
-                        r.expand2(egui::vec2(gutter + 40.0, row_h * 2.0)),
-                        Some(egui::Align::Center),
-                    );
-                }
-            });
-        });
-}
-
-/// Select the next match of `find` after the cursor in a [`code_box`]
-/// (wraps around); `false` when there is none.
-pub fn code_box_next(ctx: &egui::Context, eid: egui::Id, buf: &str, find: &str) -> bool {
-    let q = find.trim().to_lowercase();
-    let low = buf.to_lowercase();
-    if q.is_empty() || low.len() != buf.len() {
-        return false;
+            }
+            focus_field(ui.ctx(), win, "find");
+        }
+        if sc(Modifiers::COMMAND, Key::G) {
+            dr.bar = Bar::Goto;
+            dr.goto.clear();
+            focus_field(ui.ctx(), win, "goto");
+        }
+        if dr.bar != Bar::None && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            dr.bar = Bar::None;
+            match current(ui.ctx(), win, TAB) {
+                Some(r) => select_later(ui.ctx(), win, TAB, r, true),
+                None => ui.memory_mut(|m| m.request_focus(edit_id(win, TAB))),
+            }
+            set_current(ui.ctx(), win, TAB, None);
+        }
+        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F3)) {
+            step(ui.ctx(), win, TAB, &dr, true);
+        }
+        if ui.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::F3)) {
+            step(ui.ctx(), win, TAB, &dr, false);
+        }
     }
-    let from = egui::TextEdit::load_state(ctx, eid)
-        .and_then(|s| s.cursor.char_range())
-        .map_or(0, |r| r.primary.index.0.max(r.secondary.index.0));
-    let starts: Vec<(usize, usize)> = low
-        .match_indices(&q)
-        .map(|(at, _)| {
-            let a = buf[..at].chars().count();
-            (a, a + buf[at..at + q.len()].chars().count())
-        })
-        .collect();
-    let Some(&(a, b)) = starts.iter().find(|(a, _)| *a >= from).or(starts.first()) else {
-        return false;
-    };
-    ctx.data_mut(|m| m.insert_temp(eid.with("select"), a..b));
-    true
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(il(icons::CODE, name)).monospace().weak());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(RichText::new(lang.name()).weak());
+            if !editable {
+                ui.label(RichText::new("read-only").weak());
+            }
+            if ui
+                .add(egui::Button::new(il(icons::SEARCH, "Find")).small())
+                .on_hover_text("Find (Ctrl+F), replace (Ctrl+H), go to line (Ctrl+G)")
+                .clicked()
+            {
+                dr.bar = Bar::Find;
+                focus_field(ui.ctx(), win, "find");
+            }
+        });
+    });
+    if dr.bar == Bar::Replace && !editable {
+        dr.bar = Bar::Find;
+    }
+    if dr.bar != Bar::None {
+        find_bar(ui, win, &t, &mut dr);
+    }
+    let fill = ui.visuals().extreme_bg_color;
+    egui::Frame::new().fill(fill).show(ui, |ui| {
+        code(ui, win, &t, &mut dr, None, None);
+    });
+    *text = dr.texts.remove(&TAB).unwrap_or_default();
+    if !editable {
+        *text = before;
+    }
+    ui.data_mut(|m| m.insert_temp(slot, dr));
 }

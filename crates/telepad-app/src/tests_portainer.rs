@@ -578,3 +578,122 @@ fn the_stack_editor_reviews_updates_and_handles_a_changed_stack() {
         .is_empty()
     );
 }
+
+#[test]
+fn variables_open_as_their_own_page_and_come_from_a_file_or_paste() {
+    // #173: the Variables page, .env import and paste.
+    use telepad_core::portainer::{EnvVar, StackDetail};
+    let mut s = started(Instant::now(), "");
+    let page = page_with_stack(&mut s);
+    pt(&mut s, PtMsg::EditStack { page, stack: 11 });
+    let ed = s.model.pt_editors[0].id;
+    let detail = StackDetail {
+        id: 11,
+        name: "shop".into(),
+        kind: 2,
+        env_id: 1,
+        env: vec![EnvVar {
+            name: "MODE".into(),
+            value: "dev".into(),
+        }],
+        file: "services: {}\n".into(),
+        ..Default::default()
+    };
+    pt(
+        &mut s,
+        PtMsg::StackLoaded {
+            editor: ed,
+            result: Box::new(Ok(detail.clone())),
+        },
+    );
+    // Its own page, next to the editor; once.
+    pt(&mut s, PtMsg::OpenVars(ed));
+    assert!(s.model.ws.is_open(Win::PtVars(ed)));
+    assert_eq!(s.model.pt_editors[0].vars_title(), "Variables - shop");
+    pt(&mut s, PtMsg::OpenVars(ed));
+    assert_eq!(s.model.ws.focused, Some(Win::PtVars(ed)));
+    // A file: the runtime picks and reads it.
+    assert_eq!(
+        pt(&mut s, PtMsg::VarsFromFile(ed)),
+        [PtEffect::PickEnvFile { editor: ed }]
+    );
+    pt(
+        &mut s,
+        PtMsg::VarsFile {
+            editor: ed,
+            name: "app.env".into(),
+            result: Ok("# made up\nMODE=prod\nexport DB_HOST=db\n".into()),
+        },
+    );
+    let names = |s: &State| -> Vec<(String, String)> {
+        s.drafts.pt.editors[&ed]
+            .vars
+            .iter()
+            .map(|v| (v.name.clone(), v.value.clone()))
+            .collect()
+    };
+    assert_eq!(
+        names(&s),
+        [
+            ("MODE".to_string(), "prod".to_string()),
+            ("DB_HOST".to_string(), "db".to_string())
+        ]
+    );
+    assert_eq!(
+        s.model.pt_editors[0].notice,
+        Some(Ok("1 added, 1 changed from app.env".into()))
+    );
+    // A bad file takes nothing.
+    pt(
+        &mut s,
+        PtMsg::VarsFile {
+            editor: ed,
+            name: "bad.env".into(),
+            result: Ok("OK=1\nnot a line\n".into()),
+        },
+    );
+    assert_eq!(names(&s).len(), 2);
+    assert!(matches!(&s.model.pt_editors[0].notice, Some(Err(e)) if e.contains("line 2")));
+    // Paste: the dialog's text, then it closes.
+    pt(&mut s, PtMsg::VarsPasteOpen(ed));
+    *s.drafts
+        .pt
+        .editors
+        .get_mut(&ed)
+        .unwrap()
+        .paste
+        .as_mut()
+        .unwrap() = "TOKEN=\"a b\"\n".into();
+    pt(&mut s, PtMsg::VarsPaste(ed));
+    assert!(s.drafts.pt.editors[&ed].paste.is_none());
+    assert_eq!(names(&s)[2], ("TOKEN".to_string(), "a b".to_string()));
+    // The editor sees the same variables (the review lists names only).
+    pt(&mut s, PtMsg::EditorReview(ed));
+    assert_eq!(
+        crate::portainer::var_changes(&detail.env, &s.drafts.pt.editors[&ed].vars),
+        ["~ MODE", "+ DB_HOST", "+ TOKEN"]
+    );
+    // Closing the page keeps the edits; closing the editor closes it too.
+    pt(&mut s, PtMsg::CloseVars(ed));
+    assert!(!s.model.ws.is_open(Win::PtVars(ed)));
+    assert_eq!(names(&s).len(), 3);
+    pt(&mut s, PtMsg::OpenVars(ed));
+    pt(&mut s, PtMsg::EditorDiscard(ed));
+    assert!(!s.model.ws.is_open(Win::PtVars(ed)));
+    // Git stacks: no import or paste.
+    pt(&mut s, PtMsg::EditStack { page, stack: 11 });
+    let ed = s.model.pt_editors[0].id;
+    pt(
+        &mut s,
+        PtMsg::StackLoaded {
+            editor: ed,
+            result: Box::new(Ok(StackDetail {
+                git: Some("https://git.example/shop.git".into()),
+                ..detail
+            })),
+        },
+    );
+    assert!(pt(&mut s, PtMsg::VarsFromFile(ed)).is_empty());
+    pt(&mut s, PtMsg::VarsPasteOpen(ed));
+    assert!(s.drafts.pt.editors[&ed].paste.is_none());
+}

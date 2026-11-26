@@ -749,6 +749,108 @@ pub struct EnvVar {
     pub value: String,
 }
 
+/// Variables from `.env` text (a file or pasted, #173): `NAME=value` per
+/// line, blank lines and `#` comments skipped, an optional `export `,
+/// values in '…' kept as written, in "…" with `\n` `\t` `\"` `\\`
+/// escapes, unquoted values trimmed and cut at ` #`. A later line for the
+/// same name wins. Any bad line: an error naming it, nothing taken.
+pub fn parse_env_text(text: &str) -> Result<Vec<EnvVar>, String> {
+    let mut out: Vec<EnvVar> = Vec::new();
+    let mut bad = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let line = raw.trim_start_matches('\u{feff}').trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").map_or(line, str::trim_start);
+        let Some((k, v)) = line.split_once('=') else {
+            bad.push(format!("line {}: no '=' ({})", i + 1, short_line(line)));
+            continue;
+        };
+        let name = k.trim();
+        if name.is_empty() || name.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            bad.push(format!(
+                "line {}: '{}' is not a variable name",
+                i + 1,
+                short_line(name)
+            ));
+            continue;
+        }
+        let v = v.trim();
+        let value = if v.len() >= 2 && v.starts_with('\'') && v.ends_with('\'') {
+            v[1..v.len() - 1].to_string()
+        } else if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') {
+            unescape(&v[1..v.len() - 1])
+        } else {
+            v.split(" #").next().unwrap_or("").trim_end().to_string()
+        };
+        match out.iter_mut().find(|e| e.name == name) {
+            Some(e) => e.value = value,
+            None => out.push(EnvVar {
+                name: name.to_string(),
+                value,
+            }),
+        }
+    }
+    if bad.is_empty() {
+        Ok(out)
+    } else {
+        let more = if bad.len() > 5 {
+            format!(" (and {} more)", bad.len() - 5)
+        } else {
+            String::new()
+        };
+        Err(format!("{}{more}", bad[..bad.len().min(5)].join("; ")))
+    }
+}
+
+fn short_line(s: &str) -> String {
+    if s.chars().count() > 40 {
+        format!("{}…", s.chars().take(40).collect::<String>())
+    } else {
+        s.to_string()
+    }
+}
+
+fn unescape(s: &str) -> String {
+    let mut out = String::new();
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some(o) => out.push(o),
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// Put `new` into `vars`: same names get the new value, others are added
+/// at the end. (added, changed).
+pub fn merge_env(vars: &mut Vec<EnvVar>, new: Vec<EnvVar>) -> (usize, usize) {
+    let (mut added, mut changed) = (0, 0);
+    for v in new {
+        match vars.iter_mut().find(|e| e.name == v.name) {
+            Some(e) if e.value != v.value => {
+                e.value = v.value;
+                changed += 1;
+            }
+            Some(_) => {}
+            None => {
+                vars.push(v);
+                added += 1;
+            }
+        }
+    }
+    (added, changed)
+}
+
 /// A stack as the editor needs it (#173).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StackDetail {
@@ -1297,6 +1399,40 @@ mod tests {
             String::from_utf8(raw)
                 .unwrap()
                 .contains("Content-Length: 0\r\n")
+        );
+    }
+
+    #[test]
+    fn env_text_from_a_file_or_pasted() {
+        let text = "\u{feff}# made-up values\n\nMODE=dev\nexport DB_HOST = db.example\nQUOTED=\"a b\\n#c\"\nSINGLE='x \\n y'\nCUT=plain # note\nEMPTY=\nMODE=prod\n";
+        let v = parse_env_text(text).unwrap();
+        let pairs: Vec<(&str, &str)> = v
+            .iter()
+            .map(|e| (e.name.as_str(), e.value.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                ("MODE", "prod"),
+                ("DB_HOST", "db.example"),
+                ("QUOTED", "a b\n#c"),
+                ("SINGLE", "x \\n y"),
+                ("CUT", "plain"),
+                ("EMPTY", ""),
+            ]
+        );
+        let e = parse_env_text("OK=1\nno equals here\nBAD NAME=2\n").unwrap_err();
+        assert!(e.contains("line 2") && e.contains("line 3"), "{e}");
+        let mut vars = vec![EnvVar {
+            name: "MODE".into(),
+            value: "dev".into(),
+        }];
+        let (added, changed) = merge_env(&mut vars, v);
+        assert_eq!((added, changed), (5, 1));
+        assert_eq!(vars[0].value, "prod");
+        assert_eq!(
+            merge_env(&mut vars, parse_env_text("MODE=prod").unwrap()),
+            (0, 0)
         );
     }
 

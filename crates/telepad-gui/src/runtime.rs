@@ -1913,6 +1913,32 @@ impl Runtime {
                     .and_then(|()| pc::forget_token(&name));
                 Some(Msg::Portainer(PtMsg::Saved(r)))
             }
+            PtEffect::PickEnvFile { editor } => {
+                // A native file dialog: the one blocking call allowed here.
+                let path = rfd::FileDialog::new()
+                    .set_title("Import variables from a .env file")
+                    .add_filter("Environment files", &["env", "txt"])
+                    .add_filter("All files", &["*"])
+                    .pick_file()?;
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let result = match std::fs::metadata(&path) {
+                    Ok(md) if md.len() > 1024 * 1024 => {
+                        Err("larger than 1 MiB: not a .env file?".to_string())
+                    }
+                    Ok(_) => std::fs::read(&path)
+                        .map(|b| String::from_utf8_lossy(&b).into_owned())
+                        .map_err(|e| e.to_string()),
+                    Err(e) => Err(e.to_string()),
+                };
+                Some(Msg::Portainer(PtMsg::VarsFile {
+                    editor,
+                    name,
+                    result,
+                }))
+            }
             PtEffect::Pin { name, fingerprint } => {
                 let ws = self.ws.as_mut()?;
                 match ws.store.pin_portainer(&name, &fingerprint) {

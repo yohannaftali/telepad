@@ -87,6 +87,13 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
                 .find(|e| e.id == id)
                 .map_or("Stack".into(), |e| e.title()),
         ),
+        Win::PtVars(id) => (
+            icons::ROWS,
+            m.pt_editors
+                .iter()
+                .find(|e| e.id == id)
+                .map_or("Variables".into(), |e| e.vars_title()),
+        ),
     }
 }
 
@@ -105,6 +112,7 @@ fn close_msg(w: Win) -> Msg {
         | Win::Portainers => Msg::Ws(WsMsg::Close(w)),
         Win::Portainer(id) => Msg::Portainer(telepad_app::portainer::PtMsg::ClosePage(id)),
         Win::PtStack(id) => Msg::Portainer(telepad_app::portainer::PtMsg::EditorClose(id)),
+        Win::PtVars(id) => Msg::Portainer(telepad_app::portainer::PtMsg::CloseVars(id)),
         Win::SetHosts(id) => Msg::Sets(telepad_app::sets::StMsg::ClosePage(id)),
         Win::Host => Msg::Select(None),
         Win::HostSync => Msg::HostSync(telepad_app::hostsync::HsMsg::Close),
@@ -137,7 +145,8 @@ fn default_size(w: Win) -> Vec2 {
         Win::SetHosts(_) => egui::vec2(1000.0, 600.0),
         Win::Portainers => egui::vec2(1000.0, 480.0),
         Win::Portainer(_) => egui::vec2(1100.0, 700.0),
-        Win::PtStack(_) => egui::vec2(1150.0, 720.0),
+        Win::PtStack(_) => egui::vec2(1050.0, 720.0),
+        Win::PtVars(_) => egui::vec2(760.0, 520.0),
     }
 }
 

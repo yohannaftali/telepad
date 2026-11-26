@@ -439,10 +439,22 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
   container actions (scale or update the service in Portainer). Click the stack again to hide
   them; the refresh button next to the title reads them again.
 - **Stack editor** (**Edit**; a window "Stack - [name]", one per stack): the
-  `docker-compose.yml` with YAML colours, line numbers and **Find** (Enter or the arrow goes to
-  the next match, Ctrl+F jumps to the box), and the **environment variables** as name / value
-  rows (values hidden unless **Show values** is ticked; **Add variable**, ✕ removes one).
-  **Re-pull image and redeploy** and **Prune services** are Portainer's update options.
+  `docker-compose.yml` in Telepad's own text editor (the one of the file windows, see
+  [Editor](#editor)): YAML colours, line numbers, the current line, Tab / Shift+Tab indent,
+  **Find** (Ctrl+F), **Replace** (Ctrl+H), **Go to line** (Ctrl+G), F3 / Shift+F3 for the next /
+  previous match, Esc closes the bar. **Variables (n)…** opens the stack's variables on their
+  own page (below). **Re-pull image and redeploy** and **Prune services** are Portainer's update
+  options.
+- **Variables** page ("Variables - [name]", from the editor's **Variables (n)…**): one row per
+  variable, name and value (values hidden unless **Show values** is ticked); **Add variable**,
+  ✕ removes one. **Import .env file…** reads `NAME=value` lines from a file you pick (up to
+  1 MiB); **Paste…** takes the same lines pasted into a box. Blank lines and `#` comments are
+  skipped, `export ` is allowed, values in '…' are kept as written and in "…" may use `\n`,
+  `\t`, `\"`; an unquoted value ends at ` #`. A name that is already there gets the new value,
+  new names are added; the page says how many were added / changed. A bad line (no `=`, a name
+  with spaces) takes nothing and names the line. **Compose file** goes back to the editor. The
+  variables are sent with the editor's **Update the stack**; closing the page keeps the edits,
+  closing the editor closes the page.
   **Update the stack…** first checks the names (no spaces or `=`, no duplicates) and shows a
   review: whether the compose file changed (with its line diff) and which variables were added
   (+), changed (~) or removed (−) — names only. **Update the stack** then sends it and Portainer redeploys the stack (`docker compose up`): containers

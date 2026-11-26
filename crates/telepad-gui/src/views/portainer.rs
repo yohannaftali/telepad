@@ -1023,6 +1023,7 @@ pub fn stack_editor_page(
     m: &Model,
     d: &mut Drafts,
     id: EditorId,
+    focused: bool,
     out: &mut Vec<Msg>,
 ) {
     let Some(e) = m.pt_editors.iter().find(|e| e.id == id) else {
@@ -1098,124 +1099,45 @@ pub fn stack_editor_page(
         review(ui, e, dr, id, out);
         return;
     }
-    // Variables on the right, the compose file on the left.
-    let total = ui.available_width();
-    let vars_w = (total * 0.36).clamp(280.0, 520.0);
-    let body_h = ui.available_height() - 44.0;
-    ui.horizontal_top(|ui| {
-        let down = egui::Layout::top_down(egui::Align::Min);
-        ui.allocate_ui_with_layout(egui::vec2(total - vars_w - 12.0, body_h), down, |ui| {
-            ui.set_min_size(egui::vec2(total - vars_w - 12.0, body_h));
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("docker-compose.yml").strong());
-                let find_id = egui::Id::unique(("pt-ed-find", id));
-                let mut q: String = ui.data(|m| m.get_temp(find_id)).unwrap_or_default();
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut q)
-                        .desired_width(180.0)
-                        .hint_text(il(icons::SEARCH, "Find")),
-                );
-                let eid = egui::Id::unique(("pt-ed-code", id));
-                if (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                    || ui
-                        .small_button(icons::ARROW_LINE_DOWN)
-                        .on_hover_text("Next match")
-                        .clicked()
-                {
-                    super::text_editor::code_box_next(ui.ctx(), eid, &dr.file, &q);
-                }
-                if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
-                    r.request_focus();
-                }
-                ui.data_mut(|m| m.insert_temp(find_id, q));
-            });
-            let eid = egui::Id::unique(("pt-ed-code", id));
-            let q: String = ui
-                .data(|m| m.get_temp(egui::Id::unique(("pt-ed-find", id))))
-                .unwrap_or_default();
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.set_min_height(body_h - 40.0);
-                super::text_editor::code_box(
-                    ui,
-                    eid,
-                    &mut dr.file,
-                    telepad_core::files::syntax::Lang::Yaml,
-                    editable,
-                    &q,
-                );
-            });
-        });
-        ui.allocate_ui_with_layout(egui::vec2(vars_w, body_h), down, |ui| {
-            ui.set_min_width(vars_w);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Environment variables").strong());
-                ui.checkbox(&mut dr.reveal, "Show values");
-            });
-            egui::ScrollArea::vertical()
-                .id_salt(("pt-ed-vars", id))
-                .max_height(body_h - 40.0)
-                .show(ui, |ui| {
-                    let mut remove = None;
-                    let row_h = ui.spacing().interact_size.y;
-                    let (nw, vw) = (vars_w * 0.40, vars_w * 0.44);
-                    for (i, v) in dr.vars.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.add_enabled_ui(editable, |ui| {
-                                ui.add_sized(
-                                    [nw, row_h],
-                                    egui::TextEdit::singleline(&mut v.name).hint_text("NAME"),
-                                );
-                                ui.add_sized(
-                                    [vw, row_h],
-                                    egui::TextEdit::singleline(&mut v.value)
-                                        .password(!dr.reveal)
-                                        .hint_text("value"),
-                                );
-                                if ui
-                                    .add(egui::Button::new(icons::X).small())
-                                    .on_hover_text("Remove this variable")
-                                    .clicked()
-                                {
-                                    remove = Some(i);
-                                }
-                            });
-                        });
-                    }
-                    if let Some(i) = remove {
-                        dr.vars.remove(i);
-                    }
-                    if act_small(ui, editable, Act::Add, &il(icons::PLUS, "Add variable")).clicked()
-                    {
-                        dr.vars.push(Default::default());
-                    }
-                });
-        });
-    });
-    ui.separator();
+    // The variables are on their own page; the compose file gets the window.
     ui.horizontal(|ui| {
+        let n = dr.vars.len();
+        if ui
+            .button(il(icons::ROWS, &format!("Variables ({n})…")))
+            .on_hover_text("The stack's environment variables, on their own page: edit, import a .env file, paste")
+            .clicked()
+        {
+            pt(out, PtMsg::OpenVars(id));
+        }
+        ui.separator();
         ui.add_enabled(
             editable,
             egui::Checkbox::new(&mut dr.repull, "Re-pull image and redeploy"),
         );
-        ui.add_enabled(
-            editable,
-            egui::Checkbox::new(&mut dr.prune, "Prune services"),
-        )
-        .on_hover_text("Remove services that are no longer in the compose file");
+        ui.add_enabled(editable, egui::Checkbox::new(&mut dr.prune, "Prune services"))
+            .on_hover_text("Remove services that are no longer in the compose file");
         if e.saving {
             ui.spinner();
             ui.label(RichText::new("Updating the stack…").weak());
-        } else if act_button(
-            ui,
-            editable,
-            Act::Edit,
-            &il(icons::SAVE, "Update the stack…"),
-        )
-        .clicked()
-        {
+        } else if act_button(ui, editable, Act::Edit, &il(icons::SAVE, "Update the stack…")).clicked() {
             pt(out, PtMsg::EditorReview(id));
         }
     });
+    let saved = e
+        .detail
+        .as_ref()
+        .map(|x| x.file.clone())
+        .unwrap_or_default();
+    super::text_editor::embedded(
+        ui,
+        0x5741_0000_0000 + id,
+        focused,
+        "docker-compose.yml",
+        telepad_core::files::syntax::Lang::Yaml,
+        &mut dr.file,
+        &saved,
+        editable,
+    );
     if dr.ask_close {
         let modal = egui::Modal::new(egui::Id::unique(("pt-ed-close", id))).show(ui.ctx(), |ui| {
             ui.set_width(420.0);
@@ -1234,6 +1156,188 @@ pub fn stack_editor_page(
         });
         if modal.should_close() {
             dr.ask_close = false;
+        }
+    }
+}
+
+/// A stack editor's Variables page (#173): name / value rows (values hidden
+/// unless shown), add / remove, import a `.env` file, paste `.env` text.
+/// Sent with the stack editor's Update the stack.
+pub fn vars_page(ui: &mut egui::Ui, m: &Model, d: &mut Drafts, id: EditorId, out: &mut Vec<Msg>) {
+    let Some(e) = m.pt_editors.iter().find(|e| e.id == id) else {
+        return;
+    };
+    let Some(dr) = d.pt.editors.get_mut(&id) else {
+        return;
+    };
+    let git = e.detail.as_ref().is_some_and(|x| x.git.is_some());
+    let editable = e.detail.is_some() && !git && !e.saving;
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(il(icons::STACK, &e.name)).strong());
+        ui.label(RichText::new(format!("· {} variable(s)", dr.vars.len())).weak());
+        if editor_dirty(e, dr) {
+            ui.label(RichText::new("· edited").color(usage_color(80.0)));
+        }
+        ui.separator();
+        ui.checkbox(&mut dr.reveal, "Show values");
+        if act_small(ui, editable, Act::Add, &il(icons::PLUS, "Add variable")).clicked() {
+            dr.vars.push(Default::default());
+        }
+        if ui
+            .add_enabled(
+                editable,
+                egui::Button::new(il(icons::IMPORT, "Import .env file…")).small(),
+            )
+            .on_hover_text("Read NAME=value lines from a file; same names get the new value")
+            .clicked()
+        {
+            pt(out, PtMsg::VarsFromFile(id));
+        }
+        if ui
+            .add_enabled(
+                editable,
+                egui::Button::new(il(icons::COPY, "Paste…")).small(),
+            )
+            .on_hover_text("Paste NAME=value lines (a .env file's text)")
+            .clicked()
+        {
+            pt(out, PtMsg::VarsPasteOpen(id));
+        }
+        ui.separator();
+        if ui
+            .button(il(icons::CODE, "Compose file"))
+            .on_hover_text("Back to the stack editor")
+            .clicked()
+        {
+            out.push(Msg::Ws(telepad_app::workspace::WsMsg::Open(
+                telepad_app::workspace::Win::PtStack(id),
+            )));
+        }
+    });
+    if git {
+        ui.colored_label(
+            usage_color(80.0),
+            il(
+                icons::INFO,
+                "Git-based stack: variables are changed in Portainer.",
+            ),
+        );
+    }
+    match &e.notice {
+        Some(Ok(t)) => {
+            ui.colored_label(usage_color(10.0), il(icons::CHECK, t));
+        }
+        Some(Err(t)) => {
+            ui.colored_label(usage_color(95.0), il(icons::WARNING, t));
+        }
+        None => {}
+    }
+    ui.label(
+        RichText::new(
+            "Changes are sent with Update the stack in the stack editor; Portainer redeploys the stack then.",
+        )
+        .weak()
+        .small(),
+    );
+    ui.add_space(4.0);
+    let w = ui.available_width();
+    let row_h = ui.spacing().interact_size.y;
+    let (nw, vw) = ((w * 0.34).clamp(140.0, 360.0), (w * 0.58).max(160.0));
+    egui::ScrollArea::vertical()
+        .id_salt(("pt-vars", id))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let mut remove = None;
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [nw, row_h],
+                    egui::Label::new(RichText::new("Name").strong()),
+                );
+                ui.add_sized(
+                    [vw, row_h],
+                    egui::Label::new(RichText::new("Value").strong()),
+                );
+            });
+            for (i, v) in dr.vars.iter_mut().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(editable, |ui| {
+                        ui.add_sized(
+                            [nw, row_h],
+                            egui::TextEdit::singleline(&mut v.name)
+                                .font(egui::TextStyle::Monospace)
+                                .hint_text("NAME"),
+                        );
+                        ui.add_sized(
+                            [vw, row_h],
+                            egui::TextEdit::singleline(&mut v.value)
+                                .font(egui::TextStyle::Monospace)
+                                .password(!dr.reveal)
+                                .hint_text("value"),
+                        );
+                        if ui
+                            .add(egui::Button::new(icons::X).small())
+                            .on_hover_text("Remove this variable")
+                            .clicked()
+                        {
+                            remove = Some(i);
+                        }
+                    });
+                });
+            }
+            if dr.vars.is_empty() {
+                ui.label(
+                    RichText::new(
+                        "No variables. Add one, import a .env file or paste NAME=value lines.",
+                    )
+                    .weak(),
+                );
+            }
+            if let Some(i) = remove {
+                dr.vars.remove(i);
+            }
+        });
+    if let Some(text) = &mut dr.paste {
+        let modal = egui::Modal::new(egui::Id::unique(("pt-vars-paste", id))).show(ui.ctx(), |ui| {
+            ui.set_width(560.0);
+            ui.heading(il(icons::COPY, &format!("Paste variables into {}", e.name)));
+            ui.label(
+                RichText::new(
+                    "One NAME=value per line, as in a .env file (# comments, export and quotes are fine). Same names get the new value.",
+                )
+                .weak()
+                .small(),
+            );
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(text)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_rows(12)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("APP_ENV=dev\nDB_HOST=db"),
+                )
+                .request_focus();
+            });
+            if let Some(Err(t)) = &e.notice {
+                ui.colored_label(usage_color(95.0), t);
+            }
+            ui.horizontal(|ui| {
+                if act_button(
+                    ui,
+                    !text.trim().is_empty(),
+                    Act::Add,
+                    &il(icons::PLUS, "Add variables"),
+                )
+                .clicked()
+                {
+                    pt(out, PtMsg::VarsPaste(id));
+                }
+                if ui.button("Cancel").clicked() {
+                    pt(out, PtMsg::VarsPasteCancel(id));
+                }
+            });
+        });
+        if modal.should_close() {
+            pt(out, PtMsg::VarsPasteCancel(id));
         }
     }
 }

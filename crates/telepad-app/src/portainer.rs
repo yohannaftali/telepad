@@ -88,11 +88,19 @@ pub struct StackEditor {
     pub error: Option<String>,
     /// Changed in Portainer since it was loaded: Reload or Overwrite.
     pub conflict: bool,
+    /// Its Variables page is open.
+    pub vars_open: bool,
+    /// What the last import / paste did ("3 added, 1 changed from app.env").
+    pub notice: Option<Result<String, String>>,
 }
 
 impl StackEditor {
     pub fn title(&self) -> String {
         format!("Stack - {}", self.name)
+    }
+
+    pub fn vars_title(&self) -> String {
+        format!("Variables - {}", self.name)
     }
 }
 
@@ -110,6 +118,8 @@ pub struct EditorDraft {
     pub review: bool,
     /// Closing with unsaved changes: asking.
     pub ask_close: bool,
+    /// The Paste variables dialog's text.
+    pub paste: Option<String>,
 }
 
 /// A confirmation waiting for the user (#173).
@@ -248,6 +258,21 @@ pub enum PtMsg {
     /// Close; asks first with unsaved edits.
     EditorClose(EditorId),
     EditorDiscard(EditorId),
+    /// The stack's Variables page (opens / comes to the front).
+    OpenVars(EditorId),
+    CloseVars(EditorId),
+    /// Import variables from a `.env` file (file dialog).
+    VarsFromFile(EditorId),
+    /// The file picked: its name and text (or why it was not read).
+    VarsFile {
+        editor: EditorId,
+        name: String,
+        result: Result<String, String>,
+    },
+    VarsPasteOpen(EditorId),
+    VarsPasteCancel(EditorId),
+    /// Take the pasted text's variables.
+    VarsPaste(EditorId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -275,6 +300,8 @@ pub enum PtEffect {
     },
     /// Pin a certificate fingerprint.
     Pin { name: String, fingerprint: String },
+    /// Pick a `.env` file and read it (#173) → [`PtMsg::VarsFile`].
+    PickEnvFile { editor: EditorId },
     /// The containers of a stack (#173).
     Containers {
         p: Portainer,
@@ -736,6 +763,64 @@ pub(crate) fn update(
             m.pt_editors.retain(|e| e.id != editor);
             d.editors.remove(&editor);
         }
+        PtMsg::OpenVars(editor) => {
+            if let Some(e) = m.pt_editors.iter_mut().find(|e| e.id == editor) {
+                if e.vars_open {
+                    m.ws.open(Win::PtVars(editor));
+                } else {
+                    e.vars_open = true;
+                }
+            }
+        }
+        PtMsg::CloseVars(editor) => {
+            if let Some(e) = m.pt_editors.iter_mut().find(|e| e.id == editor) {
+                e.vars_open = false;
+            }
+            if let Some(dr) = d.editors.get_mut(&editor) {
+                dr.paste = None;
+            }
+        }
+        PtMsg::VarsFromFile(editor) => {
+            if vars_editable(m, editor) {
+                fx.push(Effect::Portainer(PtEffect::PickEnvFile { editor }));
+            }
+        }
+        PtMsg::VarsFile {
+            editor,
+            name,
+            result,
+        } => {
+            let text = match result {
+                Ok(t) => t,
+                Err(e) => {
+                    set_notice(m, editor, Err(format!("{name}: {e}")));
+                    return fx;
+                }
+            };
+            take_vars(m, d, editor, &text, &name);
+        }
+        PtMsg::VarsPasteOpen(editor) => {
+            if vars_editable(m, editor)
+                && let Some(dr) = d.editors.get_mut(&editor)
+            {
+                dr.paste = Some(String::new());
+            }
+        }
+        PtMsg::VarsPasteCancel(editor) => {
+            if let Some(dr) = d.editors.get_mut(&editor) {
+                dr.paste = None;
+            }
+        }
+        PtMsg::VarsPaste(editor) => {
+            let Some(text) = d.editors.get(&editor).and_then(|dr| dr.paste.clone()) else {
+                return fx;
+            };
+            if take_vars(m, d, editor, &text, "the pasted text")
+                && let Some(dr) = d.editors.get_mut(&editor)
+            {
+                dr.paste = None;
+            }
+        }
         PtMsg::Refresh(name) => fx.extend(read(m, &name, None, now, say)),
         PtMsg::RefreshAll => {
             let names: Vec<String> = m.portainers.iter().map(|r| r.p.name.clone()).collect();
@@ -904,6 +989,49 @@ pub(crate) fn update(
         }
     }
     fx
+}
+
+/// The editor's variables can be changed (loaded, not git-based, not sending).
+fn vars_editable(m: &Model, editor: EditorId) -> bool {
+    m.pt_editors
+        .iter()
+        .any(|e| e.id == editor && !e.saving && e.detail.as_ref().is_some_and(|x| x.git.is_none()))
+}
+
+fn set_notice(m: &mut Model, editor: EditorId, n: Result<String, String>) {
+    if let Some(e) = m.pt_editors.iter_mut().find(|e| e.id == editor) {
+        e.notice = Some(n);
+    }
+}
+
+/// Parse `.env` text into the editor's variables; `false` (and a notice)
+/// when a line is bad: then nothing is taken.
+fn take_vars(m: &mut Model, d: &mut PtDraft, editor: EditorId, text: &str, from: &str) -> bool {
+    if !vars_editable(m, editor) {
+        return false;
+    }
+    match telepad_core::portainer::parse_env_text(text) {
+        Ok(vars) if vars.is_empty() => {
+            set_notice(m, editor, Err(format!("No variables in {from}")));
+            false
+        }
+        Ok(vars) => {
+            let Some(dr) = d.editors.get_mut(&editor) else {
+                return false;
+            };
+            let (added, changed) = telepad_core::portainer::merge_env(&mut dr.vars, vars);
+            set_notice(
+                m,
+                editor,
+                Ok(format!("{added} added, {changed} changed from {from}")),
+            );
+            true
+        }
+        Err(e) => {
+            set_notice(m, editor, Err(format!("Nothing taken from {from}: {e}")));
+            false
+        }
+    }
 }
 
 /// The Portainer `name` and the host its tunnel goes through.
