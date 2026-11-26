@@ -270,7 +270,24 @@ pub struct Controlled<'a> {
     pub rows: &'a [usize],
     /// A cell's text (Filter by): (source row, column).
     pub text: &'a dyn Fn(usize, usize) -> String,
+    /// Every source row before the filter boxes (#170: a column's value
+    /// dropdown lists the rows the other boxes let through); `None`: the
+    /// drawn `rows` (e.g. the database grid, filtered by the server).
+    pub all: Option<&'a [usize]>,
 }
+
+/// An open value dropdown of a filter box (#170).
+#[derive(Clone, Default)]
+struct Dropdown {
+    query: String,
+    /// Highlighted entry: 0 = Clear, then the shown values.
+    sel: usize,
+    values: Vec<String>,
+    focused: bool,
+}
+
+/// Rows the value dropdown shows at a time (#170).
+const DROPDOWN_ROWS: f32 = 5.0;
 
 /// A menu pick.
 enum Pick {
@@ -541,6 +558,134 @@ fn title_line(ui: &mut Ui, c: &Col, dir: Option<Dir>, h: f32, id: egui::Id) -> R
     resp
 }
 
+enum DdOut {
+    Open,
+    Close,
+    /// A value (exact filter) or `None` = Clear.
+    Pick(Option<String>),
+}
+
+/// The value dropdown under a filter box (#170, select2 style): a search
+/// field and the column's values, five at a time.
+fn value_dropdown(
+    ui: &Ui,
+    id: egui::Id,
+    below: egui::Rect,
+    button: egui::Rect,
+    dd: &mut Dropdown,
+    filtered: bool,
+) -> DdOut {
+    let ctx = ui.ctx().clone();
+    let mut result = DdOut::Open;
+    let row_h = ui.spacing().interact_size.y;
+    let width = below.width().max(220.0);
+    let area = egui::Area::new(id.with("area"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(below.left_bottom() + egui::vec2(0.0, 2.0))
+        .show(&ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_width(width);
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut dd.query)
+                        .id(id.with("search"))
+                        .hint_text(il(icons::SEARCH, "Search"))
+                        .desired_width(width),
+                );
+                if !dd.focused {
+                    search.request_focus();
+                    dd.focused = true;
+                }
+                if search.changed() {
+                    dd.sel = 0;
+                }
+                let shown = grid::search_values(&dd.values, &dd.query);
+                let count = shown.len() + 1;
+                let (down, up, enter, esc) = ui.input(|i| {
+                    (
+                        i.key_pressed(egui::Key::ArrowDown),
+                        i.key_pressed(egui::Key::ArrowUp),
+                        i.key_pressed(egui::Key::Enter),
+                        i.key_pressed(egui::Key::Escape),
+                    )
+                });
+                if down {
+                    dd.sel = (dd.sel + 1).min(count - 1);
+                }
+                if up {
+                    dd.sel = dd.sel.saturating_sub(1);
+                }
+                let pick = |k: usize| {
+                    if k == 0 {
+                        DdOut::Pick(None)
+                    } else {
+                        DdOut::Pick(Some(shown[k - 1].to_string()))
+                    }
+                };
+                if esc {
+                    result = DdOut::Close;
+                } else if enter && (dd.sel > 0 || filtered) {
+                    result = pick(dd.sel);
+                }
+                egui::ScrollArea::vertical()
+                    .max_height(row_h * DROPDOWN_ROWS + 4.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        let clear = RichText::new(il(icons::X, "Clear filter"));
+                        let r = ui.add_enabled(
+                            filtered,
+                            egui::Button::selectable(dd.sel == 0, clear)
+                                .min_size(egui::vec2(width - 8.0, row_h)),
+                        );
+                        if r.clicked() {
+                            result = pick(0);
+                        }
+                        if shown.is_empty() {
+                            ui.label(RichText::new("No values match").weak());
+                        }
+                        for (k, v) in shown.iter().enumerate() {
+                            let text = if v.is_empty() {
+                                RichText::new("(empty)").italics().weak()
+                            } else {
+                                RichText::new(*v)
+                            };
+                            let r = ui.add(
+                                egui::Button::selectable(dd.sel == k + 1, text)
+                                    .truncate()
+                                    .min_size(egui::vec2(width - 8.0, row_h)),
+                            );
+                            if (down || up) && dd.sel == k + 1 {
+                                r.scroll_to_me(None);
+                            }
+                            if r.clicked() {
+                                result = pick(k + 1);
+                            }
+                        }
+                    });
+                if dd.values.len() >= grid::VALUES_CAP {
+                    ui.label(
+                        RichText::new(format!(
+                            "First {} values; type in the filter box for others",
+                            grid::VALUES_CAP
+                        ))
+                        .weak()
+                        .small(),
+                    );
+                }
+            });
+        });
+    // A click anywhere else closes it.
+    let outside = ctx.input(|i| {
+        i.pointer.any_pressed()
+            && i.pointer
+                .interact_pos()
+                .is_some_and(|p| !area.response.rect.contains(p) && !button.contains(p))
+    });
+    if outside && matches!(result, DdOut::Open) {
+        result = DdOut::Close;
+    }
+    result
+}
+
 /// A table whose order the view keeps (see the module docs).
 pub fn controlled(
     ui: &mut Ui,
@@ -554,6 +699,7 @@ pub fn controlled(
         mut filters,
         rows,
         text,
+        all,
     } = ctl;
     let n = spec.cols.len();
     if filters.as_deref().is_some_and(|fs| fs.len() < n) {
@@ -580,6 +726,21 @@ pub fn controlled(
     let font_h = ui.text_style_height(&egui::TextStyle::Body);
     let box_margin = ((box_h - font_h) / 2.0).floor().clamp(0.0, 8.0);
     let target_id = spec.stable.with("menu-target");
+    // The filters as they were before this frame: the value dropdown of a
+    // column lists the rows the other boxes let through.
+    let snap: Vec<String> = filters
+        .as_deref()
+        .map(<[String]>::to_vec)
+        .unwrap_or_default();
+    let values_of = |ci: usize| -> Vec<String> {
+        let src = all.unwrap_or(rows);
+        let cells: Vec<String> = src
+            .iter()
+            .filter(|&&r| all.is_none() || grid::row_matches_except(&|k| text(r, k), &snap, ci))
+            .map(|&r| text(r, ci))
+            .collect();
+        grid::distinct_values(cells.iter().map(String::as_str), grid::VALUES_CAP)
+    };
     let mut pick: Option<Pick> = None;
     let mut scrolled: Option<(f32, f32, f32)> = None;
     let mut used = vec![0.0_f32; n];
@@ -720,13 +881,19 @@ pub fn controlled(
                             match filters.as_deref_mut() {
                                 Some(fs) if c.filter => {
                                     let w = ui.available_width().max(30.0);
+                                    // The funnel sits at the right end, inside the box (#170).
+                                    let btn = (box_h - 6.0).clamp(14.0, 24.0);
                                     let r = ui.add(
                                         egui::TextEdit::singleline(&mut fs[ci])
                                             .id(spec.stable.with(("filter", ci)))
-                                            .margin(egui::Margin::symmetric(4, box_margin as i8))
+                                            .margin(egui::Margin {
+                                                left: 4,
+                                                right: (btn + 4.0) as i8,
+                                                top: box_margin as i8,
+                                                bottom: box_margin as i8,
+                                            })
                                             .min_size(egui::vec2(w, box_h))
                                             .align(egui::Align2::LEFT_CENTER)
-                                            .hint_text(icons::FUNNEL)
                                             .desired_width(w),
                                     );
                                     if r.changed() {
@@ -735,7 +902,65 @@ pub fn controlled(
                                     if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                                         out.filter_enter = true;
                                     }
+                                    let box_rect = r.rect;
                                     r.on_hover_text(HINT);
+                                    let dd_id = spec.stable.with(("values", ci));
+                                    let open: Option<Dropdown> = ui.data(|d| d.get_temp(dd_id));
+                                    let b_rect = egui::Rect::from_center_size(
+                                        egui::pos2(box_rect.right() - btn / 2.0 - 3.0, box_rect.center().y),
+                                        egui::vec2(btn, btn),
+                                    );
+                                    let b = ui
+                                        .interact(b_rect, dd_id.with("button"), egui::Sense::click())
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                        .on_hover_text("Pick a value of this column");
+                                    let on = !fs[ci].trim().is_empty();
+                                    let v = ui.visuals();
+                                    if b.hovered() || open.is_some() {
+                                        ui.painter().rect_filled(b_rect, 3.0, v.widgets.hovered.weak_bg_fill);
+                                    }
+                                    let color = if on {
+                                        v.hyperlink_color
+                                    } else if b.hovered() {
+                                        v.strong_text_color()
+                                    } else {
+                                        v.weak_text_color()
+                                    };
+                                    ui.painter().text(
+                                        b_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        icons::FUNNEL,
+                                        egui::FontId::proportional(btn * 0.7),
+                                        color,
+                                    );
+                                    if b.clicked() {
+                                        let next = match open {
+                                            Some(_) => None,
+                                            None => Some(Dropdown {
+                                                values: values_of(ci),
+                                                ..Default::default()
+                                            }),
+                                        };
+                                        ui.data_mut(|d| match next {
+                                            Some(dd) => {
+                                                d.insert_temp(dd_id, dd);
+                                            }
+                                            None => d.remove::<Dropdown>(dd_id),
+                                        });
+                                    } else if let Some(mut dd) = open {
+                                        match value_dropdown(ui, dd_id, box_rect, b_rect, &mut dd, on) {
+                                            DdOut::Open => {
+                                                ui.data_mut(|d| d.insert_temp(dd_id, dd));
+                                            }
+                                            DdOut::Close => ui.data_mut(|d| d.remove::<Dropdown>(dd_id)),
+                                            DdOut::Pick(p) => {
+                                                fs[ci] = p.map(|v| grid::exact_filter(&v)).unwrap_or_default();
+                                                out.filter_changed = true;
+                                                out.filter_enter = true;
+                                                ui.data_mut(|d| d.remove::<Dropdown>(dd_id));
+                                            }
+                                        }
+                                    }
                                 }
                                 _ => {
                                     // A slot as tall as the box, so every title is level.
@@ -940,6 +1165,7 @@ pub fn show(
     if filters.len() < spec.cols.len() {
         filters.resize(spec.cols.len(), String::new());
     }
+    let every: Vec<usize> = (0..cells.len()).collect();
     if spec.kind == Kind::Paged {
         st.pager.start_mode(ui.available_width());
     }
@@ -957,6 +1183,7 @@ pub fn show(
                         filters: Some(&mut filters[..]),
                         rows: &order[start..end],
                         text: &text,
+                        all: Some(&every),
                     },
                     &mut f,
                 )
@@ -974,6 +1201,7 @@ pub fn show(
                 filters: Some(&mut filters[..]),
                 rows: &order[start..end],
                 text: &text,
+                all: Some(&every),
             },
             &mut f,
         )

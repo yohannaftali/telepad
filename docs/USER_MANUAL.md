@@ -72,6 +72,18 @@ back to the front if it is already open. Each window has a title bar:
 
 - **Move**: drag the title bar. **Resize**: drag the right edge, the bottom edge or the
   bottom-right corner. Windows stay inside the workspace.
+- **Snap layouts** (#168, like Windows 11): while you drag a window by its title bar,
+  - move the pointer to the **left** or **right edge** of the workspace: it fills that half;
+    to a **corner**: that quarter; to the **top edge**: it is maximized. A blue rectangle
+    shows where it will land; release to snap there;
+  - move it near the **top centre**: a bar with four layouts appears (halves, two thirds +
+    one third, thirds, quarters). Point at a part of a layout and release: the window fills
+    that part;
+  - **Esc** while dragging, or releasing anywhere else, just moves the window.
+
+  The same layouts show when you hover the **Maximize** button; click a part to snap the
+  window there. Dragging a snapped window away gives it back the size it had before the
+  first snap. Snapped places are saved with the workspace like any other place.
 - **− (Minimize)** puts it in the strip at the bottom; click it there (or pick it in the
   window picker) to bring it back. Anything that leads to a window that is already open —
   **Edit** / F4 / double-click on a file (editor), **Open files…**, **Open database…**,
@@ -250,6 +262,15 @@ window narrower than 768 points. In a narrow window the footer wraps onto a seco
   finds `75%`, `>1 GiB` finds `1.5 GiB`; dates as text, `>2026-11-20`), `NULL` empty,
   `!NULL` has a value. Hover a box for the rules. The database grid applies its boxes on
   Enter (on the server); the other tables filter while you type.
+- **Value list** (#170): the funnel at the right end of each filter box (blue while that
+  column has a filter) opens a list of the column's values under the box, five at a time
+  (scroll for more), in the table's sort order, `(empty)` for blank cells. Type in its search
+  field to narrow it (contains, any case); **↑ / ↓** and **Enter**, or a click, pick a value:
+  the box then holds `=value` (`NULL` for `(empty)`) and the table shows only those rows.
+  **Clear filter** empties the box. **Esc** or a click outside closes the list. The list holds
+  the values of the rows the *other* boxes let through, so every value gives results; at most
+  500 values are listed (type in the box for others). On the database grid it lists the values
+  of the rows loaded in the grid.
 - **Right-click a row** for its menu: first the table's own commands (e.g. the host menu
   on the Hosts table, Edit / Set NULL / Copy value on the database grid, container actions
   on Docker tables, Revoke on Authorized keys), then for every table:
@@ -276,8 +297,11 @@ window narrower than 768 points. In a narrow window the footer wraps onto a seco
 
 **☰ → Settings → Theme** switches between **System** (follows the Windows / macOS / desktop
 setting, the default), **Light** and **Dark**. The choice is saved in the database. The light
-theme uses a grey background behind white windows with a border, and buttons and input
-boxes with a visible fill and border, so every layer stands apart.
+theme uses a blue-grey (slate) background, sidebar and top bar behind white windows with a
+border, and blue-grey buttons, input boxes, window title bars and table headers, so every
+layer stands apart (#167); the window in front has a darker blue-grey title bar. The dark
+theme uses dark blue for the title bar of the window in front, the table headers and the
+selection (#167).
 
 ## Hosts
 
@@ -325,7 +349,11 @@ how many hosts each has, how many are down and how many have flags. The last row
 
 **Hosts - [name]** is the Hosts page for that group or cluster only: search, Table / Cards,
 sort, flags, a click opens the host, right-click for its menu. A group page shows each host's
-**Cluster**, a cluster page its **Group**. **Add hosts…** lists the other hosts with their
+**Cluster**, a cluster page its **Group**; click it to open that page (#163). **Back** (#169):
+the **←** before the window title, or a click on the title itself, brings the page it was
+opened from to the front — **Groups** / **Clusters**, **Hosts**, or the other Hosts - [name]
+page — and opens Groups / Clusters when that page is closed or the page came back with the
+workspace. The Hosts - [name] window stays open. **Add hosts…** lists the other hosts with their
 current group / cluster: tick some and **Add** moves them here. These pages come back with the
 [workspace](#workspaces) (saved as group:<name> / cluster:<name>).
 
@@ -360,8 +388,10 @@ pages use what the regular refresh collected.
 
 One row per host: **Host**, **Description**, **Address**, **OS**, **Flags**, **CPU**, **Memory**,
 **Fullest disk**, **Temp** (hottest sensor), **Docker** (running/total containers) and
-**Updated** (age of the data). The row under the mouse is highlighted. Click a row (or the
-host name) to open its host window. **Right-click** a row (or a card) for the host menu:
+**Updated** (age of the data), and **Group** / **Cluster** when shown. The row under the mouse
+is highlighted. Click a row (or the host name) to open its host window. A host's **Group** or
+**Cluster** is a link (#163): a click opens **Hosts - [that group / cluster]** (or brings it
+to the front); an empty Group / Cluster cell opens the host like the rest of the row. **Right-click** a row (or a card) for the host menu:
 **Open SSH** (or **Open RDP**, amber), **Files** (yellow, the host's file window), the
 **databases** Telepad found on the host and in its containers (MariaDB / MySQL / PostgreSQL),
 then **Open host window**, **Edit**, **Clone** and **Delete…**.
@@ -406,7 +436,8 @@ name, address, OS or container name.
 
 One card per host, wrapping to the window width, every card the same height (#157). Click
 anywhere on a card for the host page, right-click it for the host menu. A card shows status,
-OS logo, alias, address and description, its group and cluster (when it has them), OS, CPU / RAM / fullest-disk bars, hottest
+OS logo, alias, address and description, its group and cluster (when it has them; links
+that open Hosts - [name], #163), OS, CPU / RAM / fullest-disk bars, hottest
 temperature, Docker summary, how long ago it was checked, and an **SSH** / **RDP** button.
 Unreachable hosts show their error instead of the bars. The search box filters the cards;
 **Sort by** picks the order (the same columns as the table, including Group and Cluster, or

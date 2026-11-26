@@ -535,6 +535,7 @@ fn table(
             filters: Some(&mut filters[..]),
             rows: &src,
             text: &text,
+            all: None,
         },
         &mut |ui, ev| match ev {
             Ev::Cell { row: UP, col } => {

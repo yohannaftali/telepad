@@ -54,6 +54,7 @@ fn card(ui: &mut egui::Ui, m: &Model, i: usize, height: f32, out: &mut Vec<Msg>)
     let h = &m.hosts[i];
     // Text must not take the right-click meant for the card's menu (#83).
     ui.style_mut().interaction.selectable_labels = false;
+    let mut link = false;
     let card = egui::Frame::group(ui.style())
         .inner_margin(egui::Margin::same(CARD_MARGIN as i8))
         .show(ui, |ui| {
@@ -91,12 +92,21 @@ fn card(ui: &mut egui::Ui, m: &Model, i: usize, height: f32, out: &mut Vec<Msg>)
                             (SetKind::Cluster, icons::CIRCLES_THREE),
                         ] {
                             let name = h.entry.set(kind);
-                            if !name.is_empty() {
-                                ui.add(
-                                    egui::Label::new(RichText::new(il(icon, name)).small())
-                                        .truncate(),
-                                )
-                                .on_hover_text(format!("{}: {name}", kind.title()));
+                            if !name.is_empty()
+                                && ui
+                                    .add(egui::Link::new(RichText::new(il(icon, name)).small()))
+                                    .on_hover_text(format!(
+                                        "{}: {name} · Open Hosts - {name}",
+                                        kind.title()
+                                    ))
+                                    .clicked()
+                            {
+                                // Its hosts page instead of the host (#163).
+                                link = true;
+                                out.push(Msg::Sets(telepad_app::sets::StMsg::OpenHosts {
+                                    kind,
+                                    name: name.to_string(),
+                                }));
                             }
                         }
                     });
@@ -168,7 +178,7 @@ fn card(ui: &mut egui::Ui, m: &Model, i: usize, height: f32, out: &mut Vec<Msg>)
         .response
         .interact(egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
-    if resp.clicked() {
+    if resp.clicked() && !link {
         out.push(Msg::Select(Some(i)));
     }
     resp.context_menu(|ui| host_menu(ui, m, i, out));

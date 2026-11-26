@@ -259,6 +259,8 @@ fn table(
         None => Some((Col::Time.index(), GDir::Desc)),
     };
     let rows: Vec<usize> = page.collect();
+    // Every row of every page for the value dropdowns (#170).
+    let every: Vec<usize> = (0..all.len()).collect();
     let text = |r: usize, c: usize| all[r].cell(Col::ALL[c]);
     let spec = Spec::new("login-log-table", title, &cols)
         .kind(Kind::Fill)
@@ -272,6 +274,7 @@ fn table(
             filters: Some(&mut filters[..]),
             rows: &rows,
             text: &text,
+            all: Some(&every),
         },
         &mut |ui, ev| {
             if let Ev::Cell { row, col } = ev {

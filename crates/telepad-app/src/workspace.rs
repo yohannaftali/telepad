@@ -127,6 +127,9 @@ pub struct Group {
     pub maximized: bool,
     /// Bumped whenever the window should come to the front.
     pub raise: u64,
+    /// Snapped into a layout zone (#168): the size it had before, given
+    /// back when it is dragged out of the zone.
+    pub unsnap: Option<Rect>,
 }
 
 impl Group {
@@ -190,6 +193,13 @@ pub enum WsMsg {
     },
     MinimizeAll,
     RestoreAll,
+    /// Snap layouts (#168): put the window holding `win` into `rect` (a
+    /// zone of the workspace); `from` is where it was, for [`Group::unsnap`].
+    Snap {
+        win: Win,
+        rect: Rect,
+        from: Rect,
+    },
 }
 
 impl Workspace {
@@ -226,6 +236,7 @@ impl Workspace {
             minimized: false,
             maximized: false,
             raise,
+            unsnap: None,
         });
         self.groups.len() - 1
     }
@@ -422,6 +433,22 @@ impl Workspace {
                     return false;
                 }
                 g.rect = Some(rect);
+                // Moved or resized by hand: no longer in its zone.
+                g.unsnap = None;
+            }
+            WsMsg::Snap { win, rect, from } => {
+                let Some(gi) = self.group_of(win) else {
+                    return false;
+                };
+                let raise = self.bump();
+                let g = &mut self.groups[gi];
+                // Snapped again: the size from before the first snap stays.
+                g.unsnap = Some(g.unsnap.unwrap_or(from));
+                g.rect = Some(rect);
+                g.maximized = false;
+                g.minimized = false;
+                g.raise = raise;
+                self.focused = Some(win);
             }
             WsMsg::Tile { w, h } => {
                 let order = self.shown_back_to_front();
@@ -810,6 +837,90 @@ pub fn layout(m: &Model) -> String {
 
 const GAP: f32 = 4.0;
 const STEP: f32 = 28.0;
+
+/// A snap zone (#168) as fractions of the workspace: x, y, width, height.
+pub type Zone = [f32; 4];
+
+/// The whole workspace: maximize.
+pub const ZONE_MAX: Zone = [0.0, 0.0, 1.0, 1.0];
+
+/// The layouts of the snap picker (#168, Windows 11 style): halves,
+/// two thirds + one third, thirds, quarters.
+pub const SNAP_LAYOUTS: [&[Zone]; 4] = [
+    &[[0.0, 0.0, 0.5, 1.0], [0.5, 0.0, 0.5, 1.0]],
+    &[[0.0, 0.0, 2.0 / 3.0, 1.0], [2.0 / 3.0, 0.0, 1.0 / 3.0, 1.0]],
+    &[
+        [0.0, 0.0, 1.0 / 3.0, 1.0],
+        [1.0 / 3.0, 0.0, 1.0 / 3.0, 1.0],
+        [2.0 / 3.0, 0.0, 1.0 / 3.0, 1.0],
+    ],
+    &[
+        [0.0, 0.0, 0.5, 0.5],
+        [0.5, 0.0, 0.5, 0.5],
+        [0.0, 0.5, 0.5, 0.5],
+        [0.5, 0.5, 0.5, 0.5],
+    ],
+];
+
+/// How close to an edge of the workspace the pointer snaps (#168), and how
+/// far along an edge counts as a corner.
+pub const SNAP_EDGE: f32 = 6.0;
+pub const SNAP_CORNER: f32 = 80.0;
+
+/// A zone of a `w` × `h` workspace in points, with a small gap around it
+/// as the arranged windows have (#94); the whole workspace stays whole.
+pub fn zone_rect(z: Zone, w: f32, h: f32) -> Rect {
+    if z == ZONE_MAX {
+        return [0.0, 0.0, w.round(), h.round()];
+    }
+    let (x0, y0) = (z[0] * w, z[1] * h);
+    let (x1, y1) = ((z[0] + z[2]) * w, (z[1] + z[3]) * h);
+    [
+        (x0 + GAP / 2.0).round(),
+        (y0 + GAP / 2.0).round(),
+        (x1 - x0 - GAP).max(1.0).round(),
+        (y1 - y0 - GAP).max(1.0).round(),
+    ]
+}
+
+/// The zone a window dragged with the pointer at (`x`, `y`) of a `w` × `h`
+/// workspace snaps to (#168): a corner gives a quarter, the left / right
+/// edge a half, the top edge the whole workspace (maximize).
+pub fn edge_zone(x: f32, y: f32, w: f32, h: f32) -> Option<Zone> {
+    let left = x <= SNAP_EDGE;
+    let right = x >= w - SNAP_EDGE;
+    let top = y <= SNAP_EDGE;
+    let bottom = y >= h - SNAP_EDGE;
+    let near_top = y <= SNAP_CORNER;
+    let near_bottom = y >= h - SNAP_CORNER;
+    let near_left = x <= SNAP_CORNER;
+    let near_right = x >= w - SNAP_CORNER;
+    let quarter = |l: bool, t: bool| -> Zone {
+        [
+            if l { 0.0 } else { 0.5 },
+            if t { 0.0 } else { 0.5 },
+            0.5,
+            0.5,
+        ]
+    };
+    Some(if (left && near_top) || (top && near_left) {
+        quarter(true, true)
+    } else if (right && near_top) || (top && near_right) {
+        quarter(false, true)
+    } else if (left && near_bottom) || (bottom && near_left) {
+        quarter(true, false)
+    } else if (right && near_bottom) || (bottom && near_right) {
+        quarter(false, false)
+    } else if left {
+        SNAP_LAYOUTS[0][0]
+    } else if right {
+        SNAP_LAYOUTS[0][1]
+    } else if top {
+        ZONE_MAX
+    } else {
+        return None;
+    })
+}
 
 /// Tile (#94): `n` windows in a grid filling a `w` × `h` workspace, rows
 /// top to bottom; a last, shorter row is stretched to the full width.

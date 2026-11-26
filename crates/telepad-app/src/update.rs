@@ -1436,6 +1436,11 @@ fn start_pending_sets(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec
                 m.ws.drop_pending(&key);
                 continue;
             }
+            let shown = if name.eq_ignore_ascii_case(kind.none_name()) {
+                String::new()
+            } else {
+                name.clone()
+            };
             fx.extend(crate::sets::update(
                 m,
                 &mut d.sets,
@@ -1443,6 +1448,14 @@ fn start_pending_sets(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec
                 now,
                 &mut |m, t| say(m, now, t),
             ));
+            // Restored with the workspace (#169): Back goes to Groups / Clusters.
+            if let Some(p) = m
+                .set_pages
+                .iter_mut()
+                .find(|p| p.kind == kind && p.name == shown)
+            {
+                p.parent = crate::workspace::Win::Sets(kind);
+            }
         }
     }
     fx
