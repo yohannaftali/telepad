@@ -2,6 +2,10 @@
 
 Newest first.
 
+## [2026-11-26] — #180 updated: compatible open of newer schemas
+- Owner asked for a button to fix the schema; added to #180: Update Telepad stays the button, plus a stored minimum compatible schema so additive changes (like schema 6) open in older builds
+- Title now: fix(store): Update Telepad on a database from a newer Telepad, and open newer but compatible schemas
+
 ## [2026-11-26] — fix(store): explain a database written by a newer Telepad and offer Update Telepad instead of a dead end
 - Issue #180 created on GitHub
 - Scope: store / fatal screen / update
