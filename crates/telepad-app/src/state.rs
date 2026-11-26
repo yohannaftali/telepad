@@ -110,6 +110,13 @@ pub struct Model {
     /// Open "Hosts - [name]" pages.
     pub set_pages: Vec<crate::sets::SetPage>,
     pub set_pages_next: crate::sets::SetPageId,
+    /// Registered Portainers (#171) with their last read.
+    pub portainers: Vec<crate::portainer::PtRow>,
+    /// They have been read (restored `portainer:` pages wait for it).
+    pub portainers_loaded: bool,
+    /// Open "Portainer - [name]" pages.
+    pub pt_pages: Vec<crate::portainer::PtPage>,
+    pub pt_pages_next: crate::portainer::PtPageId,
 }
 
 /// A key added to / revoked from several hosts.
@@ -180,6 +187,8 @@ pub struct Drafts {
     pub logins: std::collections::BTreeMap<crate::logins::LogId, crate::logins::LoginDraft>,
     /// Groups / Clusters pages and their host pages (#144, #145).
     pub sets: crate::sets::SetsDraft,
+    /// Portainers page form and delete question (#171).
+    pub pt: crate::portainer::PtDraft,
     /// Sort, filter boxes and page of every table (#153), by table key.
     pub tables: std::collections::BTreeMap<String, crate::grid::TableState>,
 }
@@ -429,6 +438,7 @@ impl Default for Drafts {
             strategy: StrategyDraft::default(),
             logins: Default::default(),
             sets: Default::default(),
+            pt: Default::default(),
             tables: Default::default(),
         }
     }

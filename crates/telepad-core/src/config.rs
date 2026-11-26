@@ -282,6 +282,9 @@ pub struct Inventory {
     /// #145; JSON only — an OpenSSH config keeps just the names in the tags).
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub sets: std::collections::BTreeMap<SetKind, Vec<HostSet>>,
+    /// Registered Portainer servers (#171; JSON only, never a token).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub portainers: Vec<crate::portainer::Portainer>,
 }
 
 #[derive(Debug, thiserror::Error)]

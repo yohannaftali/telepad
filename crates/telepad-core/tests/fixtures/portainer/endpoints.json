@@ -1,0 +1,11 @@
+[
+  {"Id":1,"Name":"local","Type":1,"URL":"unix:///var/run/docker.sock","PublicURL":"","GroupId":1,"Status":1,
+   "Snapshots":[{"Time":1763100000,"DockerVersion":"27.3.1","Swarm":false,"TotalCPU":4,"TotalMemory":8000000000,
+     "RunningContainerCount":7,"StoppedContainerCount":2,"HealthyContainerCount":5,"UnhealthyContainerCount":0,
+     "VolumeCount":6,"ImageCount":12,"ServiceCount":0,"StackCount":3}]},
+  {"Id":2,"Name":"docker2","Type":2,"URL":"tcp://192.0.2.21:9001","PublicURL":"192.0.2.21","GroupId":1,"Status":2,
+   "Snapshots":[{"Time":1763000000,"RunningContainerCount":1,"StoppedContainerCount":0,"StackCount":1}]},
+  {"Id":3,"Name":"k8s-lab","Type":6,"URL":"198.51.100.30:9001","GroupId":1,"Status":1,"Snapshots":[],
+   "Kubernetes":{"Snapshots":[{"KubernetesVersion":"v1.31.0","NodeCount":3}]}},
+  {"Id":4,"Name":"edge-box","Type":4,"URL":"","GroupId":1,"Status":1,"Snapshots":[]}
+]

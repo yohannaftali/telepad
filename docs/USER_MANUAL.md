@@ -63,7 +63,7 @@ Pages            | +-[Hosts]-[Docker / Podman]---------- _ □ × ⧉ + |
 | Area | What it shows |
 |---|---|
 | **Top bar** | **Refresh all**, the **workspace** dropdown and the **window picker** (the window in front and how many are open; see below), **Arrange**, up/down/total counts, a spinner while hosts load, an **Update X available** button when a new release exists, and at the top right the **☰** menu (**Settings ▸ Theme**, **Update Strategy…**, **Software update…**; Host Management and Authorized keys are in the sidebar, adding, importing and exporting hosts is on the Host Management page) |
-| **Pages** (left sidebar) | One button per page: **My Computer**, **Groups**, **Clusters**, **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
+| **Pages** (left sidebar) | One button per page: **My Computer**, **Groups**, **Clusters**, **Hosts**, **Docker / Podman**, **Kubernetes**, **Docker Swarm**, **Portainers**, **Authorized keys**, **Host Management** (file and database windows open from a host: right-click its row, or use its window or a container's menu). The **▯ ‹** button at the top folds the sidebar to centred icons only; Telepad remembers it |
 | **Workspace** | The open windows. Minimized windows wait in a strip at its bottom |
 | **Status bar** (bottom) | Path of the database in use (hover: the generated ssh config), the Telepad version, and short messages |
 
@@ -361,6 +361,64 @@ Other ways to set a host's group or cluster: right-click a host ▸ **Group: …
 (pick one, or *Ungrouped* / *No cluster* to take it out), or the **Group** / **Cluster** lists
 in the host editor. Changing it reads nothing from the host again. Cards show the group and
 cluster under the address.
+
+## Portainers
+
+**Portainers** (sidebar, #171) lists the Portainer servers you registered and opens one page
+per server with its **environments** and **stacks**. Telepad only *reads* Portainer: it sends
+`GET` requests, never changes a stack, a container or a setting there (changes stay in
+Portainer: **Open in Portainer**).
+
+How it connects: Telepad opens an SSH tunnel (`ssh -N -L`) to the host Portainer runs on — the
+host's normal Telepad login — and talks to `127.0.0.1:<port>` there, like the database browser.
+No Portainer port is reached over the network. It logs in with a Portainer **API access
+token** (Portainer 2.11 or later: *My account ▸ Access tokens ▸ Add access token*), kept in the
+OS password store (Windows Credential Manager, macOS Keychain, Linux Secret Service) under
+"Telepad Portainer" — never in `telepad.db`, an export or the logs.
+
+**Portainers page**
+
+| Column / control | What it shows / does |
+|---|---|
+| **Add Portainer…** | Name (one line, up to 64 characters, unique ignoring case), **Host** (hosts that run a `portainer/portainer` container are listed first with their published port, e.g. *web1 · Portainer on 9443 (https)*), **Port** on that host, **HTTPS** and the **API token** (hidden as you type). **Test** reads it with these settings without saving; **Save** stores it (a new Portainer needs a token) |
+| **Refresh all** | Reads every Portainer again |
+| Name, Host, Port | As registered (port with http / https) |
+| Version, Environments, Stacks | From the last good read |
+| Status | *OK*, *reading…*, *not read yet*, *no token*, *unreachable*, *token rejected*, *certificate changed*, *too old*; hover an error for the full message |
+| Last checked | When it was last read |
+| **⟳ / Edit / Delete** | Read again; change it (leave the token empty to keep the saved one; a rename keeps the token); delete asks first and also removes the saved token. Nothing changes in Portainer |
+| Click a row | Opens **Portainer - [name]**; right-click for Open, Open in Portainer, Refresh, Edit, Delete |
+
+Each Portainer is read when the Portainers page or its own page opens and on **Refresh**; there
+is no background polling.
+
+**HTTPS certificate.** Portainer's certificate is usually self-signed. Telepad trusts it on the
+first read and remembers its SHA-256 fingerprint (like SSH's first connect). If Portainer later
+shows a different certificate, the read is refused with *The HTTPS certificate changed (was …,
+now …)* and an **Accept new certificate** button; accept it only if you know why it changed (a
+renewed certificate). Changing a Portainer's host, port or HTTPS forgets the fingerprint.
+
+**Portainer - [name]** (one page per Portainer, several can be open; an open one comes to the
+front; they come back with the [workspace](#workspaces) as portainer:<name>):
+
+- The header: **Refresh**, **Open in Portainer** (its web UI at the host's address), host,
+  port, Portainer version and when it was read. An error shows above the tables, with **Edit…**
+  for a missing / rejected token; the last good read stays on screen.
+- **Environments**: name, type (Docker, Docker agent, Docker Edge, Kubernetes, Kubernetes
+  agent / Edge, Azure ACI), URL, status (up / down), stacks, containers (running / total) and
+  the **Telepad host** it runs on (the Portainer's own host for its local socket, else the host
+  whose address or alias is in the URL, or whose alias is the environment's name); click the
+  host for its page. The browser button opens the environment in Portainer. Click a row to list
+  its stacks below.
+- **Stacks** of that environment: name, type (Compose, Swarm, Kubernetes), status (active /
+  inactive), created / updated (UTC) and who created it. The browser button opens the stack in Portainer;
+  the container button (shown when Telepad sees that stack's containers on the host) opens the
+  host page with its Docker table. Stack environment variables are never read (they often hold
+  secrets).
+
+Both tables have the usual sort, filter row, value lists and exports ([Tables](#tables)).
+Registered Portainers (without tokens) are part of the JSON export / import; they follow a
+host's rename and go when their host is deleted.
 
 ### Docker / Podman
 

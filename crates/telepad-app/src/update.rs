@@ -1129,6 +1129,19 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
                 fx.extend(start_pending_sets(m, d, now));
             }
         }
+        Msg::Portainer(pm) => {
+            let loaded = matches!(pm, crate::portainer::PtMsg::Loaded(Ok(_)));
+            fx.extend(crate::portainer::update(
+                m,
+                &mut d.pt,
+                pm,
+                now,
+                &mut |m, t| say(m, now, t),
+            ));
+            if loaded {
+                fx.extend(start_pending_portainers(m, d, now));
+            }
+        }
         Msg::HostSync(hm) => {
             let db: Vec<_> = m.hosts.iter().map(|h| h.entry.clone()).collect();
             let (effects, follow) =
@@ -1422,6 +1435,29 @@ fn start_pending_logins(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> V
 
 /// "Hosts - [name]" pages of a restored layout (#144, #145), once the
 /// groups / clusters are known; one that no longer exists is left out.
+/// "Portainer - [name]" pages of a restored layout (#171), once the
+/// Portainers are read.
+fn start_pending_portainers(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec<Effect> {
+    let mut fx = Vec::new();
+    if !m.portainers_loaded {
+        return fx;
+    }
+    for (key, name, _) in m.ws.pending_of("portainer:") {
+        if m.pt(&name).is_none() {
+            m.ws.drop_pending(&key);
+            continue;
+        }
+        fx.extend(crate::portainer::update(
+            m,
+            &mut d.pt,
+            crate::portainer::PtMsg::Open(name),
+            now,
+            &mut |m, t| say(m, now, t),
+        ));
+    }
+    fx
+}
+
 fn start_pending_sets(m: &mut Model, d: &mut crate::Drafts, now: Instant) -> Vec<Effect> {
     use telepad_core::config::SetKind;
     let mut fx = Vec::new();

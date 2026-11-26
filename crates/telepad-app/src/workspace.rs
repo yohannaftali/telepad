@@ -44,6 +44,10 @@ pub enum Win {
     Sets(SetKind),
     /// "Hosts - [name]" of one group / cluster.
     SetHosts(crate::sets::SetPageId),
+    /// The Portainers page (#171).
+    Portainers,
+    /// "Portainer - [name]" of one registered Portainer.
+    Portainer(crate::portainer::PtPageId),
 }
 
 impl Win {
@@ -62,12 +66,14 @@ impl Win {
             Win::Strategy => Some("strategy"),
             Win::Sets(SetKind::Group) => Some("groups"),
             Win::Sets(SetKind::Cluster) => Some("clusters"),
+            Win::Portainers => Some("portainers"),
             Win::Host
             | Win::Files(_)
             | Win::Db(_)
             | Win::Editor(_)
             | Win::Logins(_)
-            | Win::SetHosts(_) => None,
+            | Win::SetHosts(_)
+            | Win::Portainer(_) => None,
         }
     }
 
@@ -83,6 +89,7 @@ impl Win {
             "strategy" => Win::Strategy,
             "groups" => Win::Sets(SetKind::Group),
             "clusters" => Win::Sets(SetKind::Cluster),
+            "portainers" => Win::Portainers,
             _ => return None,
         })
     }
@@ -299,6 +306,9 @@ impl Workspace {
         for p in &m.set_pages {
             want.push(Win::SetHosts(p.id));
         }
+        for p in &m.pt_pages {
+            want.push(Win::Portainer(p.id));
+        }
         let session = |w: &Win| {
             matches!(
                 w,
@@ -309,6 +319,7 @@ impl Workspace {
                     | Win::Editor(_)
                     | Win::Logins(_)
                     | Win::SetHosts(_)
+                    | Win::Portainer(_)
             )
         };
         let gone: Vec<Win> = self
@@ -559,7 +570,14 @@ impl Workspace {
             for t in f[4].split(';') {
                 let key = token_key(t);
                 let known = [
-                    "host:", "files:", "editor:", "db:", "logins:", "group:", "cluster:",
+                    "host:",
+                    "files:",
+                    "editor:",
+                    "db:",
+                    "logins:",
+                    "group:",
+                    "cluster:",
+                    "portainer:",
                 ]
                 .iter()
                 .any(|p| key.len() > p.len() && key.starts_with(p));
@@ -776,6 +794,10 @@ pub fn session_key(m: &Model, w: Win) -> Option<String> {
                 esc(crate::sets::shown_name(p.kind, &p.name))
             )
         }
+        Win::Portainer(id) => format!(
+            "portainer:{}",
+            esc(&m.pt_pages.iter().find(|p| p.id == id)?.name)
+        ),
         _ => return None,
     })
 }

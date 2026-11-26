@@ -292,6 +292,12 @@ impl Runtime {
                 let _ = self
                     .tx
                     .send(Msg::Sets(telepad_app::sets::StMsg::Loaded(sets)));
+                // Registered Portainers come with the hosts (#171).
+                let _ = self
+                    .tx
+                    .send(Msg::Portainer(telepad_app::portainer::PtMsg::Loaded(
+                        ws.store.portainers().map_err(|e| e.to_string()),
+                    )));
                 // Remote Desktop settings come with the hosts (#102).
                 let _ = self.tx.send(Msg::RdpLoaded(
                     ws.store.rdp_all().map_err(|e| e.to_string()),
@@ -349,6 +355,7 @@ impl Runtime {
                     .and_then(|()| ws.sync_ssh_config());
                 Some(Msg::Sets(StMsg::Saved(r)))
             }
+            Effect::Portainer(e) => self.run_portainer(e),
             Effect::SaveOrder(ids) => {
                 let ws = self.ws.as_mut()?;
                 let saved = ws.store.save_order(&ids).map_err(|e| e.to_string());
@@ -1860,6 +1867,98 @@ impl Runtime {
                     Err(e) => e,
                 };
                 Some(Msg::Notice(text))
+            }
+        }
+    }
+
+    /// Portainers (#171): store changes here, tokens and reads on a thread
+    /// (the read opens an SSH tunnel and only sends GET requests).
+    fn run_portainer(&mut self, e: telepad_app::portainer::PtEffect) -> Option<Msg> {
+        use telepad_app::portainer::{PtEffect, PtMsg};
+        use telepad_core::portainer as pc;
+        match e {
+            PtEffect::Save { old, p, token } => {
+                let ws = self.ws.as_mut()?;
+                let mut r = ws
+                    .store
+                    .save_portainer(old.as_deref(), &p)
+                    .map_err(|e| e.to_string());
+                if r.is_ok() {
+                    // A rename moves the saved token along (names differing
+                    // only in case share one entry).
+                    let renamed = old.as_deref().filter(|o| !o.eq_ignore_ascii_case(&p.name));
+                    let stored = match (&token, renamed) {
+                        (Some(t), Some(o)) => {
+                            pc::save_token(&p.name, t).and_then(|()| pc::forget_token(o))
+                        }
+                        (Some(t), None) => pc::save_token(&p.name, t),
+                        (None, Some(o)) => pc::load_token(o).and_then(|t| match t {
+                            Some(t) => {
+                                pc::save_token(&p.name, &t).and_then(|()| pc::forget_token(o))
+                            }
+                            None => Ok(()),
+                        }),
+                        (None, None) => Ok(()),
+                    };
+                    r = stored.map_err(|e| format!("Saved, but the token was not stored: {e}"));
+                }
+                Some(Msg::Portainer(PtMsg::Saved(r)))
+            }
+            PtEffect::Delete(name) => {
+                let ws = self.ws.as_mut()?;
+                let r = ws
+                    .store
+                    .delete_portainer(&name)
+                    .map_err(|e| e.to_string())
+                    .and_then(|()| pc::forget_token(&name));
+                Some(Msg::Portainer(PtMsg::Saved(r)))
+            }
+            PtEffect::Pin { name, fingerprint } => {
+                let ws = self.ws.as_mut()?;
+                match ws.store.pin_portainer(&name, &fingerprint) {
+                    Ok(()) => None,
+                    Err(e) => Some(Msg::Notice(format!("Portainer {name}: {e}"))),
+                }
+            }
+            PtEffect::Read { p, host, accept } => {
+                let s = self.ssh.clone()?;
+                self.background(move || {
+                    let result = match pc::load_token(&p.name) {
+                        Ok(Some(t)) => pc::read(&s, &host, &p, &t, accept.as_deref()),
+                        Ok(None) => Err(pc::ReadError::NoToken),
+                        Err(e) => Err(pc::ReadError::Other(format!("password store: {e}"))),
+                    };
+                    Msg::Portainer(PtMsg::Read {
+                        name: p.name,
+                        result: Box::new(result),
+                    })
+                });
+                None
+            }
+            PtEffect::Test { p, host, token } => {
+                let s = self.ssh.clone()?;
+                self.background(move || {
+                    let token = match token {
+                        Some(t) => Ok(Some(t)),
+                        None => pc::load_token(&p.name),
+                    };
+                    let r = match token {
+                        Ok(Some(t)) => match pc::read(&s, &host, &p, &t, None) {
+                            Ok((snap, _)) => Ok(format!(
+                                "Portainer {} · {} environment(s) · {} stack(s)",
+                                snap.version,
+                                snap.environments.len(),
+                                snap.stacks.len()
+                            )),
+                            // A changed certificate is the saved one's business: the test only asks whether it answers.
+                            Err(e) => Err(e.to_string()),
+                        },
+                        Ok(None) => Err(pc::ReadError::NoToken.to_string()),
+                        Err(e) => Err(format!("password store: {e}")),
+                    };
+                    Msg::Portainer(PtMsg::Tested(r))
+                });
+                None
             }
         }
     }

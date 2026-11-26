@@ -72,6 +72,14 @@ pub fn title(m: &Model, w: Win) -> (&'static str, String) {
             };
             (icon, p.map_or("Hosts".into(), |p| p.title()))
         }
+        Win::Portainers => (super::portainer::ICON, "Portainers".into()),
+        Win::Portainer(id) => (
+            super::portainer::ICON,
+            m.pt_pages
+                .iter()
+                .find(|p| p.id == id)
+                .map_or("Portainer".into(), |p| p.title()),
+        ),
     }
 }
 
@@ -86,7 +94,9 @@ fn close_msg(w: Win) -> Msg {
         | Win::Kube
         | Win::Swarm
         | Win::Strategy
-        | Win::Sets(_) => Msg::Ws(WsMsg::Close(w)),
+        | Win::Sets(_)
+        | Win::Portainers => Msg::Ws(WsMsg::Close(w)),
+        Win::Portainer(id) => Msg::Portainer(telepad_app::portainer::PtMsg::ClosePage(id)),
         Win::SetHosts(id) => Msg::Sets(telepad_app::sets::StMsg::ClosePage(id)),
         Win::Host => Msg::Select(None),
         Win::HostSync => Msg::HostSync(telepad_app::hostsync::HsMsg::Close),
@@ -117,6 +127,8 @@ fn default_size(w: Win) -> Vec2 {
         Win::Logins(_) => egui::vec2(1200.0, 640.0),
         Win::Sets(_) => egui::vec2(820.0, 520.0),
         Win::SetHosts(_) => egui::vec2(1000.0, 600.0),
+        Win::Portainers => egui::vec2(1000.0, 480.0),
+        Win::Portainer(_) => egui::vec2(1100.0, 700.0),
     }
 }
 
@@ -204,6 +216,18 @@ pub fn sidebar(ui: &mut egui::Ui, m: &Model, out: &mut Vec<Msg>) {
         }
         ui.add_space(3.0);
     }
+    if nav_button(
+        ui,
+        shown(Win::Portainers),
+        super::portainer::ICON,
+        text("Portainers"),
+    )
+    .on_hover_text("Portainers: your Portainer servers, their environments and stacks (read-only)")
+    .clicked()
+    {
+        out.push(Msg::Portainer(telepad_app::portainer::PtMsg::OpenList));
+    }
+    ui.add_space(3.0);
     if nav_button(ui, shown(Win::Keys), icons::KEY, text("Authorized keys"))
         .on_hover_text(
             "Authorized keys: the keys on each server, by server or by key; add or revoke",

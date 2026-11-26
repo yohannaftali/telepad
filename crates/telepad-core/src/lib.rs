@@ -14,6 +14,7 @@ pub mod login_log;
 pub mod model;
 pub mod parse;
 pub mod platform;
+pub mod portainer;
 pub mod prefs;
 pub mod rdp;
 pub mod store;

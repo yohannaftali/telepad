@@ -3,6 +3,7 @@
 //!        telepad-check --check-update   (ask GitHub for a newer release)
 //!        telepad-check --logins alias ...  (SSH logins from the journal, #126)
 //!        telepad-check --local [--json]  (this computer, #129)
+//!        telepad-check --portainer name [--json]  (a registered Portainer, #171)
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -17,6 +18,7 @@ fn main() -> ExitCode {
     let mut check_update = false;
     let mut logins = false;
     let mut local = false;
+    let mut portainer: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--config" => cfg = args.next(),
@@ -25,10 +27,11 @@ fn main() -> ExitCode {
             "--check-update" => check_update = true,
             "--logins" => logins = true,
             "--local" => local = true,
+            "--portainer" => portainer = args.next(),
             "-h" | "--help" => {
                 println!(
                     "telepad-check [--db <telepad.db>] [--config <ssh config>] [--json] [alias ...]
-\n                     telepad-check [--db <telepad.db>] --check-update\n                     telepad-check --local [--json]"
+\n                     telepad-check [--db <telepad.db>] --check-update\n                     telepad-check --local [--json]\n                     telepad-check [--db <telepad.db>] --portainer <name> [--json]"
                 );
                 return ExitCode::SUCCESS;
             }
@@ -55,6 +58,9 @@ fn main() -> ExitCode {
     }
     if check_update {
         return run_check_update(&ws);
+    }
+    if let Some(name) = portainer {
+        return run_portainer(&ws, &name, json);
     }
     let hosts: Vec<_> = match ws.store.hosts() {
         Ok(h) => h
@@ -267,6 +273,95 @@ fn run_check_update(ws: &telepad_core::Workspace) -> ExitCode {
         Err(e) => {
             eprintln!("update check failed (github.com/{repo}): {e}");
             ExitCode::from(2)
+        }
+    }
+}
+
+/// `--portainer`: read a registered Portainer (#171) like its page does:
+/// through the tunnel, token from the OS password store, `GET`s only.
+fn run_portainer(ws: &telepad_core::Workspace, name: &str, json: bool) -> ExitCode {
+    use telepad_core::portainer as pc;
+    let list = match ws.store.portainers() {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(2);
+        }
+    };
+    let Some(p) = list.iter().find(|p| p.name.eq_ignore_ascii_case(name)) else {
+        let names: Vec<&str> = list.iter().map(|p| p.name.as_str()).collect();
+        eprintln!("no Portainer named {name}; registered: {names:?}");
+        return ExitCode::from(2);
+    };
+    let hosts = ws.store.hosts().unwrap_or_default();
+    let Some(host) = hosts.iter().find(|h| h.alias == p.alias) else {
+        eprintln!("host {} of Portainer {} is not in Telepad", p.alias, p.name);
+        return ExitCode::from(2);
+    };
+    let token = match pc::load_token(&p.name) {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            eprintln!("{}", pc::ReadError::NoToken);
+            return ExitCode::from(1);
+        }
+        Err(e) => {
+            eprintln!("password store: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    match pc::read(&ws.settings(), host, p, &token, None) {
+        Ok((snap, seen)) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"portainer": p.name, "host": p.alias, "certificate": seen, "snapshot": snap})
+                );
+                return ExitCode::SUCCESS;
+            }
+            println!(
+                "Portainer {} on {} port {}: version {}",
+                p.name, p.alias, p.port, snap.version
+            );
+            if let Some(fp) = &seen {
+                let pinned = if p.fingerprint.is_empty() {
+                    "not pinned yet (the app pins it on its first read)"
+                } else if p.fingerprint.eq_ignore_ascii_case(fp) {
+                    "pinned"
+                } else {
+                    "differs from the pinned one"
+                };
+                println!("  certificate {} ({pinned})", pc::short_fp(fp));
+            }
+            for e in &snap.environments {
+                let up = match e.up {
+                    Some(true) => "up",
+                    Some(false) => "down",
+                    None => "?",
+                };
+                let on = pc::env_host(e, &p.alias, &hosts)
+                    .map(|h| format!(" -> {}", h.alias))
+                    .unwrap_or_default();
+                println!(
+                    "  [{}] {} ({}, {up}) {}{on}",
+                    e.id,
+                    e.name,
+                    e.kind_name(),
+                    e.url
+                );
+                for s in snap.stacks.iter().filter(|s| s.env == e.id) {
+                    let state = match s.active {
+                        Some(true) => "active",
+                        Some(false) => "inactive",
+                        None => "?",
+                    };
+                    println!("      stack {} ({}, {state})", s.name, s.kind_name());
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Portainer {}: {e}", p.name);
+            ExitCode::from(1)
         }
     }
 }

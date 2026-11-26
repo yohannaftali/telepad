@@ -22,6 +22,8 @@ minimized, maximized, tabbed and arranged, kept in named workspaces like MikroTi
   with this computer on both sides, and its local MariaDB / MySQL / PostgreSQL
 - **Groups** and **Clusters**: optional, independent labels for your hosts (a host can be in
   group *Office* and cluster *Web*); each has a "Hosts - [name]" page like the Hosts page
+- **Portainers**: register your Portainer servers (API token in the OS password store) and see
+  each one's environments and stacks, read-only through an SSH tunnel to its host
 - **Open files…**: a WinSCP-style file window per host, this computer on the left and the host
   on the right; upload / download with drag and drop, overwrite questions and progress,
   over SFTP (scp when the host has no SFTP server, rsync when both sides have it); new
@@ -241,9 +243,10 @@ The **top bar** holds the tools for those windows:
 | Page | What you do there |
 |---|---|
 | **Groups**, **Clusters** | Your host groups and clusters (plus Ungrouped / No cluster): add, rename, describe, reorder, delete; click one for its "Hosts - [name]" page, **Add hosts…** to move hosts in |
-| **Hosts** | All hosts as a table or cards. Search box at the top; click a header to sort; columns fit the page by themselves (drag a border to set a width, double-click it for automatic again). **By group**, Group / Cluster columns. Click a row to open the host, right-click for its menu (incl. Group / Cluster) |
+| **Hosts** | All hosts as a table or cards. Search box at the top; click a header to sort; columns fit the page by themselves (drag a border to set a width, double-click it for automatic again). Group / Cluster columns (click one to open that group / cluster). Click a row to open the host, right-click for its menu (incl. Group / Cluster) |
 | **Docker / Podman** | Every container of every host, grouped by compose stack, with start / stop / logs / shell actions (each one shown and confirmed in a terminal) |
 | **Kubernetes**, **Docker Swarm** | The clusters found on your hosts: nodes, workloads, services, problems |
+| **Portainers** | Your Portainer servers: add / edit / delete with an API token, status and version; click one for its environments and their stacks (read-only; Open in Portainer for changes) |
 | **Authorized keys** | Who can log in with which SSH key: by server or by key, grouped by the `#` comment lines in `authorized_keys`. Add or revoke a key on many servers at once (you type `add` / `revoke` to confirm), or edit the file |
 | **Host Management** | **Add host…**, **Import** (from a file, `~/.ssh/config` or pasted text) and **Export…**; compare Telepad's hosts with `~/.ssh/config` and copy, edit or delete hosts on either side |
 
