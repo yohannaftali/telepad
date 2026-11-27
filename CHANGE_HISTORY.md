@@ -2,6 +2,13 @@
 
 Newest first.
 
+## [2026-11-27] — Tested and merged: #198 My Computer read speed
+- Windows 11, release build: fmt, clippy `-D warnings`, `cargo test --workspace` (core 248, app 220, gui 20)
+- `telepad-check --local`: 19.2 s → 1.6 s; networks, IPs and Docker-socket flag of all 49 containers identical to the old `docker inspect` output
+- GUI on a scratch inventory (UI Automation + window capture): My Computer "took 1.3s", 16 compose stacks, IPs with network names, stopped containers without IP — same as before the fix
+- Remote: `script.sh` unchanged (dockercenter: `inspect` of 87 running containers 0.12 s, measured read-only with the owner's OK)
+- Not verified: Podman on Windows (not installed; its path is unchanged)
+
 ## [2026-11-27] — fix(local): My Computer read takes ~19 s on Windows (#198)
 - Issue #198 addressed on GitHub (branch `198-local-docker-speed`)
 - Cause: `docker inspect` of every container; Docker Desktop takes ~0.45 s (up to 3 s) per running container
