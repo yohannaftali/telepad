@@ -11,7 +11,7 @@ use telepad_core::files::syntax::Lang;
 use telepad_core::files::text::{
     self, Charset, Doc, FindOpts, Format, Indent, MAX_EDIT, convert_indent,
 };
-use telepad_core::files::{Kind, local_join, sftp};
+use telepad_core::files::{Entry, Kind, local_join, sftp};
 
 use crate::files::{FileDraft, FileSession, FmEffect, Mode, Side, Status};
 
@@ -135,7 +135,22 @@ pub struct FileEditor {
     pub compare: Option<(TabId, TabId)>,
     /// Reopen with Encoding of a tab with unsaved changes asks first (#203).
     pub reopen_ask: Option<(TabId, Charset)>,
+    /// Open… (#204): a folder of the same side, listed without moving the
+    /// file window's panes.
+    pub open: Option<OpenDialog>,
     next: TabId,
+}
+
+/// The editor's Open… dialog (#204).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpenDialog {
+    /// The side of the file window it lists (the host, or this computer).
+    pub side: Side,
+    /// Folder shown (absolute once listed).
+    pub dir: String,
+    pub entries: Vec<Entry>,
+    pub loading: bool,
+    pub error: Option<String>,
 }
 
 impl FileEditor {
@@ -171,6 +186,10 @@ pub struct EdDraft {
     pub opts: FindOpts,
     /// Compare (#135): the two sides scroll on their own.
     pub no_sync_scroll: bool,
+    /// Open… (#204): the typed path, the name filter and the selected row.
+    pub open_path: String,
+    pub open_filter: String,
+    pub open_sel: Option<String>,
 }
 
 impl EdDraft {
@@ -253,6 +272,16 @@ pub enum EdMsg {
     ReopenWithEncoding(TabId, Charset),
     /// The answer to [`FileEditor::reopen_ask`]: `true` = discard and reopen.
     ReopenAnswer(bool),
+    /// Open… / Ctrl+O (#204): list the active file's folder (else the
+    /// file window's folder) on the same side.
+    ShowOpen,
+    /// List another folder in the Open… dialog (typed path, `..`, a folder).
+    Browse(String),
+    /// The Open… dialog's listing.
+    Browsed(Result<(String, Vec<Entry>), String>),
+    /// Double-click / Open on a row: a folder is listed, a file opens.
+    PickOpen(String),
+    CloseOpen,
 }
 
 /// `true` when the file window should close now (after the question).
@@ -580,6 +609,103 @@ pub(crate) fn update(
                 reopen(id, e, tab, charset, fx);
             }
         }
+        EdMsg::ShowOpen => {
+            if s.status != Status::Ready {
+                return false;
+            }
+            let (side, dir) = match s.editor.active.and_then(|a| s.editor.tab(a)) {
+                Some(t) => {
+                    let local = s.local_side(t.side);
+                    let dir =
+                        crate::files::parent(local, &t.path).unwrap_or_else(|| t.path.clone());
+                    (t.side, dir)
+                }
+                None => (Side::Remote, s.remote.path.clone()),
+            };
+            let error = (side == Side::Remote && s.mode == Mode::Fallback)
+                .then(|| "Editing needs SFTP on the host".to_string());
+            d.editor.open_path = dir.clone();
+            d.editor.open_filter.clear();
+            d.editor.open_sel = None;
+            let loading = error.is_none();
+            if loading {
+                fx.push(FmEffect::Browse {
+                    id,
+                    side,
+                    path: dir.clone(),
+                });
+            }
+            s.editor.open = Some(OpenDialog {
+                side,
+                dir,
+                entries: Vec::new(),
+                loading,
+                error,
+            });
+        }
+        EdMsg::Browse(path) => {
+            let Some(o) = e.open.as_mut() else {
+                return false;
+            };
+            let path = path.trim().to_string();
+            if path.is_empty() || o.loading {
+                return false;
+            }
+            o.loading = true;
+            o.error = None;
+            dr.open_sel = None;
+            fx.push(FmEffect::Browse {
+                id,
+                side: o.side,
+                path,
+            });
+        }
+        EdMsg::Browsed(result) => {
+            let Some(o) = e.open.as_mut() else {
+                return false;
+            };
+            o.loading = false;
+            match result {
+                Ok((dir, mut entries)) => {
+                    entries.sort_by(|a, b| {
+                        b.is_dir()
+                            .cmp(&a.is_dir())
+                            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                    });
+                    dr.open_path = dir.clone();
+                    dr.open_filter.clear();
+                    o.dir = dir;
+                    o.entries = entries;
+                    o.error = None;
+                }
+                Err(why) => o.error = Some(why),
+            }
+        }
+        EdMsg::PickOpen(name) => {
+            let Some(side) = s.editor.open.as_ref().map(|o| o.side) else {
+                return false;
+            };
+            let local = s.local_side(side);
+            let Some(o) = s.editor.open.as_ref() else {
+                return false;
+            };
+            if name == ".." {
+                if let Some(up) = crate::files::parent(local, &o.dir) {
+                    return update(s, d, EdMsg::Browse(up), fx);
+                }
+                return false;
+            }
+            let Some(entry) = o.entries.iter().find(|x| x.name == name) else {
+                return false;
+            };
+            let path = crate::files::join(local, &o.dir, &name);
+            if entry.is_dir() {
+                return update(s, d, EdMsg::Browse(path), fx);
+            }
+            s.editor.open = None;
+            return update(s, d, EdMsg::OpenPath { side, path }, fx);
+        }
+        EdMsg::CloseOpen => e.open = None,
     }
     false
 }

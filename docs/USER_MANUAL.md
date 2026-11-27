@@ -1442,6 +1442,13 @@ looks and works like VS Code. One editor window per file window: each file is a 
 of this computer and of the host side by side (the tab's icon says which; hover it for the
 full path). Opening a file that already has a tab switches to it.
 
+- **Open…** (#204; the toolbar button, or **Ctrl+O**) opens another file without going back to
+  the file window: a dialog lists the folder of the file you are editing on the same side —
+  the host, or this computer — with a path box (type a folder or a file path, Enter), a parent
+  button, a name filter, folders first. Double-click a folder to enter it, a file to open it as
+  a new tab (or **Open**). The file window's own folders do not move. Host files need the
+  host's SFTP, like the editor itself.
+
 - **Refused files** show the reason in their tab instead of the text: binary files and files
   over 10 MiB (download them instead). **Close tab** closes it. A text file that is not UTF-8
   opens as **Windows-1252** with a yellow line saying so; if characters look wrong, use

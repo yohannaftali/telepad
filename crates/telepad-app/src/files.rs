@@ -651,6 +651,13 @@ pub enum FmEffect {
         id: FmId,
         host: HostEntry,
     },
+    /// List a folder for the editor's Open… dialog (#204) →
+    /// [`EdMsg::Browsed`]; the panes stay where they are.
+    Browse {
+        id: FmId,
+        side: Side,
+        path: String,
+    },
     /// → [`FmMsg::Listed`]
     List {
         id: FmId,
@@ -774,7 +781,7 @@ fn list(fx: &mut Vec<FmEffect>, s: &mut FileSession, d: &mut FileDraft, side: Si
 }
 
 /// `local`: a path of this computer (see [`FileSession::local_side`]).
-fn join(local: bool, dir: &str, name: &str) -> String {
+pub(crate) fn join(local: bool, dir: &str, name: &str) -> String {
     if local {
         local_join(dir, name)
     } else {
@@ -782,7 +789,7 @@ fn join(local: bool, dir: &str, name: &str) -> String {
     }
 }
 
-fn parent(local: bool, dir: &str) -> Option<String> {
+pub(crate) fn parent(local: bool, dir: &str) -> Option<String> {
     if local {
         local_parent(dir)
     } else {
