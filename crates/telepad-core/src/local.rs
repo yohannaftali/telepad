@@ -240,6 +240,39 @@ fn docker() -> crate::model::Docker {
         ps.extend(out.lines().map(str::to_string));
     }
     let mut net: Vec<String> = Vec::new();
+    if rt == "docker" {
+        // Docker Desktop answers `inspect` of a running container in ~0.5 s
+        // (#198), so read names / mounts from `ps` and IPs per network.
+        let ps_nets = run(
+            rt,
+            &[
+                "ps",
+                "-a",
+                "--no-trunc",
+                "--format",
+                "{{.ID}}|{{.Networks}}|{{.Mounts}}",
+            ],
+        );
+        let ids = run(rt, &["network", "ls", "-q"])
+            .map(|(_, o)| o)
+            .unwrap_or_default();
+        let ids: Vec<&str> = ids.split_whitespace().collect();
+        let mut by_net = String::new();
+        if !ids.is_empty() {
+            let mut args = vec![
+                "network",
+                "inspect",
+                "-f",
+                "{{.Name}}|{{range $id, $c := .Containers}}{{$id}}={{$c.IPv4Address}} {{end}}",
+            ];
+            args.extend(ids);
+            by_net = run(rt, &args).map(|(_, o)| o).unwrap_or_default();
+        }
+        if let Some((_, out)) = ps_nets {
+            net = docker_net_lines(&out, &by_net);
+        }
+        return crate::parse::parse_docker(Some(&ps), &net);
+    }
     if let Some((_, ids)) = run(rt, &["ps", "-aq", "--no-trunc"]) {
         let ids: Vec<&str> = ids.split_whitespace().collect();
         if !ids.is_empty() {
@@ -255,6 +288,62 @@ fn docker() -> crate::model::Docker {
         }
     }
     crate::parse::parse_docker(Some(&ps), &net)
+}
+
+/// The `===DOCKERNET===` lines (`id|net=ip net=ip |mount mount `) that
+/// `docker inspect` gives, built from two calls that do not get slower with
+/// every running container (#198):
+/// - `ps`: `docker ps -a --format '{{.ID}}|{{.Networks}}|{{.Mounts}}'` —
+///   network names and mounts (comma separated) of every container;
+/// - `by_net`: `docker network inspect -f '{{.Name}}|{{range $id, $c :=
+///   .Containers}}{{$id}}={{$c.IPv4Address}} {{end}}'` — the IP (with its
+///   prefix length) of each running container on each network.
+///
+/// Stopped containers keep their network names with an empty IP, as
+/// `inspect` shows them; networks are sorted by name like `inspect`'s map.
+pub fn docker_net_lines(ps: &str, by_net: &str) -> Vec<String> {
+    let mut ips: std::collections::HashMap<(&str, &str), &str> = Default::default();
+    for l in by_net.lines() {
+        let Some((net, rest)) = l.split_once('|') else {
+            continue;
+        };
+        for pair in rest.split_whitespace() {
+            if let Some((id, ip)) = pair.split_once('=') {
+                let ip = ip.split_once('/').map_or(ip, |(a, _)| a);
+                ips.insert((net.trim(), id), ip);
+            }
+        }
+    }
+    ps.lines()
+        .filter_map(|l| {
+            let mut it = l.splitn(3, '|');
+            let id = it.next()?.trim();
+            if id.is_empty() {
+                return None;
+            }
+            let mut nets: Vec<&str> = it
+                .next()
+                .unwrap_or("")
+                .split(',')
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .collect();
+            nets.sort_unstable();
+            let nets: String = nets
+                .iter()
+                .map(|n| format!("{n}={} ", ips.get(&(*n, id)).copied().unwrap_or("")))
+                .collect();
+            let mounts: String = it
+                .next()
+                .unwrap_or("")
+                .split(',')
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+                .map(|m| format!("{m} "))
+                .collect();
+            Some(format!("{id}|{nets}|{mounts}"))
+        })
+        .collect()
 }
 
 /// First port of Windows' dynamic (client) range.
@@ -367,6 +456,55 @@ Active Connections
   UDP    [fe80::1%12]:1900      *:*                                    3100
   UDP    0.0.0.0:61234          *:*                                    3100
 ";
+
+    #[test]
+    fn docker_net_lines_match_what_inspect_gives() {
+        // Made-up containers: web on two networks, a stopped one, one that
+        // mounts the Docker socket, one with no network data at all.
+        let ps = "aaa111|web_default,proxy|/srv/web/conf,web_data
+bbb222|web_default|
+ccc333|tools_default|/var/run/docker.sock
+ddd444||
+";
+        let by_net = "web_default|aaa111=172.18.0.2/16
+proxy|aaa111=172.19.0.5/16 ccc999=172.19.0.9/16
+tools_default|ccc333=172.20.0.3/16
+bridge|
+";
+        let lines = docker_net_lines(ps, by_net);
+        assert_eq!(
+            lines,
+            [
+                "aaa111|proxy=172.19.0.5 web_default=172.18.0.2 |/srv/web/conf web_data ",
+                "bbb222|web_default= |",
+                "ccc333|tools_default=172.20.0.3 |/var/run/docker.sock ",
+                "ddd444||",
+            ]
+        );
+        // The parser reads them exactly like `inspect` output.
+        let ps_rows: Vec<String> = [
+            "aaa111|web|nginx|running|Up|web|/srv/web|compose.yaml|",
+            "bbb222|old|nginx|exited|Exited (0)|web|/srv/web|compose.yaml|",
+            "ccc333|agent|portainer/agent|running|Up||||",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let d = crate::parse::parse_docker(Some(&ps_rows), &lines);
+        let by = |n: &str| d.containers.iter().find(|c| c.name == n).unwrap();
+        assert_eq!(
+            by("web").networks,
+            [
+                ("proxy".to_string(), "172.19.0.5".to_string()),
+                ("web_default".to_string(), "172.18.0.2".to_string())
+            ]
+        );
+        assert_eq!(
+            by("old").networks,
+            [("web_default".to_string(), String::new())]
+        );
+        assert!(by("agent").mounts_socket && !by("web").mounts_socket);
+    }
 
     #[test]
     fn reads_listening_sockets_from_netstat() {
