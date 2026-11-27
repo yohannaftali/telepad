@@ -382,6 +382,6 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #196 | feat(sensors): driver-free Windows sensors — AMD graphics via ADLX, NVMe drive temperature | open | 2026-11-27 |
 | #198 | fix(local): My Computer read takes ~19 s on Windows — docker inspect of every running container | closed | 2026-11-27 |
 | #201 | feat(editor): indentation Size as an editable field with a 2 / 4 / 8 dropdown | open | 2026-11-27 |
-| #203 | feat(editor): clickable line ending and encoding in the status bar — LF / CRLF, Reopen / Save with Encoding | ready-for-review | 2026-11-27 |
-| #204 | feat(editor): open another file from the editor on the same host or this computer | ready-for-review | 2026-11-27 |
-| #205 | feat(editor): keyboard shortcut profiles — VS Code, Sublime, JetBrains, Notepad++, Emacs, nano — with go to line, matching bracket, copy all | ready-for-review | 2026-11-27 |
+| #203 | feat(editor): clickable line ending and encoding in the status bar — LF / CRLF, Reopen / Save with Encoding | closed | 2026-11-27 |
+| #204 | feat(editor): open another file from the editor on the same host or this computer | closed | 2026-11-27 |
+| #205 | feat(editor): keyboard shortcut profiles — VS Code, Sublime, JetBrains, Notepad++, Emacs, nano — with go to line, matching bracket, copy all | closed | 2026-11-27 |

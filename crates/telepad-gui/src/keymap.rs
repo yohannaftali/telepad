@@ -453,6 +453,21 @@ fn native(cmd: Cmd, seq: &Seq) -> bool {
         .any(|(c, s)| *c == cmd && parse_seq(s).as_ref() == Some(seq))
 }
 
+fn is_modifier(k: Key) -> bool {
+    matches!(
+        k,
+        Key::ShiftLeft
+            | Key::ShiftRight
+            | Key::ControlLeft
+            | Key::ControlRight
+            | Key::AltLeft
+            | Key::AltRight
+            | Key::SuperLeft
+            | Key::SuperRight
+            | Key::CapsLock
+    )
+}
+
 /// Takes a profile's shortcuts out of the frame's input.
 pub struct Matcher {
     binds: Vec<(Cmd, Seq)>,
@@ -482,39 +497,61 @@ impl Matcher {
         let mut keep = Vec::with_capacity(input.events.len());
         let mut eat_text = false;
         for ev in input.events.drain(..) {
-            let stroke = match &ev {
+            // The key as typed, and the key pressed: with Shift a US keyboard
+            // types `|` on the `\` key, `?` on `/`, `%` on `5` — shortcuts are
+            // written with the key pressed ("Ctrl+Shift+Backslash").
+            let strokes: Vec<Stroke> = match &ev {
+                // egui also reports Ctrl / Shift / Alt on their own: not a
+                // stroke (pressing Ctrl for the second key of Ctrl+X Ctrl+S
+                // would cancel the first).
+                Event::Key { key, .. } if is_modifier(*key) => Vec::new(),
                 Event::Key {
                     key,
+                    physical_key,
                     pressed: true,
                     modifiers,
                     ..
-                } => Some(Stroke::of(*modifiers, *key)),
-                Event::Cut => Some(Stroke::of(Modifiers::CTRL, Key::X)),
-                Event::Copy => Some(Stroke::of(Modifiers::CTRL, Key::C)),
-                Event::Paste(_) => Some(Stroke::of(Modifiers::CTRL, Key::V)),
+                } => {
+                    let mut v = vec![Stroke::of(*modifiers, *key)];
+                    if let Some(p) = physical_key.filter(|p| p != key) {
+                        v.push(Stroke::of(*modifiers, p));
+                    }
+                    v
+                }
+                Event::Cut => vec![Stroke::of(Modifiers::CTRL, Key::X)],
+                Event::Copy => vec![Stroke::of(Modifiers::CTRL, Key::C)],
+                Event::Paste(_) => vec![Stroke::of(Modifiers::CTRL, Key::V)],
                 Event::Text(_) if eat_text => {
                     eat_text = false;
                     continue;
                 }
-                _ => None,
+                _ => Vec::new(),
             };
             eat_text = false;
-            let Some(st) = stroke else {
+            let Some(&first) = strokes.first() else {
                 keep.push(ev);
                 continue;
             };
-            // Modifier-only and plain keys only matter inside a sequence.
-            let mut seq = pending.clone();
-            seq.push(st);
             let usable = |c: Cmd| text || !c.on_text();
-            let exact = self
-                .binds
+            let look = |st: Stroke| {
+                let mut seq = pending.clone();
+                seq.push(st);
+                let exact = self
+                    .binds
+                    .iter()
+                    .find(|(c, s)| s.strokes == seq && usable(*c))
+                    .map(|(c, _)| *c);
+                let prefix = self.binds.iter().any(|(c, s)| {
+                    s.strokes.len() > seq.len() && s.strokes.starts_with(&seq) && usable(*c)
+                });
+                (st, seq, exact, prefix)
+            };
+            // The typed key first, then the pressed key.
+            let (st, seq, exact, prefix) = strokes
                 .iter()
-                .find(|(c, s)| s.strokes == seq && usable(*c))
-                .map(|(c, _)| *c);
-            let prefix = self.binds.iter().any(|(c, s)| {
-                s.strokes.len() > seq.len() && s.strokes.starts_with(&seq) && usable(*c)
-            });
+                .map(|s| look(*s))
+                .find(|(_, _, e, p)| e.is_some() || *p)
+                .unwrap_or_else(|| look(first));
             if let Some(c) = exact {
                 cmds.push(c);
                 pending.clear();
@@ -649,6 +686,27 @@ mod tests {
             true,
         );
         assert_eq!((c, pending.len()), (vec![Cmd::Save], 0));
+        // As Windows sends it: Ctrl goes down on its own before each key.
+        run(
+            "emacs",
+            vec![key(Modifiers::CTRL, Key::ControlLeft), Event::Cut],
+            &mut pending,
+            true,
+        );
+        let (c, left) = run(
+            "emacs",
+            vec![
+                key(Modifiers::CTRL, Key::ControlLeft),
+                key(Modifiers::CTRL, Key::S),
+            ],
+            &mut pending,
+            true,
+        );
+        assert_eq!(
+            (c, left, pending.len()),
+            (vec![Cmd::Save], 1, 0),
+            "Ctrl alone is kept, not a stroke"
+        );
         // An unknown second key cancels the sequence and is not typed.
         run("emacs", vec![Event::Cut], &mut pending, true);
         let (c, left) = run(
@@ -679,6 +737,29 @@ mod tests {
             )
             .0,
             [Cmd::MatchingBracket]
+        );
+        // Shift changes the typed key (`\` → `|`): the pressed key still matches.
+        let piped = Event::Key {
+            key: Key::Pipe,
+            physical_key: Some(Key::Backslash),
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::CTRL | Modifiers::SHIFT,
+        };
+        assert_eq!(
+            run("vscode", vec![piped], &mut pending, true).0,
+            [Cmd::MatchingBracket]
+        );
+        let underscore = Event::Key {
+            key: Key::Minus,
+            physical_key: Some(Key::Minus),
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::CTRL | Modifiers::SHIFT,
+        };
+        assert_eq!(
+            run("nano", vec![underscore], &mut pending, true).0,
+            [Cmd::GotoLine]
         );
         // Text commands wait for the text field: Ctrl+C in the find box copies normally.
         let (c, left) = run("vscode", vec![Event::Copy], &mut pending, false);
