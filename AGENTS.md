@@ -380,3 +380,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #193 | feat(sensors): GPU and Windows sensors — nvidia-smi, LibreHardwareMonitor on Windows, and why Sensors is empty | closed | 2026-11-27 |
 | #196 | feat(sensors): driver-free Windows sensors — AMD graphics via ADLX, NVMe drive temperature | open | 2026-11-27 |
 | #198 | fix(local): My Computer read takes ~19 s on Windows — docker inspect of every running container | closed | 2026-11-27 |
+| #201 | feat(editor): indentation Size as an editable field with a 2 / 4 / 8 dropdown | open | 2026-11-27 |
