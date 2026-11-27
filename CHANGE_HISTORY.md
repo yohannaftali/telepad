@@ -2,6 +2,16 @@
 
 Newest first.
 
+## [2026-11-27] — Telepad 0.9.16
+- #201 Editor: the indentation Size is a field — type any size from 1 to 16 or pick 2 / 4 / 8 from its dropdown; files indented with 3 or 6 spaces keep their size
+- #211 My Computer on Windows: Windows Update (pending from the local cache, last install), antivirus definitions, Virus & threat protection, Firewall & network protection and App & browser control On / Off with a security flag, and an Installed applications table; Ports in use right after Network
+
+## [2026-11-27] — Tested and merged: #201, #211; #196 tested, partly done (not merged)
+- Windows 11, release builds on the demo database (the owner's Telepad untouched), window captures + UI Automation; fmt, clippy `-D warnings`, `cargo test --workspace` green; CI green on Windows, Ubuntu, macOS
+- #201 merged in PR #212, #211 merged in PR #213 (details in the issue comments)
+- #196: drive temperatures on branch `196-drive-temps` (pushed, not merged): this PC's NVMe gives its temperature only to administrators, so no reading was seen; AMD ADLX not implemented — licence not read / not cleared, owner to decide
+- Not verified: Portainer stack editor live (#201, same code as the file editor), third-party antivirus / firewall and Windows Server (#211, unit tests)
+
 ## [2026-11-27] — feat(local): My Computer — Windows security and update status, installed applications
 - Issue #211 addressed on GitHub
 - Files: core `local/security.rs` (new), `local.rs` (`collect(slow)`, `keep_slow`), `model.rs` (`Security`, `Antivirus`, `FirewallProfile`, `App`, `Maintenance::last_update`); app `msg.rs` (`CollectLocal { slow }`, `LocalCollected::slow`), `state.rs` (`Model::local_slow`), `update.rs`, `table.rs` (`FlagKind::Security`), `tests_local.rs`, `tests.rs`; gui `views/detail.rs` (Maintenance rows, Installed applications table, Ports in use after Network on My Computer, flags in the header), `icons.rs` (shield), `widgets.rs`, `runtime.rs`; `telepad-check` text output; `README.md`, `docs/USER_MANUAL.md`, `docs/crates/telepad-core.md`, `AGENTS.md`, `docs/images/my-computer-security.png`, `docs/images/my-computer-apps.png`
