@@ -186,7 +186,15 @@ fn report(results: &[Collected], json: bool) -> ExitCode {
                         println!("   BMC     : not readable: {e}");
                     }
                     for s in &r.sensors {
-                        println!("   Sensor  : {} {} = {:.1}", s.chip, s.label, s.value);
+                        println!(
+                            "   Sensor  : {} {} = {}",
+                            s.chip,
+                            s.label,
+                            s.kind.format(s.value)
+                        );
+                    }
+                    if let Some(n) = &r.sensors_note {
+                        println!("   Sensors : {n}");
                     }
                     match &r.docker.unavailable {
                         Some(why) => println!("   Docker  : {why}"),

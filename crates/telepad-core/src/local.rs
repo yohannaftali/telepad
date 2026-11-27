@@ -13,6 +13,8 @@ use std::time::Duration;
 use crate::model::{HostReport, Listener};
 use crate::platform;
 
+pub mod sensors;
+
 /// Longest a local read may take (Docker can be slow to answer).
 pub const TIMEOUT: Duration = Duration::from_secs(40);
 
@@ -100,8 +102,8 @@ fn run(program: &str, args: &[&str]) -> Option<(bool, String)> {
 
 #[cfg(target_os = "windows")]
 fn collect_impl() -> Result<HostReport, String> {
-    use crate::model::{Disk, Memory, NetAddr, Sensor, SensorKind};
-    use sysinfo::{Components, Disks, Networks, ProcessesToUpdate, System};
+    use crate::model::{Disk, Memory, NetAddr};
+    use sysinfo::{Disks, Networks, ProcessesToUpdate, System};
 
     let mut sys = System::new().map_err(|e| e.to_string())?;
     sys.refresh_cpu_usage();
@@ -164,21 +166,7 @@ fn collect_impl() -> Result<HostReport, String> {
     }
     r.addresses
         .sort_by(|a, b| a.interface.cmp(&b.interface).then(a.family.cmp(&b.family)));
-    // Usually empty without admin rights (WMI thermal zones).
-    let comps = Components::new_with_refreshed_list().ok();
-    for c in comps.iter().flatten() {
-        if let Some(t) = c
-            .temperature()
-            .filter(|t| *t > -40.0 && *t < 150.0 && *t != 0.0)
-        {
-            r.sensors.push(Sensor {
-                kind: SensorKind::Temperature,
-                chip: String::new(),
-                label: c.label().to_string(),
-                value: t,
-            });
-        }
-    }
+    (r.sensors, r.sensors_note) = sensors::read(run);
     let names = |pid: u32| {
         sys.process(sysinfo::Pid::from_u32(pid))
             .map(|p| {

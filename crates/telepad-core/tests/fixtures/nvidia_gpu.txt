@@ -1,0 +1,14 @@
+===HOSTNAME===
+gpu01
+===UNAME===
+Linux
+6.8.0-45-generic
+x86_64
+===THERMAL===
+x86_pkg_temp|52000
+===HWMON===
+k10temp|temp1|Tctl|52250
+===NVIDIA===
+0, NVIDIA RTX A4000, 61, 41, 87.35
+1, Example GPU, Rev. B, 48, [N/A], [N/A]
+===IPMI===

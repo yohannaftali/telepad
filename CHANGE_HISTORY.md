@@ -2,6 +2,17 @@
 
 Newest first.
 
+## [2026-11-27] — feat(sensors): GPU and Windows sensors, and why Sensors is empty (#193)
+- Issue #193 addressed on GitHub (branch `193-sensors`)
+- Hosts and Linux My Computer: new guarded `===NVIDIA===` section (`nvidia-smi`, timeout 10 s, no sudo) → GPU temperature, fan % and power next to the hwmon sensors; hosts without `nvidia-smi` unchanged
+- Windows My Computer: `nvidia-smi`, then LibreHardwareMonitor's WMI namespace while it runs (any vendor; never installed or started by Telepad), then the `sysinfo` thermal zone; LibreHardwareMonitor's NVIDIA rows dropped when `nvidia-smi` reported the GPU; a direct WMI thermal-zone query tells "needs administrator" from "this PC publishes none" for the note
+- `HostReport::sensors_note` (macOS: "not available on macOS"; Windows: why CPU / board readings are missing + LibreHardwareMonitor hint); new `SensorKind::FanPercent` / `Power` with `SensorKind::format`; Sensors view shows the note, GPU fan % in Fans, a Power table; `telepad-check` prints units and the note
+- Files: core `script.sh`, `parse.rs` (+ fixtures `nvidia_gpu.txt`, `macos_nosensors.txt`), `model.rs`, `local.rs`, `local/sensors.rs` (new), `Cargo.toml` (`wmi` 0.18.4, Windows only, no new `windows` version); gui `views/sensors.rs`; check `main.rs`; `docs/USER_MANUAL.md` (My Computer wording fixed, new "Sensors on each computer", troubleshooting row), `docs/DEPENDENCIES.md` (wmi), `docs/crates/telepad-core.md`, `AGENTS.md`
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 247, app 220, gui 20); `telepad-check --local` on Windows 11 (MSI MS-7D76, RTX 3070 Ti, not administrator): GPU temperature / fan / power shown, note "only the GPU is readable: this PC publishes no temperature sensors to Windows — start LibreHardwareMonitor …"
+- Not verified yet: GUI (tester); LibreHardwareMonitor running (not installed here; covered by unit tests of the row mapping and merge); a Linux host with an NVIDIA GPU (fixture test only); macOS (fixture test only)
+- No screenshot: the Sensors section only has data on a real PC, and manual screenshots come from the demo lab
+- Found (not part of #193): `telepad-check --local` takes ≈ 19 s on this PC, same on `main`
+
 ## [2026-11-27] — feat(sensors): GPU and Windows sensors — nvidia-smi, LibreHardwareMonitor on Windows, and why Sensors is empty
 - Issue #193 created on GitHub
 - Scope: sensors (core script.sh, parse.rs, local.rs; gui views/sensors.rs; telepad-check --local; manual)

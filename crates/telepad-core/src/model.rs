@@ -24,6 +24,9 @@ pub struct HostReport {
     pub disks: Vec<Disk>,
     pub addresses: Vec<NetAddr>,
     pub sensors: Vec<Sensor>,
+    /// Why sensors are missing, or what would show more (#193): e.g. "not
+    /// available on macOS", or start LibreHardwareMonitor on Windows.
+    pub sensors_note: Option<String>,
     /// A BMC (IPMI) device exists on this host.
     pub has_bmc: bool,
     /// Why BMC sensors could not be read (ipmitool missing, no sudo rule).
@@ -153,7 +156,24 @@ pub struct NetAddr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum SensorKind {
     Temperature,
+    /// Fan speed in RPM.
     Fan,
+    /// Fan speed as a share of its maximum (GPUs report this, #193).
+    FanPercent,
+    /// Power draw in watts (GPUs, #193).
+    Power,
+}
+
+impl SensorKind {
+    /// The value with its unit, as shown in tables and `telepad-check`.
+    pub fn format(self, value: f32) -> String {
+        match self {
+            SensorKind::Temperature => format!("{value:.1} °C"),
+            SensorKind::Fan => format!("{value:.0} RPM"),
+            SensorKind::FanPercent => format!("{value:.0} %"),
+            SensorKind::Power => format!("{value:.1} W"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -161,7 +181,7 @@ pub struct Sensor {
     pub kind: SensorKind,
     pub chip: String,
     pub label: String,
-    /// °C for temperatures, RPM for fans.
+    /// In the unit of its [`SensorKind`]: °C, RPM, % or W.
     pub value: f32,
 }
 

@@ -1,4 +1,5 @@
-//! Sensors section of the host detail: fans, temperatures, BMC hint.
+//! Sensors section of the host detail: fans, temperatures, GPU power (#193),
+//! BMC hint and why readings are missing (`HostReport::sensors_note`).
 
 use eframe::egui::{self, RichText};
 use telepad_app::Msg;
@@ -45,25 +46,38 @@ pub fn sensors(
         ui.add_space(4.0);
     }
     if r.sensors.is_empty() {
-        let why = if host.is_none() && cfg!(windows) {
-            "not available — Windows shows temperatures only to administrators (WMI thermal zones)"
+        let why = if let Some(n) = &r.sensors_note {
+            format!("not available — {n}")
         } else if host.is_none() {
-            "not available — no temperature or fan sensors readable on this computer"
+            "not available — no temperature or fan sensors readable on this computer".into()
         } else if r.has_bmc {
-            "No sensor readings"
+            "No sensor readings".into()
         } else {
-            "No temperature or fan sensors exposed (typical for VMs)"
+            "No temperature or fan sensors exposed (typical for VMs)".into()
         };
         ui.label(RichText::new(why).weak());
         return;
     }
+    if let Some(n) = &r.sensors_note {
+        ui.label(RichText::new(format!("{}  {n}", icons::INFO)).weak());
+        ui.add_space(4.0);
+    }
     let fans: Vec<_> = r
         .sensors
         .iter()
-        .filter(|s| s.kind == SensorKind::Fan)
+        .filter(|s| matches!(s.kind, SensorKind::Fan | SensorKind::FanPercent))
         .collect();
     if !fans.is_empty() {
-        let max = fans.iter().map(|s| s.value).fold(1.0_f32, f32::max);
+        let max_rpm = fans
+            .iter()
+            .filter(|s| s.kind == SensorKind::Fan)
+            .map(|s| s.value)
+            .fold(1.0_f32, f32::max);
+        // GPUs report a share of full speed, BMC / board fans RPM (#193).
+        let share = |s: &telepad_core::model::Sensor| match s.kind {
+            SensorKind::FanPercent => s.value / 100.0,
+            _ => s.value / max_rpm,
+        };
         ui.label(RichText::new(il(icons::FAN, "Fans")).strong());
         let cols = [
             Col::action(""),
@@ -78,7 +92,7 @@ pub fn sensors(
                     String::new(),
                     s.chip.clone(),
                     s.label.clone(),
-                    format!("{:.0} RPM", s.value),
+                    s.kind.format(s.value),
                 ]
             })
             .collect();
@@ -94,11 +108,11 @@ pub fn sensors(
                     let s = fans[row];
                     match col {
                         0 => {
-                            spinning_fan(ui, 18.0, (s.value / max).clamp(0.0, 1.0));
+                            spinning_fan(ui, 18.0, share(s).clamp(0.0, 1.0));
                         }
                         3 => {
                             ui.add(
-                                egui::ProgressBar::new((s.value / max).clamp(0.0, 1.0))
+                                egui::ProgressBar::new(share(s).clamp(0.0, 1.0))
                                     .desired_width(ui.available_width().min(220.0))
                                     .fill(crate::widgets::info_fill())
                                     .text(&cells[row][3]),
@@ -132,7 +146,7 @@ pub fn sensors(
                     String::new(),
                     s.chip.clone(),
                     s.label.clone(),
-                    format!("{:.1} °C", s.value),
+                    s.kind.format(s.value),
                 ]
             })
             .collect();
@@ -160,6 +174,34 @@ pub fn sensors(
                         }
                         c => table::text(ui, &cells[row][c]),
                     }
+                }
+            },
+        );
+        out.extend(o.msgs);
+    }
+    let power: Vec<_> = r
+        .sensors
+        .iter()
+        .filter(|s| s.kind == SensorKind::Power)
+        .collect();
+    if !power.is_empty() {
+        ui.add_space(6.0);
+        ui.label(RichText::new(il(icons::GAUGE, "Power")).strong());
+        let cols = [Col::new("Chip"), Col::new("Sensor"), Col::new("Power")];
+        let cells: Vec<Vec<String>> = power
+            .iter()
+            .map(|s| vec![s.chip.clone(), s.label.clone(), s.kind.format(s.value)])
+            .collect();
+        let title = format!("Power of {alias}");
+        let st = table::state(d, format!("power:{alias}"));
+        let o = table::show(
+            ui,
+            &Spec::new(("power", alias), &title, &cols),
+            st,
+            &cells,
+            |ui, ev| {
+                if let Ev::Cell { row, col } = ev {
+                    table::text(ui, &cells[row][col]);
                 }
             },
         );

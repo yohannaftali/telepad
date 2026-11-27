@@ -80,6 +80,7 @@ pub fn parse_report(output: &str) -> HostReport {
     r.disks = parse_df(get("DF"));
     r.addresses = parse_ip(get("IPADDR"));
     r.sensors = parse_sensors(get("THERMAL"), get("HWMON"));
+    r.sensors.extend(parse_nvidia(get("NVIDIA")));
     let (has_bmc, bmc_error, bmc) = parse_ipmi(get("IPMI"));
     r.has_bmc = has_bmc;
     r.bmc_error = bmc_error;
@@ -97,8 +98,16 @@ pub fn parse_report(output: &str) -> HostReport {
     r.docker = parse_docker(s.get("DOCKER").map(Vec::as_slice), get("DOCKERNET"));
     r.cluster.swarm = crate::cluster::parse_swarm(get("SWARM"));
     (r.cluster.kube, r.cluster.kube_error) = crate::cluster::parse_kube(get("KUBE"));
+    if r.sensors.is_empty() && r.os_type == "Darwin" {
+        r.sensors_note = Some(MACOS_SENSORS.into());
+    }
     r
 }
+
+/// Why a Mac shows no sensors (#193): macOS has no `/sys`, and its readings
+/// need administrator rights (`powermetrics`) or private system interfaces.
+pub const MACOS_SENSORS: &str =
+    "not available on macOS (temperatures and fans need administrator rights there)";
 
 fn unquote(v: &str) -> String {
     v.trim().trim_matches('"').trim_matches('\'').to_string()
@@ -294,7 +303,7 @@ pub fn parse_ip(lines: &[String]) -> Vec<NetAddr> {
     out
 }
 
-fn plausible_temp(c: f32) -> bool {
+pub(crate) fn plausible_temp(c: f32) -> bool {
     c > -40.0 && c < 150.0 && c != 0.0
 }
 
@@ -345,6 +354,45 @@ pub fn parse_sensors(thermal: &[String], hwmon: &[String]) -> Vec<Sensor> {
                 label: kind.to_string(),
                 value: c,
             });
+        }
+    }
+    out
+}
+
+/// `nvidia-smi --query-gpu=index,name,temperature.gpu,fan.speed,power.draw
+/// --format=csv,noheader,nounits` lines (#193) → temperature, fan % and power
+/// per GPU. `[N/A]` fields (laptops have no fan reading) are left out. The
+/// name may hold commas, so the numbers are taken from the end.
+pub fn parse_nvidia(lines: &[String]) -> Vec<Sensor> {
+    let mut out = Vec::new();
+    for l in lines {
+        let p: Vec<&str> = l.split(',').map(str::trim).collect();
+        if p.len() < 5 {
+            continue;
+        }
+        let Ok(index) = p[0].parse::<u32>() else {
+            continue;
+        };
+        let n = p.len();
+        let name = p[1..n - 3].join(", ");
+        let chip = format!("GPU {index}");
+        let num = |v: &str| v.parse::<f32>().ok().filter(|x| x.is_finite());
+        let mut push = |kind, value| {
+            out.push(Sensor {
+                kind,
+                chip: chip.clone(),
+                label: name.clone(),
+                value,
+            })
+        };
+        if let Some(t) = num(p[n - 3]).filter(|&t| plausible_temp(t)) {
+            push(SensorKind::Temperature, t);
+        }
+        if let Some(f) = num(p[n - 2]).filter(|f| (0.0..=100.0).contains(f)) {
+            push(SensorKind::FanPercent, f);
+        }
+        if let Some(w) = num(p[n - 1]).filter(|&w| w >= 0.0) {
+            push(SensorKind::Power, w);
         }
     }
     out
@@ -544,6 +592,60 @@ mod tests {
 
     const SAMPLE: &str = include_str!("../tests/fixtures/ubuntu_docker.txt");
     const BUSYBOX: &str = include_str!("../tests/fixtures/busybox_nodocker.txt");
+    const NVIDIA: &str = include_str!("../tests/fixtures/nvidia_gpu.txt");
+    const MACOS: &str = include_str!("../tests/fixtures/macos_nosensors.txt");
+
+    #[test]
+    fn nvidia_gpus_next_to_hwmon_sensors() {
+        let r = parse_report(NVIDIA);
+        let got: Vec<_> = r
+            .sensors
+            .iter()
+            .map(|s| (s.kind, s.chip.as_str(), s.label.as_str(), s.value))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (SensorKind::Temperature, "k10temp", "Tctl", 52.25),
+                (SensorKind::Temperature, "GPU 0", "NVIDIA RTX A4000", 61.0),
+                (SensorKind::FanPercent, "GPU 0", "NVIDIA RTX A4000", 41.0),
+                (SensorKind::Power, "GPU 0", "NVIDIA RTX A4000", 87.35),
+                // A comma in the name; no fan / power reading ([N/A]).
+                (
+                    SensorKind::Temperature,
+                    "GPU 1",
+                    "Example GPU, Rev. B",
+                    48.0
+                ),
+            ]
+        );
+        assert_eq!(r.sensors_note, None);
+        assert!(
+            parse_report(SAMPLE)
+                .sensors
+                .iter()
+                .all(|s| !s.chip.starts_with("GPU"))
+        );
+        let lines = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(
+            parse_nvidia(&lines(&[
+                "",
+                "garbage",
+                "x, a, 1, 2, 3",
+                "0, a, 999, 250, -1"
+            ]))
+            .is_empty(),
+            "headers, bad indexes and impossible values are skipped"
+        );
+    }
+
+    #[test]
+    fn macos_says_why_sensors_are_empty() {
+        let r = parse_report(MACOS);
+        assert!(r.sensors.is_empty());
+        assert_eq!(r.sensors_note.as_deref(), Some(MACOS_SENSORS));
+        assert_eq!(parse_report(BUSYBOX).sensors_note, None, "Linux: no note");
+    }
 
     #[test]
     fn maintenance_from_fixture_and_other_package_managers() {
