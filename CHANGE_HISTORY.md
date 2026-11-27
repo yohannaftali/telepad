@@ -2,6 +2,13 @@
 
 Newest first.
 
+## [2026-11-27] — Telepad 0.9.15
+- #193 Sensors: NVIDIA graphics cards (nvidia-smi) on hosts and on Windows My Computer; LibreHardwareMonitor readings when it happens to run; a note says why Sensors is empty (Windows without CPU / board temperatures, macOS)
+- #198 My Computer reads in about 1.5 s instead of ~19 s with Docker Desktop (container IPs per network instead of inspecting each container)
+- #203 Editor: click LF / CRLF to choose the line ending; click the encoding to Reopen or Save with another encoding; files that are not UTF-8 open (as Windows-1252) instead of being refused
+- #204 Editor: Open… (Ctrl+O) opens another file of the same host or this computer as a new tab
+- #205 Editor: keyboard shortcut styles — VS Code, Sublime Text, JetBrains, Notepad++, Emacs, nano — with go to matching bracket, copy all, cut / copy / delete line, mark, save as, insert a file and a searchable shortcut list
+
 ## [2026-11-27] — Tested: #203, #204, #205 (editor: line endings and encodings, Open…, shortcut profiles)
 - Windows 11, release build, scratch Telepad (own database, made-up files; the owner's Telepad untouched), UI Automation + window captures; fmt, clippy `-D warnings`, `cargo test --workspace` green
 - #203: a Windows-1252 file opens with the "Not UTF-8" line and é / € right; CRLF → LF and Windows-1252 → UTF-8 then Ctrl+S wrote exactly `name=café
