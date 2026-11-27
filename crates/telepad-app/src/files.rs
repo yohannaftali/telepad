@@ -732,6 +732,8 @@ pub enum FmEffect {
         side: Side,
         path: String,
         load: Load,
+        /// Read as this encoding (Reopen with Encoding, #203); `None` = detect.
+        charset: Option<telepad_core::files::text::Charset>,
     },
     /// Plan Synchronize of `left` (this computer) with `right` (#131) →
     /// [`FmMsg::SyncPlanned`].

@@ -18,7 +18,7 @@ use telepad_app::workspace::{Win, WsMsg};
 use telepad_app::{Drafts, Model, Msg};
 use telepad_core::db::human_size;
 use telepad_core::files::syntax::{self, Lang, Tok};
-use telepad_core::files::text::{self, FindOpts, Indent};
+use telepad_core::files::text::{self, Charset, FindOpts, Indent};
 use telepad_core::files::time_text;
 
 use crate::editor_theme;
@@ -122,6 +122,7 @@ pub fn editor_page(
     }
     window(ui, s, &mut dr.editor, focused, out);
     question(ui, s, &dr.editor, out);
+    reopen_question(ui, s, out);
 }
 
 fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, out: &mut Vec<Msg>) {
@@ -269,6 +270,16 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
         }
         if let Some(err) = &t.error {
             ui.colored_label(red(), format!("{} {err}", icons::X_CIRCLE));
+        }
+        if t.guessed && t.state == TabState::Ready {
+            ui.colored_label(
+                usage_color(80.0),
+                format!(
+                    "{} Not UTF-8: opened as {}. If characters look wrong, click the encoding in the status bar ▸ Reopen with Encoding.",
+                    icons::WARNING,
+                    t.charset.name()
+                ),
+            );
         }
         if t.conflict.is_some() {
             conflict(ui, s, t, out);
@@ -924,15 +935,9 @@ fn status(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, dr: &EdDraft, out: &mut
         }
         let txt = dr.texts.get(&t.id).map(String::as_str).unwrap_or("");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(if t.bom { "UTF-8 with BOM" } else { "UTF-8" });
+            encoding_menu(ui, id, t, out);
             ui.separator();
-            let eol = ui.label(if t.crlf { "CRLF" } else { "LF" });
-            if t.mixed {
-                eol.on_hover_text(format!(
-                    "The file had both line endings; it is saved with {}",
-                    if t.crlf { "CRLF" } else { "LF" }
-                ));
-            }
+            eol_menu(ui, id, t, out);
             ui.separator();
             scheme_menu(ui, out);
             ui.separator();
@@ -969,6 +974,131 @@ fn status(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, dr: &EdDraft, out: &mut
 
 /// The language used for syntax colours (#183): every language, and Auto
 /// detect (from the name / first line). Only the colours change, not the file.
+/// Select End of Line Sequence (#203): LF (suggested) or CRLF.
+fn eol_menu(ui: &mut egui::Ui, id: u64, t: &EdTab, out: &mut Vec<Msg>) {
+    let name = |crlf: bool| if crlf { "CRLF" } else { "LF" };
+    let r = ui.menu_button(name(t.crlf), |ui| {
+        ui.label(RichText::new("Select End of Line Sequence").weak());
+        for (crlf, what) in [(false, "LF  (suggested)"), (true, "CRLF")] {
+            if ui.selectable_label(t.crlf == crlf, what).clicked() {
+                send(out, id, EdMsg::SetEol(t.id, crlf));
+                ui.close();
+            }
+        }
+    });
+    let hover = if t.mixed {
+        format!(
+            "The file had both line endings; it is saved with {}. Click to choose.",
+            name(t.crlf)
+        )
+    } else {
+        "Line ending the file is saved with: click to change (LF suggested)".to_string()
+    };
+    r.response.on_hover_text(hover);
+}
+
+/// The encoding (#203): Reopen with Encoding / Save with Encoding.
+fn encoding_menu(ui: &mut egui::Ui, id: u64, t: &EdTab, out: &mut Vec<Msg>) {
+    let filter_id = egui::Id::unique(("telepad-ed-enc-filter", id));
+    let r = ui.menu_button(t.format().encoding_label(), |ui| {
+        let mut filter: String = ui.data(|m| m.get_temp(filter_id)).unwrap_or_default();
+        ui.menu_button("Reopen with Encoding", |ui| {
+            if let Some(c) = encoding_list(ui, &mut filter, t.charset, false) {
+                send(out, id, EdMsg::ReopenWithEncoding(t.id, c.0));
+                ui.close();
+            }
+        })
+        .response
+        .on_hover_text("Read the file again from disk as another encoding");
+        ui.menu_button("Save with Encoding", |ui| {
+            if let Some((c, bom)) = encoding_list(ui, &mut filter, t.charset, true) {
+                send(out, id, EdMsg::SaveWithEncoding(t.id, c, bom));
+                ui.close();
+            }
+        })
+        .response
+        .on_hover_text("The encoding the next Save writes");
+        ui.data_mut(|m| m.insert_temp(filter_id, filter));
+    });
+    r.response
+        .on_hover_text("Encoding: click to reopen or save the file in another encoding");
+}
+
+/// A searchable list of encodings; `save` adds "UTF-8 with BOM" (UTF-16 is
+/// always written with its byte order mark).
+fn encoding_list(
+    ui: &mut egui::Ui,
+    filter: &mut String,
+    cur: Charset,
+    save: bool,
+) -> Option<(Charset, bool)> {
+    ui.add(
+        egui::TextEdit::singleline(filter)
+            .hint_text("Search encodings")
+            .desired_width(220.0),
+    );
+    let needle = filter.to_lowercase();
+    let mut rows: Vec<(Charset, bool, String)> = Vec::new();
+    for c in Charset::all() {
+        let bom = save && c.bom().is_some() && c != Charset::Utf8;
+        rows.push((c, bom, c.name()));
+        if save && c == Charset::Utf8 {
+            rows.push((c, true, "UTF-8 with BOM".into()));
+        }
+    }
+    let mut pick = None;
+    egui::ScrollArea::vertical()
+        .max_height(320.0)
+        .show(ui, |ui| {
+            for (c, bom, name) in rows {
+                if !needle.is_empty() && !name.to_lowercase().contains(&needle) {
+                    continue;
+                }
+                let marked = c == cur && (!save || c != Charset::Utf8 || !bom);
+                if ui.selectable_label(marked, &name).clicked() {
+                    pick = Some((c, bom));
+                }
+            }
+        });
+    pick
+}
+
+/// Reopen with Encoding of a tab with unsaved changes (#203).
+fn reopen_question(ui: &mut egui::Ui, s: &FileSession, out: &mut Vec<Msg>) {
+    let id = s.id;
+    let Some((tab, charset)) = s.editor.reopen_ask else {
+        return;
+    };
+    let name = s
+        .editor
+        .tab(tab)
+        .map(|t| t.name.clone())
+        .unwrap_or_default();
+    let modal = egui::Modal::new(egui::Id::unique(("telepad-ed-reopen", id))).show(ui.ctx(), |ui| {
+        ui.set_width(440.0);
+        ui.heading(il(icons::WARNING, "Reopen with Encoding?"));
+        ui.label(format!(
+            "{name} has changes that are not saved. Reopening it as {} replaces them with the file's text.",
+            charset.name()
+        ));
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add(egui::Button::new(act_text(Act::Danger, "Discard and reopen")))
+                .clicked()
+            {
+                send(out, id, EdMsg::ReopenAnswer(true));
+            }
+            if ui.button("Keep editing").clicked() {
+                send(out, id, EdMsg::ReopenAnswer(false));
+            }
+        });
+    });
+    if modal.should_close() {
+        send(out, id, EdMsg::ReopenAnswer(false));
+    }
+}
+
 fn lang_menu(
     ui: &mut egui::Ui,
     salt: impl std::hash::Hash + std::fmt::Debug,
@@ -1493,22 +1623,16 @@ pub fn embedded(
     let lang: Lang = ui.data(|m| m.get_temp(lang_slot)).unwrap_or(given);
     dr.texts.insert(TAB, std::mem::take(text));
     let t = EdTab {
-        id: TAB,
-        side: Side::Remote,
-        path: name.to_string(),
-        name: name.to_string(),
         lang,
         indent,
-        state: TabState::Ready,
-        crlf: false,
-        mixed: false,
-        bom: false,
-        stamp: None,
         saved: saved.to_string(),
-        saving: None,
-        error: None,
-        conflict: None,
-        close_after_save: false,
+        ..EdTab::new(
+            TAB,
+            Side::Remote,
+            name.to_string(),
+            name.to_string(),
+            TabState::Ready,
+        )
     };
     if focused {
         let sc = |m: Modifiers, k: Key| {

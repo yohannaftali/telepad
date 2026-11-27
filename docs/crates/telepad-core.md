@@ -76,7 +76,7 @@ outside libraries: [DEPENDENCIES.md](../DEPENDENCIES.md)
 
 | Module | What it does |
 |---|---|
-| `files/` | Own SFTP v3 client (`sftp.rs`), `scp -O` fallback, rsync, transfer planning and copying via `.telepad-part`, file operations (`ops.rs`), the editor's load / save (`edit.rs`), text helpers incl. regex find / replace (`text.rs`), syntax lexer (`syntax.rs`), directory compare and sync (`compare.rs`) |
+| `files/` | Own SFTP v3 client (`sftp.rs`), `scp -O` fallback, rsync, transfer planning and copying via `.telepad-part`, file operations (`ops.rs`), the editor's load / save (`edit.rs`), text helpers incl. regex find / replace and encodings (`text.rs`, `charset.rs`, #203), syntax lexer (`syntax.rs`), directory compare and sync (`compare.rs`) |
 | `db/` | Database browser: detect databases on a host (`detect.rs`), `ssh -N -L` tunnels (`tunnel.rs`), MySQL / PostgreSQL sessions (`client.rs`), SQL quoting and checks (`sql.rs`), DDL (`ddl.rs`), passwords in the OS store (`secret.rs`), export / import CSV, SQL, Excel (`io.rs`) |
 | `portainer.rs` | Portainer API client over an SSH tunnel: own HTTP/1.1 client, TLS via `rustls` with a pinned certificate, token in the OS password store, parsers, stack and container actions |
 | `table_export.rs` | Table exports: CSV, JSON, Excel (`rust_xlsxwriter`), PDF (`pdf-writer` + `ttf-parser`, fonts passed in by the caller) |

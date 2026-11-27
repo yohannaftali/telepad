@@ -5689,6 +5689,7 @@ dependencies = [
  "cbc 0.1.2",
  "csv",
  "ed25519-dalek",
+ "encoding_rs",
  "hmac 0.12.1",
  "keyring",
  "miniz_oxide 0.8.9",

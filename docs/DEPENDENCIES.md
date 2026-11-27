@@ -37,6 +37,7 @@ library at all in `telepad-app`), and add an entry here in the same PR.
 | [serde / serde_json](#serde-and-serde_json) | core, check | JSON import / export, `--json`, Portainer API, saved facts |
 | [thiserror](#thiserror) | core | typed error enums |
 | [regex](#regex) | core | editor find / replace |
+| [encoding_rs](#encoding_rs) | core | editor Reopen / Save with Encoding |
 | [ureq](#ureq) | core | self-update HTTPS requests |
 | [semver](#semver) | core | version comparison (updates, Portainer minimum) |
 | [self-replace](#self-replace) | core | replacing the running executable |
@@ -189,6 +190,23 @@ and `known_hosts` work exactly as in their terminal.
   case-insensitivity as an option, `regex::escape` for plain text, `NoExpand` when the
   replacement must be taken literally. The parsers of collected output do **not** use regex —
   they are plain string splitting, which is faster and easier to test.
+
+### encoding_rs
+
+- **What:** the character-encoding library used by Firefox: decoders and encoders for the
+  WHATWG encodings (Windows-125x, ISO-8859-x, KOI8, Shift_JIS, EUC-JP, GBK, GB18030, Big5,
+  EUC-KR, …).
+- **Who:** `telepad-core` (it was already in the build through another library).
+- **Where:** `files/charset.rs` (`Charset::Other`), used by `files/text.rs` (`decode_with`,
+  `encode_as`).
+- **When:** the editor opens a file that is not UTF-8 (read as Windows-1252), Reopen with
+  Encoding, Save with Encoding (#203).
+- **Why:** correct, fast tables for every common legacy encoding without writing them by hand.
+- **How:** `decode_without_bom_handling_and_without_replacement` (invalid bytes are an error,
+  never silently replaced) and `encode` checked character by character so characters the
+  encoding cannot store are listed instead of written as `&#…;`. UTF-8, UTF-16 and ISO-8859-1
+  are done in `charset.rs` itself: the WHATWG tables read ISO-8859-1 as Windows-1252 and have
+  no UTF-16 encoder.
 
 ## Network, TLS and updates
 

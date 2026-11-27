@@ -97,6 +97,7 @@ enum FileJob {
         side: Side,
         path: String,
         load: Load,
+        charset: Option<telepad_core::files::text::Charset>,
     },
     Save {
         tab: u64,
@@ -1097,6 +1098,7 @@ impl Runtime {
                                 side,
                                 path,
                                 load,
+                                charset,
                             } => {
                                 let read = match (on(side), sftp.as_mut()) {
                                     (Side::Local, _) => edit::read_local(&path),
@@ -1104,7 +1106,7 @@ impl Runtime {
                                     (Side::Remote, None) => Err("Needs SFTP on the host".into()),
                                 };
                                 let result = read.and_then(|(bytes, stamp)| {
-                                    text::decode(&bytes).map(|doc| (doc, stamp))
+                                    text::decode_with(&bytes, charset).map(|doc| (doc, stamp))
                                 });
                                 send(fm(FmMsg::Editor {
                                     id,
@@ -1386,6 +1388,7 @@ impl Runtime {
                 side,
                 path,
                 load,
+                charset,
             } => self.files.get(&id).and_then(|w| {
                 w.jobs
                         .send(FileJob::Load {
@@ -1393,6 +1396,7 @@ impl Runtime {
                             side,
                             path,
                             load,
+                            charset,
                         })
                         .err()
                         .map(|_| {
