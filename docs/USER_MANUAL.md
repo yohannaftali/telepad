@@ -1442,9 +1442,10 @@ looks and works like VS Code. One editor window per file window: each file is a 
 of this computer and of the host side by side (the tab's icon says which; hover it for the
 full path). Opening a file that already has a tab switches to it.
 
-- **Refused files** show the reason in their tab instead of the text: binary files, files
-  that are not UTF-8 text, and files over 10 MiB (download them instead). **Close tab**
-  closes it.
+- **Refused files** show the reason in their tab instead of the text: binary files and files
+  over 10 MiB (download them instead). **Close tab** closes it. A text file that is not UTF-8
+  opens as **Windows-1252** with a yellow line saying so; if characters look wrong, use
+  **Reopen with Encoding** (below).
 - **Look**: light or dark with Telepad's theme, line numbers, the line with the cursor
   highlighted, monospace font, colours by language. The language comes from the file name
   (`.sh`, `.yml` / `.yaml`, `.json`, `.toml`, `.ini` / `.conf` / `.cnf`, `.env`, `Dockerfile`,
@@ -1455,8 +1456,24 @@ full path). Opening a file that already has a tab switches to it.
   or Ctrl+W) closes it.
 - **Status bar**: *Saved* / *Not saved* / *Saving…*, then `Ln 12, Col 5` (and how many
   characters are selected), the indentation (*Spaces: 2* or *Tab size: 4*, found in the file),
-  the language, the line endings (**LF** or **CRLF**) and the encoding (**UTF-8**, or **UTF-8
-  with BOM**).
+  the language, the line endings (**LF** or **CRLF**) and the encoding (**UTF-8**, **UTF-8
+  with BOM**, **UTF-16 LE**, **Windows-1252**, …).
+- **Line endings** (#203): click **LF** / **CRLF** ▸ *Select End of Line Sequence*: **LF**
+  (suggested; Linux, macOS and most tools) or **CRLF** (Windows). The tab shows *Not saved*;
+  **Save** writes every line with the chosen ending. A file that had both shows a hover note
+  and is saved with the one it had most of.
+- **Encoding** (#203): click the encoding:
+  - **Reopen with Encoding** reads the file again from disk / the host as the encoding you
+    pick (searchable list: UTF-8, UTF-16 LE / BE, ISO-8859-1, Windows-1250 … 1258,
+    ISO-8859-x, KOI8, Shift_JIS, GBK, Big5, EUC-KR, …). With unsaved changes it asks first:
+    **Discard and reopen** or **Keep editing**.
+  - **Save with Encoding** sets the encoding the next **Save** writes (also **UTF-8 with
+    BOM**; UTF-16 is written with its byte order mark). The tab shows *Not saved*. If the
+    text has characters that encoding cannot store, Save is refused and the red line names
+    each one (*line 3, column 9 '€'*) — nothing is replaced with `?`; pick another encoding
+    or change those characters.
+  - UTF-8 and UTF-16 files with a byte order mark are recognised by it; other files are read
+    as UTF-8, else as Windows-1252.
 - **Colour scheme** (#183): the palette button in the status bar (also in the Portainer stack
   editor's header and ☰ ▸ Settings ▸ **Editor colours**) picks the editor's colours for every
   editor: **Follow app theme** (the default: Dark Modern in the dark theme, Light Modern in the

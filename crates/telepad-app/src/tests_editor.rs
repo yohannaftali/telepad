@@ -585,3 +585,94 @@ fn indentation_is_detected_set_and_converted_without_saving() {
         "a:\n\tb: 1\n  c:\n    d: 2\n"
     );
 }
+
+#[test]
+fn line_ending_and_encoding_are_chosen_and_saved() {
+    use telepad_core::files::text::{Charset, GUESS};
+    let (mut s, id) = window(Mode::Sftp);
+    let tab = open_compose(&mut s, id, "name: café\n");
+    let dirty = |s: &mut State| {
+        let t = editor(s).tab(tab).unwrap().clone();
+        edraft(s, id).dirty(&t)
+    };
+    assert!(!dirty(&mut s));
+    // CRLF → LF (#203): an unsaved change on its own; Save writes LF.
+    ed(&mut s, id, EdMsg::SetEol(tab, false));
+    assert!(dirty(&mut s));
+    let fx = ed(&mut s, id, EdMsg::Save(tab));
+    let [FmEffect::Save { bytes, .. }] = &fx[..] else {
+        panic!("{fx:?}")
+    };
+    assert_eq!(bytes, "name: café\n".as_bytes());
+    ed(
+        &mut s,
+        id,
+        EdMsg::Saved {
+            tab,
+            result: Ok(stamp(41, 101)),
+        },
+    );
+    assert!(!dirty(&mut s));
+    // Save with Encoding: ISO-8859-1 writes é as one byte.
+    ed(
+        &mut s,
+        id,
+        EdMsg::SaveWithEncoding(tab, Charset::Latin1, true),
+    );
+    assert!(dirty(&mut s));
+    assert!(!editor(&s).tab(tab).unwrap().bom, "ISO-8859-1 has no BOM");
+    let fx = ed(&mut s, id, EdMsg::Save(tab));
+    assert!(matches!(&fx[..], [FmEffect::Save { bytes, .. }] if bytes == b"name: caf\xE9\n"));
+    ed(
+        &mut s,
+        id,
+        EdMsg::Saved {
+            tab,
+            result: Ok(stamp(42, 102)),
+        },
+    );
+    // A character the encoding cannot store: Save is refused, never replaced.
+    edraft(&mut s, id).texts.insert(tab, "price: 5 €\n".into());
+    let fx = ed(&mut s, id, EdMsg::Save(tab));
+    assert!(fx.is_empty());
+    let err = editor(&s).tab(tab).unwrap().error.clone().unwrap();
+    assert!(err.contains("line 1, column 10 '€'"), "{err}");
+    // Reopen with Encoding with unsaved changes asks first.
+    let fx = ed(&mut s, id, EdMsg::ReopenWithEncoding(tab, Charset::Utf8));
+    assert!(fx.is_empty());
+    assert_eq!(editor(&s).reopen_ask, Some((tab, Charset::Utf8)));
+    assert!(ed(&mut s, id, EdMsg::ReopenAnswer(false)).is_empty());
+    assert_eq!(editor(&s).reopen_ask, None);
+    ed(&mut s, id, EdMsg::ReopenWithEncoding(tab, Charset::Utf8));
+    let fx = ed(&mut s, id, EdMsg::ReopenAnswer(true));
+    assert!(matches!(
+        &fx[..],
+        [FmEffect::Load {
+            load: Load::Reload,
+            charset: Some(Charset::Utf8),
+            ..
+        }]
+    ));
+    // A guessed file: reloads detect again; reading it back clears the guess.
+    ed(
+        &mut s,
+        id,
+        EdMsg::Loaded {
+            tab,
+            load: Load::Reload,
+            result: Ok((
+                Doc {
+                    text: "x".into(),
+                    charset: GUESS,
+                    guessed: true,
+                    ..Default::default()
+                },
+                stamp(43, 1),
+            )),
+        },
+    );
+    let t = editor(&s).tab(tab).unwrap();
+    assert!(t.guessed && t.charset == GUESS && !dirty(&mut s));
+    let fx = ed(&mut s, id, EdMsg::Reload(tab));
+    assert!(matches!(&fx[..], [FmEffect::Load { charset: None, .. }]));
+}

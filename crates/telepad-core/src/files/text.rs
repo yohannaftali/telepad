@@ -6,6 +6,8 @@ use std::ops::Range;
 
 use regex::{NoExpand, Regex, RegexBuilder};
 
+pub use crate::files::charset::Charset;
+
 /// Larger files are refused (download them instead).
 pub const MAX_EDIT: u64 = 10 * 1024 * 1024;
 
@@ -18,9 +20,48 @@ pub struct Doc {
     pub crlf: bool,
     /// Both `\r\n` and `\n` were found (saved with the more common one).
     pub mixed: bool,
-    /// Starts with a UTF-8 byte order mark (kept when saving).
+    /// Starts with a byte order mark (kept when saving).
+    pub bom: bool,
+    /// What the bytes were read as (#203).
+    pub charset: Charset,
+    /// Not valid UTF-8 and no byte order mark: read as [`GUESS`], the usual
+    /// legacy encoding, until the user picks the right one.
+    pub guessed: bool,
+}
+
+/// What a file is written as: line ending and encoding (#203).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Format {
+    pub crlf: bool,
+    pub charset: Charset,
+    /// Write a byte order mark (UTF-8 / UTF-16 only).
     pub bom: bool,
 }
+
+impl Default for Format {
+    /// New files: LF, UTF-8 without a byte order mark.
+    fn default() -> Self {
+        Format {
+            crlf: false,
+            charset: Charset::Utf8,
+            bom: false,
+        }
+    }
+}
+
+impl Format {
+    /// "UTF-8", "UTF-8 with BOM", "Windows-1252", …
+    pub fn encoding_label(self) -> String {
+        if self.bom && self.charset == Charset::Utf8 {
+            "UTF-8 with BOM".into()
+        } else {
+            self.charset.name()
+        }
+    }
+}
+
+/// The encoding a file that is not UTF-8 is read as first.
+pub const GUESS: Charset = Charset::Other(encoding_rs::WINDOWS_1252);
 
 pub fn too_big(size: u64) -> String {
     format!(
@@ -29,21 +70,37 @@ pub fn too_big(size: u64) -> String {
     )
 }
 
-/// Bytes of a file → text; binary and non-UTF-8 files are refused with the reason.
+/// Bytes of a file → text. A byte order mark names the encoding (UTF-8,
+/// UTF-16); otherwise UTF-8, and text that is not valid UTF-8 is read as
+/// [`GUESS`] (`guessed`). Binary files are refused with the reason.
 pub fn decode(bytes: &[u8]) -> Result<Doc, String> {
+    decode_with(bytes, None)
+}
+
+/// Bytes of a file → text in a chosen encoding (Reopen with Encoding, #203),
+/// or detected as [`decode`] does when `charset` is `None`. A byte order mark
+/// of the chosen encoding is taken off and remembered.
+pub fn decode_with(bytes: &[u8], charset: Option<Charset>) -> Result<Doc, String> {
     if bytes.len() as u64 > MAX_EDIT {
         return Err(too_big(bytes.len() as u64));
     }
-    let (bom, body) = match bytes.strip_prefix(b"\xEF\xBB\xBF") {
-        Some(b) => (true, b),
-        None => (false, bytes),
+    let (cs, bom, body) = match (charset, Charset::sniff(bytes)) {
+        (None, Some((c, n))) => (c, true, &bytes[n..]),
+        (Some(c), Some((s, n))) if s == c => (c, true, &bytes[n..]),
+        (Some(c), _) => (c, false, bytes),
+        (None, None) => (Charset::Utf8, false, bytes),
     };
-    if body.iter().take(8192).any(|&b| b == 0) {
+    if !cs.wide() && body.iter().take(8192).any(|&b| b == 0) {
         return Err("Binary file: it cannot be edited here (download it instead)".into());
     }
-    let s = std::str::from_utf8(body).map_err(|_| {
-        "Not UTF-8 text: it cannot be edited here (download it instead)".to_string()
-    })?;
+    let (s, cs, guessed) = match cs.decode(body) {
+        Ok(s) => (s, cs, false),
+        Err(_) if charset.is_none() && cs == Charset::Utf8 && !bom => {
+            (GUESS.decode(body)?, GUESS, true)
+        }
+        Err(e) => return Err(e),
+    };
+    let s = s.as_str();
     let crlf_n = s.matches("\r\n").count();
     let lf_n = s.matches('\n').count() - crlf_n;
     Ok(Doc {
@@ -55,7 +112,31 @@ pub fn decode(bytes: &[u8]) -> Result<Doc, String> {
         crlf: crlf_n > 0 && crlf_n >= lf_n,
         mixed: crlf_n > 0 && lf_n > 0,
         bom,
+        charset: cs,
+        guessed,
     })
+}
+
+/// Text → the file's bytes in `f` (#203); `Err` names the characters the
+/// encoding cannot store (they are never replaced).
+pub fn encode_as(text: &str, f: Format) -> Result<Vec<u8>, String> {
+    let lf = text.replace("\r\n", "\n");
+    let body = if f.crlf { lf.replace('\n', "\r\n") } else { lf };
+    let bytes = f.charset.encode(&body).map_err(|bad| {
+        format!(
+            "{} cannot store {}: choose another encoding (Save with Encoding) or change those characters",
+            f.charset.name(),
+            crate::files::charset::describe_unmappable(&bad)
+        )
+    })?;
+    let mut out = Vec::with_capacity(bytes.len() + 3);
+    if f.bom
+        && let Some(m) = f.charset.bom()
+    {
+        out.extend_from_slice(m);
+    }
+    out.extend_from_slice(&bytes);
+    Ok(out)
 }
 
 /// Text → bytes with the file's line endings and BOM.
@@ -523,15 +604,69 @@ mod tests {
     }
 
     #[test]
-    fn binary_non_utf8_and_big_files_are_refused() {
+    fn binary_and_big_files_are_refused() {
         assert!(
             decode(b"PK\x03\x04\x00\x00")
                 .unwrap_err()
                 .contains("Binary")
         );
-        assert!(decode(b"caf\xe9").unwrap_err().contains("UTF-8"));
         let big = vec![b'a'; MAX_EDIT as usize + 1];
         assert!(decode(&big).unwrap_err().contains("10 MiB"));
+    }
+
+    #[test]
+    fn encodings_are_detected_guessed_and_chosen() {
+        // Not UTF-8: opened as Windows-1252, marked as a guess (#203).
+        let d = decode(b"caf\xe9\r\n").unwrap();
+        assert_eq!(
+            (d.text.as_str(), d.charset, d.guessed, d.crlf),
+            ("café\n", GUESS, true, true)
+        );
+        // UTF-16 with a byte order mark: NUL bytes are not "binary".
+        let d = decode(b"\xFF\xFEh\0i\0\n\0").unwrap();
+        assert_eq!(
+            (d.text.as_str(), d.charset, d.bom),
+            ("hi\n", Charset::Utf16Le, true)
+        );
+        // Reopen with a chosen encoding.
+        let d = decode_with(b"caf\xe9", Some(Charset::Latin1)).unwrap();
+        assert_eq!((d.text.as_str(), d.guessed), ("café", false));
+        assert!(
+            decode_with(b"caf\xe9", Some(Charset::Utf8))
+                .unwrap_err()
+                .contains("UTF-8")
+        );
+        let d = decode_with(b"\xEF\xBB\xBFok", Some(Charset::Utf8)).unwrap();
+        assert!(d.bom && d.text == "ok");
+    }
+
+    #[test]
+    fn encode_as_writes_line_endings_encoding_and_bom() {
+        let f = |crlf, charset, bom| Format { crlf, charset, bom };
+        assert_eq!(encode_as("a\nb", Format::default()).unwrap(), b"a\nb");
+        assert_eq!(
+            encode_as("a\r\nb", f(false, Charset::Utf8, false)).unwrap(),
+            b"a\nb"
+        );
+        assert_eq!(
+            encode_as("a\nb", f(true, Charset::Utf8, true)).unwrap(),
+            b"\xEF\xBB\xBFa\r\nb"
+        );
+        assert_eq!(
+            encode_as("é\n", f(false, Charset::Utf16Be, true)).unwrap(),
+            b"\xFE\xFF\x00\xE9\x00\n"
+        );
+        assert_eq!(encode_as("é", f(false, GUESS, false)).unwrap(), b"\xE9");
+        let err = encode_as("ok\n€ ✓", f(false, Charset::Latin1, false)).unwrap_err();
+        assert!(
+            err.contains("ISO-8859-1 cannot store line 2, column 1 '€'; line 2, column 3 '✓'"),
+            "{err}"
+        );
+        assert_eq!(Format::default().encoding_label(), "UTF-8");
+        assert_eq!(
+            f(false, Charset::Utf8, true).encoding_label(),
+            "UTF-8 with BOM"
+        );
     }
 
     #[test]

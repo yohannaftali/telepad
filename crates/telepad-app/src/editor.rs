@@ -8,7 +8,9 @@ use std::collections::HashMap;
 
 use telepad_core::files::edit::{SaveError, Stamp};
 use telepad_core::files::syntax::Lang;
-use telepad_core::files::text::{self, Doc, FindOpts, Indent, MAX_EDIT, convert_indent};
+use telepad_core::files::text::{
+    self, Charset, Doc, FindOpts, Format, Indent, MAX_EDIT, convert_indent,
+};
 use telepad_core::files::{Kind, local_join, sftp};
 
 use crate::files::{FileDraft, FileSession, FmEffect, Mode, Side, Status};
@@ -47,6 +49,15 @@ pub struct EdTab {
     pub crlf: bool,
     pub mixed: bool,
     pub bom: bool,
+    /// The encoding it is saved with (#203).
+    pub charset: Charset,
+    /// Not UTF-8: read as [`text::GUESS`] until the user picks one (#203).
+    pub guessed: bool,
+    /// Line ending and encoding as last loaded or saved: a different
+    /// [`EdTab::format`] is an unsaved change.
+    pub saved_format: Format,
+    /// Format being written now.
+    pub saving_format: Option<Format>,
     pub stamp: Option<Stamp>,
     /// The file's text as last loaded or saved (unsaved = draft differs).
     pub saved: String,
@@ -57,6 +68,42 @@ pub struct EdTab {
     pub conflict: Option<Conflict>,
     /// Close once the save finished (from the unsaved-changes question).
     pub close_after_save: bool,
+}
+
+impl EdTab {
+    pub fn new(id: TabId, side: Side, path: String, name: String, state: TabState) -> EdTab {
+        EdTab {
+            id,
+            side,
+            lang: Lang::detect(&path, ""),
+            indent: Indent::default(),
+            path,
+            name,
+            state,
+            crlf: false,
+            mixed: false,
+            bom: false,
+            charset: Charset::Utf8,
+            guessed: false,
+            saved_format: Format::default(),
+            saving_format: None,
+            stamp: None,
+            saved: String::new(),
+            saving: None,
+            error: None,
+            conflict: None,
+            close_after_save: false,
+        }
+    }
+
+    /// What Save writes: line ending, encoding, byte order mark (#203).
+    pub fn format(&self) -> Format {
+        Format {
+            crlf: self.crlf,
+            charset: self.charset,
+            bom: self.bom,
+        }
+    }
 }
 
 /// The unsaved-changes question.
@@ -86,6 +133,8 @@ pub struct FileEditor {
     /// Two tabs shown side by side with their differing lines marked
     /// (Diff of the file window, #131): (left pane's file, right pane's).
     pub compare: Option<(TabId, TabId)>,
+    /// Reopen with Encoding of a tab with unsaved changes asks first (#203).
+    pub reopen_ask: Option<(TabId, Charset)>,
     next: TabId,
 }
 
@@ -126,7 +175,9 @@ pub struct EdDraft {
 
 impl EdDraft {
     pub fn dirty(&self, t: &EdTab) -> bool {
-        t.state == TabState::Ready && self.texts.get(&t.id).is_some_and(|x| *x != t.saved)
+        t.state == TabState::Ready
+            && (self.texts.get(&t.id).is_some_and(|x| *x != t.saved)
+                || t.format() != t.saved_format)
     }
 }
 
@@ -192,6 +243,16 @@ pub enum EdMsg {
     },
     /// Leave the side-by-side compare (#131); both tabs stay open.
     EndCompare,
+    /// Select End of Line Sequence (#203): `true` = CRLF. Not saved until Save.
+    SetEol(TabId, bool),
+    /// Save with Encoding (#203): the encoding (and byte order mark) the
+    /// next Save writes.
+    SaveWithEncoding(TabId, Charset, bool),
+    /// Reopen with Encoding (#203): read the file again as `Charset`; asks
+    /// first when the tab has unsaved changes.
+    ReopenWithEncoding(TabId, Charset),
+    /// The answer to [`FileEditor::reopen_ask`]: `true` = discard and reopen.
+    ReopenAnswer(bool),
 }
 
 /// `true` when the file window should close now (after the question).
@@ -245,27 +306,11 @@ pub(crate) fn update(
                     side,
                     path: path.clone(),
                     load: Load::Open,
+                    charset: None,
                 });
                 TabState::Loading
             };
-            e.tabs.push(EdTab {
-                id: tab,
-                side,
-                lang: Lang::detect(&path, ""),
-                indent: Indent::default(),
-                path,
-                name,
-                state,
-                crlf: false,
-                mixed: false,
-                bom: false,
-                stamp: None,
-                saved: String::new(),
-                saving: None,
-                error: None,
-                conflict: None,
-                close_after_save: false,
-            });
+            e.tabs.push(EdTab::new(tab, side, path, name, state));
             e.active = Some(tab);
         }
         EdMsg::OpenPath { side, path } => {
@@ -286,25 +331,10 @@ pub(crate) fn update(
                 side,
                 path: path.clone(),
                 load: Load::Open,
+                charset: None,
             });
-            e.tabs.push(EdTab {
-                id: tab,
-                side,
-                lang: Lang::detect(&path, ""),
-                indent: Indent::default(),
-                path,
-                name,
-                state: TabState::Loading,
-                crlf: false,
-                mixed: false,
-                bom: false,
-                stamp: None,
-                saved: String::new(),
-                saving: None,
-                error: None,
-                conflict: None,
-                close_after_save: false,
-            });
+            e.tabs
+                .push(EdTab::new(tab, side, path, name, TabState::Loading));
             e.active = Some(tab);
         }
         EdMsg::Loaded { tab, load, result } => {
@@ -322,6 +352,9 @@ pub(crate) fn update(
                     t.crlf = doc.crlf;
                     t.mixed = doc.mixed;
                     t.bom = doc.bom;
+                    t.charset = doc.charset;
+                    t.guessed = doc.guessed;
+                    t.saved_format = t.format();
                     t.stamp = Some(stamp);
                     t.saved = doc.text.clone();
                     t.error = None;
@@ -360,9 +393,14 @@ pub(crate) fn update(
                 return false;
             };
             let written = t.saving.take();
+            let format = t.saving_format.take();
             match result {
                 Ok(stamp) => {
                     t.saved = written.unwrap_or_default();
+                    if let Some(f) = format {
+                        t.saved_format = f;
+                        t.guessed = false;
+                    }
                     t.stamp = Some(stamp);
                     t.error = None;
                     if t.close_after_save {
@@ -407,6 +445,7 @@ pub(crate) fn update(
                     side: t.side,
                     path: t.path.clone(),
                     load: Load::Reload,
+                    charset: reread_as(t),
                 });
             }
         }
@@ -423,6 +462,7 @@ pub(crate) fn update(
                     side: t.side,
                     path: t.path.clone(),
                     load: Load::Diff,
+                    charset: reread_as(t),
                 });
             }
         }
@@ -502,8 +542,75 @@ pub(crate) fn update(
                 t.indent = to;
             }
         }
+        EdMsg::SetEol(tab, crlf) => {
+            if let Some(t) = e.tab_mut(tab)
+                && t.state == TabState::Ready
+            {
+                t.crlf = crlf;
+                t.mixed = false;
+            }
+        }
+        EdMsg::SaveWithEncoding(tab, charset, bom) => {
+            if let Some(t) = e.tab_mut(tab)
+                && t.state == TabState::Ready
+            {
+                t.charset = charset;
+                t.bom = bom && charset.bom().is_some();
+                t.error = None;
+            }
+        }
+        EdMsg::ReopenWithEncoding(tab, charset) => {
+            let Some(t) = e.tab(tab) else {
+                return false;
+            };
+            if t.saving.is_some() || t.state == TabState::Loading {
+                return false;
+            }
+            if dr.dirty(t) {
+                e.active = Some(tab);
+                e.reopen_ask = Some((tab, charset));
+            } else {
+                reopen(id, e, tab, charset, fx);
+            }
+        }
+        EdMsg::ReopenAnswer(discard) => {
+            if let Some((tab, charset)) = e.reopen_ask.take()
+                && discard
+            {
+                reopen(id, e, tab, charset, fx);
+            }
+        }
     }
     false
+}
+
+/// The encoding to read a tab's file with again (Reload, Show diff): the one
+/// it is shown in, unless that was only a guess.
+fn reread_as(t: &EdTab) -> Option<Charset> {
+    (t.state == TabState::Ready && !t.guessed).then_some(t.charset)
+}
+
+/// Read the file again as `charset`, replacing the tab's text (#203).
+fn reopen(id: u64, e: &mut FileEditor, tab: TabId, charset: Charset, fx: &mut Vec<FmEffect>) {
+    let Some(t) = e.tab_mut(tab) else {
+        return;
+    };
+    t.conflict = None;
+    t.error = None;
+    let load = if matches!(t.state, TabState::Failed(_)) {
+        t.state = TabState::Loading;
+        Load::Open
+    } else {
+        Load::Reload
+    };
+    fx.push(FmEffect::Load {
+        id,
+        tab,
+        side: t.side,
+        path: t.path.clone(),
+        load,
+        charset: Some(charset),
+    });
 }
 
 /// Tabs are not valid YAML indentation (#182).
@@ -530,20 +637,30 @@ fn save(
         return;
     };
     // An unchanged file is not rewritten (unless overwriting on purpose).
-    if check && *text == t.saved {
+    if check && *text == t.saved && t.format() == t.saved_format {
         if t.close_after_save {
             t.close_after_save = false;
         }
         return;
     }
+    let bytes = match text::encode_as(text, t.format()) {
+        Ok(b) => b,
+        Err(why) => {
+            t.error = Some(why);
+            t.close_after_save = false;
+            e.close_window_after_save = false;
+            return;
+        }
+    };
     t.error = None;
     t.saving = Some(text.clone());
+    t.saving_format = Some(t.format());
     fx.push(FmEffect::Save {
         id,
         tab,
         side: t.side,
         path: t.path.clone(),
-        bytes: text::encode(text, t.crlf, t.bom),
+        bytes,
         expect: if check { t.stamp } else { None },
     });
 }
