@@ -2,6 +2,22 @@
 
 Newest first.
 
+## [2026-11-27] — Tested and merged: #193 GPU and Windows sensors
+- Owner decisions during testing: test on My Computer only (no hosts); keep reading LibreHardwareMonitor if it runs but never suggest it (note texts, manual and docs changed on the branch); CPU / board temperatures on Windows need a kernel driver, which Telepad will not ship; vendor-native driver-free sources (AMD ADLX, NVMe temperature) go to a follow-up issue
+- Windows 11 (AMD Ryzen 7 7700X, MSI MS-7D76, RTX 3070 Ti, not administrator), release build: fmt, clippy `-D warnings`, `cargo test --workspace` (core 247, app 220, gui 20); `telepad-check --local` and `--json`: GPU 0 temperature, fan %, power and the note; GUI on a scratch inventory via UI Automation and window captures: My Computer ▸ Sensors shows the note (no other program named), Fans with 0 % and the fan drawing, Temperatures, Power
+- Not verified: LibreHardwareMonitor running (owner declined third-party software; row mapping, NVIDIA de-duplication and merge covered by unit tests); a Linux host with an NVIDIA GPU and macOS (fixture tests; owner scoped testing to this computer); other targets not installed (CI builds Linux / macOS)
+
+## [2026-11-27] — feat(sensors): GPU and Windows sensors, and why Sensors is empty (#193)
+- Issue #193 addressed on GitHub (branch `193-sensors`)
+- Hosts and Linux My Computer: new guarded `===NVIDIA===` section (`nvidia-smi`, timeout 10 s, no sudo) → GPU temperature, fan % and power next to the hwmon sensors; hosts without `nvidia-smi` unchanged
+- Windows My Computer: `nvidia-smi`, then LibreHardwareMonitor's WMI namespace only if it happens to run (owner decision during testing: Telepad never needs or suggests another program, no message or manual text recommends it), then the `sysinfo` thermal zone; LibreHardwareMonitor's NVIDIA rows dropped when `nvidia-smi` reported the GPU; a direct WMI thermal-zone query tells "needs administrator" from "this PC publishes none" for the note
+- `HostReport::sensors_note` (macOS: "not available on macOS"; Windows: "this PC publishes no CPU or board temperatures to Windows (reading them needs a hardware driver, which Telepad does not install)" or "… only to administrators"); new `SensorKind::FanPercent` / `Power` with `SensorKind::format`; Sensors view shows the note, GPU fan % in Fans, a Power table; `telepad-check` prints units and the note
+- Files: core `script.sh`, `parse.rs` (+ fixtures `nvidia_gpu.txt`, `macos_nosensors.txt`), `model.rs`, `local.rs`, `local/sensors.rs` (new), `Cargo.toml` (`wmi` 0.18.4, Windows only, no new `windows` version); gui `views/sensors.rs`; check `main.rs`; `docs/USER_MANUAL.md` (My Computer wording fixed, new "Sensors on each computer", troubleshooting row), `docs/DEPENDENCIES.md` (wmi), `docs/crates/telepad-core.md`, `AGENTS.md`
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (core 247, app 220, gui 20); `telepad-check --local` on Windows 11 (MSI MS-7D76, RTX 3070 Ti, not administrator): GPU temperature / fan / power shown with the "only the GPU is readable …" note
+- Not verified yet: GUI (tester); LibreHardwareMonitor running (not installed here; covered by unit tests of the row mapping and merge); a Linux host with an NVIDIA GPU (fixture test only); macOS (fixture test only)
+- No screenshot: the Sensors section only has data on a real PC, and manual screenshots come from the demo lab
+- Found (not part of #193): `telepad-check --local` takes ≈ 19 s on this PC, same on `main`
+
 ## [2026-11-27] — feat(sensors): GPU and Windows sensors — nvidia-smi, LibreHardwareMonitor on Windows, and why Sensors is empty
 - Issue #193 created on GitHub
 - Scope: sensors (core script.sh, parse.rs, local.rs; gui views/sensors.rs; telepad-check --local; manual)

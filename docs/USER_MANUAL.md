@@ -7,7 +7,7 @@ How to use Telepad once it is [installed](../README.md#install). For a first run
 Every screenshot comes from a demo lab with made-up host names, keys and stacks on
 loopback and documentation addresses.
 
-**Contents:** [How Telepad works](#how-telepad-works) · [Window layout](#window-layout) · [Workspaces](#workspaces) · [Tables](#tables) · [Overview](#overview) · [Groups and clusters](#groups-and-clusters) · [Portainers](#portainers) · [Docker / Podman](#docker--podman) · [Kubernetes and Docker Swarm](#kubernetes-and-docker-swarm) · [Container management at a glance](#container-management-at-a-glance) · [My Computer](#my-computer) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Host Management](#host-management-compare-with-an-openssh-config) · [Files](#files-upload--download--manage--edit) · [Authorized keys](#authorized-keys-list-add-revoke) · [Database browser](#database-browser-mariadb--mysql--postgresql) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
+**Contents:** [How Telepad works](#how-telepad-works) · [Window layout](#window-layout) · [Workspaces](#workspaces) · [Tables](#tables) · [Overview](#overview) · [Groups and clusters](#groups-and-clusters) · [Portainers](#portainers) · [Docker / Podman](#docker--podman) · [Kubernetes and Docker Swarm](#kubernetes-and-docker-swarm) · [Container management at a glance](#container-management-at-a-glance) · [My Computer](#my-computer) · [Host detail](#host-detail) · [Refreshing](#refreshing) · [Adding, editing and removing hosts](#adding-editing-and-removing-hosts) · [Import and export](#import-and-export) · [Host Management](#host-management-compare-with-an-openssh-config) · [Files](#files-upload--download--manage--edit) · [Authorized keys](#authorized-keys-list-add-revoke) · [Database browser](#database-browser-mariadb--mysql--postgresql) · [Sensors on each computer](#sensors-on-each-computer) · [Fan speeds and BMC temperatures (IPMI)](#fan-speeds-and-bmc-temperatures-ipmi) · [Updates](#updates) · [Troubleshooting](#troubleshooting) · [Command line](#command-line)
 
 ## How Telepad works
 
@@ -759,8 +759,13 @@ exported, imported or written into `telepad.ssh_config`. It shows the same secti
   rights: on Windows from the system, `netstat -ano` (listening ports and their program),
   `reg query` (reboot pending) and the `docker` / `podman` command; on Linux and macOS
   the same script that runs on hosts, run locally.
-- On Windows, temperatures are shown only to administrators, so **Sensors** usually says
-  *not available*; pending updates are *unknown* (Windows Update is not asked).
+- On Windows, **Sensors** shows an NVIDIA graphics card's temperature, fan and power
+  (`nvidia-smi`, part of the NVIDIA driver) and the board's thermal zone when it has one.
+  CPU and board temperatures sit behind the hardware, where only a kernel driver can read
+  them; Telepad installs no driver, so many desktop PCs show only the graphics card (running
+  Telepad as administrator does not change that) and the section says why. See
+  [Sensors on each computer](#sensors-on-each-computer). Pending updates are *unknown*
+  (Windows Update is not asked).
 - **Open Terminal** opens a shell of this computer in a new terminal window, in your home
   folder (Windows Terminal, else PowerShell; Terminal on macOS; the first terminal
   emulator found on Linux).
@@ -793,9 +798,12 @@ of being cut off. Below that:
 - **Usage**: CPU, Memory and Swap bars.
 - **Disks**: every mount with size, used and free space.
 - **Network**: interfaces and their IP addresses.
-- **Sensors**: temperatures and fan speeds. Fans spin faster in the drawing the faster
-  they run. On a physical server whose BMC is not readable yet, **Set up BMC access…**
-  appears (see [Fan speeds and BMC temperatures](#fan-speeds-and-bmc-temperatures-ipmi)).
+- **Sensors**: temperatures, fan speeds (RPM, or % for graphics cards) and graphics card
+  power. Fans spin faster in the drawing the faster they run. When readings are missing, a
+  line under the title says why (for example *not available on macOS*). On a physical server
+  whose BMC is not readable yet, **Set up BMC access…** appears (see
+  [Fan speeds and BMC temperatures](#fan-speeds-and-bmc-temperatures-ipmi)); what each kind
+  of computer shows is in [Sensors on each computer](#sensors-on-each-computer).
 - Under the description: when the OS / CPU facts and the addresses / ports / updates were
   last read (see [Refreshing](#refreshing)).
 - **Docker**: runtime version, management (for example a Portainer agent), compose
@@ -1877,6 +1885,29 @@ the top of the panel. Drag its top edge to make it taller. Passwords in `IDENTIF
 `PASSWORD '…'` and `PASSWORD('…')` are written as `'***'`; connection passwords are never
 logged. The log is kept in `history.db` with the [transfer history](#transfer-history).
 
+## Sensors on each computer
+
+Telepad reads sensors read-only and without administrator rights. What appears depends on
+what the computer publishes to a normal user:
+
+| Computer | Sensors shows | Where it comes from |
+|---|---|---|
+| Linux host or My Computer on Linux | CPU (Intel, AMD), NVMe drives, AMD graphics cards, board fans when the board's sensor driver is loaded (often after `sensors-detect` once) | `/sys/class/hwmon`, `/sys/class/thermal` |
+| Linux with an NVIDIA graphics card | the above plus the card's temperature, fan % and power | `nvidia-smi` (the NVIDIA driver publishes nothing in `/sys`) |
+| Physical server with a BMC | fans and inlet / exhaust temperatures, after the one-time setup | `ipmitool` (see below) |
+| Windows (My Computer) with an NVIDIA graphics card | the card's temperature, fan % and power | `nvidia-smi` (installed with the NVIDIA driver) |
+| Windows (My Computer), CPU and board | the ACPI thermal zone, if the board publishes one; many desktop boards do not | Windows (WMI) |
+| macOS | *not available on macOS* | macOS needs administrator rights for its sensors |
+| Virtual machine | usually nothing | VMs have no sensors |
+
+On Windows, CPU and board temperatures and fan speeds are read by the hardware's sensor
+chips, which only a kernel driver can reach. Telepad installs no driver and needs no other
+program, so when the board publishes no thermal zone, **Sensors** says why: *this PC
+publishes no CPU or board temperatures to Windows* (running as administrator would not help),
+or *Windows shows this PC's temperatures only to administrators*. If a hardware monitor that
+publishes its readings in WMI (LibreHardwareMonitor) happens to run, Telepad also shows those
+readings, read-only; a graphics card it reports and `nvidia-smi` also reports is shown once.
+
 ## Fan speeds and BMC temperatures (IPMI)
 
 CPU temperatures work without setup. Fans and inlet/exhaust temperatures on physical
@@ -1934,6 +1965,7 @@ also pauses automatic installs until the next start.
 | `connection timed out` + `(host answers ping …)` | The machine is up but SSH is blocked or not running. |
 | `no common SSH algorithm (legacy host)` | Add e.g. `KexAlgorithms +diffie-hellman-group1-sha1` under **Other ssh options**. |
 | Sensors: `ipmitool not installed` / `sudo rule missing` | Use **Set up BMC access…** on that host. |
+| My Computer Sensors: `this PC publishes no CPU or board temperatures to Windows` / `only the GPU is readable` | Expected on many desktop PCs: the board does not publish its temperatures to Windows, and reading them needs a hardware driver, which Telepad does not install ([Sensors on each computer](#sensors-on-each-computer)). |
 | Update check: `cannot reach GitHub` | No internet or a proxy blocks `api.github.com`; Telepad keeps working without updates. |
 | `Database from a newer Telepad` / `was upgraded by a newer Telepad` | A newer Telepad upgraded the database schema beyond what this copy supports. Your data is unchanged; click **Update Telepad** on that screen (or download the latest release) and restart. Newer databases with additive changes still open with a status-bar note (`database from a newer Telepad (schema n): some features need an update`) without touching the newer data. |
 

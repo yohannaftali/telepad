@@ -65,6 +65,13 @@ for h in /sys/class/hwmon/hwmon*; do
   done
 done
 
+echo "===NVIDIA==="
+# NVIDIA GPUs (#193): the proprietary driver publishes nothing in hwmon. Read-only, no sudo.
+if command -v nvidia-smi >/dev/null 2>&1; then
+  NT=""; command -v timeout >/dev/null 2>&1 && NT="timeout 10"
+  $NT nvidia-smi --query-gpu=index,name,temperature.gpu,fan.speed,power.draw     --format=csv,noheader,nounits 2>/dev/null
+fi
+
 echo "===IPMI==="
 # BMC sensors (Dell iDRAC etc.). /dev/ipmi0 is root-only, so this needs a sudoers rule
 # allowing exactly "ipmitool sdr type Fan" and "ipmitool sdr type Temperature".

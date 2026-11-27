@@ -1,0 +1,10 @@
+===HOSTNAME===
+mac01
+===UNAME===
+Darwin
+24.1.0
+arm64
+===THERMAL===
+===HWMON===
+===NVIDIA===
+===IPMI===
