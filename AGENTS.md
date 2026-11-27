@@ -379,3 +379,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #188 | docs: developer guide — how the egui UI is built (tables, searchable dropdown, pagination, editor) and how authorization and outside APIs work | closed | 2026-11-27 |
 | #193 | feat(sensors): GPU and Windows sensors — nvidia-smi, LibreHardwareMonitor on Windows, and why Sensors is empty | closed | 2026-11-27 |
 | #196 | feat(sensors): driver-free Windows sensors — AMD graphics via ADLX, NVMe drive temperature | open | 2026-11-27 |
+| #198 | fix(local): My Computer read takes ~19 s on Windows — docker inspect of every running container | open | 2026-11-27 |

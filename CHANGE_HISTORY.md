@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-27] — fix(local): My Computer read takes ~19 s on Windows — docker inspect of every running container
+- Issue #198 created on GitHub (found while testing #193)
+- Scope: local (core local.rs docker(), parse.rs; maybe script.sh DOCKERNET)
+- Labels: bug
+- Measured: `docker inspect` of 49 containers (44 running) 18.3 s; `docker network inspect` of all 19 networks 0.15 s
+
 ## [2026-11-27] — feat(sensors): driver-free Windows sensors — AMD graphics via ADLX, NVMe drive temperature
 - Issue #196 created on GitHub (follow-up of #193, owner decision: no kernel driver, no third-party program)
 - Scope: sensors (core local/sensors.rs, platform.rs FFI; manual)
