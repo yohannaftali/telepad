@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-27] — docs: one page per crate and a guide to the outside libraries
+- Documentation only, no release
+- New docs/crates/telepad-core.md, telepad-app.md, telepad-gui.md, telepad-check.md: role, dependencies, rules, modules by area, how the other crates use it, how to extend it, tests (telepad-check: commands and exit codes)
+- New docs/DEPENDENCIES.md: every direct outside library (eframe / egui, egui_extras, rfd, arboard, rusqlite, serde, thiserror, regex, ureq, semver, self-replace, zip, sha2, rustls, keyring, mysql, postgres, csv, calamine, rust_xlsxwriter, pdf-writer / ttf-parser / miniz_oxide, ssh-key, the RustCrypto key crates, p12-keystore, pgp, sysinfo, windows-sys, winresource) — what, who, where, when, why, how; usages checked against the source
+- DEVELOPER_GUIDE "Crates" links the crate pages and DEPENDENCIES.md; README and AGENTS (docs convention) link them too
+
 ## [2026-11-26] — docs: refreshed README and user manual, new developer guide
 - Issues #187 and #188 addressed (documentation only, no release)
 - README: "Tour of 0.9.3" replaced by a tour without version numbers; new screenshots; link to the developer guide

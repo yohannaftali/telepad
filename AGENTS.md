@@ -229,9 +229,12 @@ in `update()` with a test → run the effect in `runtime.rs` → draw/emit it in
 - Conventional commits: `feat(collector): ...`, `fix(ui): ...`, referencing the issue (`#12`).
 - Docs live in `README.md` (overview, install, quick start), `docs/USER_MANUAL.md` (every screen,
   button and message), `docs/DEVELOPER_GUIDE.md` (how the code works: MVU, inner windows, the table
-  component, the editor, authorization and the Portainer API), `CONTRIBUTING.md` (build, workflow,
-  releasing) and `SECURITY.md`. A change to the UI or behaviour updates the manual in the same PR;
-  a change to a component the guide explains updates the guide. Manual screenshots come from a demo
+  component, the editor, authorization and the Portainer API), `docs/crates/<crate>.md` (one page per
+  workspace crate: modules, rules, how to extend it), `docs/DEPENDENCIES.md` (every outside library:
+  what, who, where, when, why, how), `CONTRIBUTING.md` (build, workflow, releasing) and `SECURITY.md`.
+  A change to the UI or behaviour updates the manual in the same PR; a change to a component the
+  guide explains updates the guide; a new module updates its crate page; a new or removed library
+  updates `docs/DEPENDENCIES.md`. Manual screenshots come from a demo
   lab (made-up hosts, keys and stacks), never the real inventory; no version-labelled sections.
 
 ## Configuration

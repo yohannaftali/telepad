@@ -7,7 +7,9 @@ and how Telepad authorizes against hosts, databases and the Portainer API.
 
 [`AGENTS.md`](../AGENTS.md) is the map (every module and its role, the conventions, the
 read-only rule and its exceptions); this guide is the walk-through. Build, test and release
-steps are in [`CONTRIBUTING.md`](../CONTRIBUTING.md). Paths below are relative to the
+steps are in [`CONTRIBUTING.md`](../CONTRIBUTING.md). Each crate has its own page in
+[`docs/crates/`](crates/), and every outside library is explained in
+[`DEPENDENCIES.md`](DEPENDENCIES.md). Paths below are relative to the
 repository root; names are the real ones in the code.
 
 **Contents:** [Crates](#crates) · [Model–View–Update](#modelviewupdate) ·
@@ -24,15 +26,29 @@ telepad-gui ──► telepad-app ──► telepad-core ◄── telepad-check
      └──────────────────────────────►┘
 ```
 
-| Crate | What lives there | Rules |
-|---|---|---|
-| `telepad-core` | everything that touches the outside world or is pure domain logic: ssh, the collection script and its parsers, SQLite stores, the database client, SFTP, the Portainer client, key formats, `platform.rs` | no GUI; OS-specific code only in `platform.rs` |
-| `telepad-app` | the state and all behaviour: `State { model, drafts }`, `Msg`, `Effect`, `update()` | no GUI, no I/O, time is a parameter |
-| `telepad-gui` | egui views, the runtime that executes effects, shared widgets, the table component, the editor | views never do I/O |
-| `telepad-check` | a headless CLI over `telepad-core` | — |
+The workspace (`Cargo.toml`, `[workspace] members`) has four crates. Arrows are the only
+allowed dependencies. Each crate has its own page with its modules, rules, how the others use
+it and how to extend it:
+
+| Crate | Builds | What lives there | Rules | Details |
+|---|---|---|---|---|
+| `telepad-core` | library | everything that touches the outside world or is pure domain logic: ssh, the collection script and its parsers, SQLite stores, the database client, SFTP, the Portainer client, key formats, `platform.rs` | no GUI; OS-specific code only in `platform.rs` | [docs/crates/telepad-core.md](crates/telepad-core.md) |
+| `telepad-app` | library | the state and all behaviour: `State { model, drafts }`, `Msg`, `Effect`, `update()` | no GUI, no I/O, no outside libraries, time is a parameter | [docs/crates/telepad-app.md](crates/telepad-app.md) |
+| `telepad-gui` | `telepad` | egui views, the runtime that executes effects, shared widgets, the table component, the editor | views never do I/O | [docs/crates/telepad-gui.md](crates/telepad-gui.md) |
+| `telepad-check` | `telepad-check` | a headless CLI over `telepad-core`: collect once as text / JSON, update check, Log info, My Computer, Portainers | read-only | [docs/crates/telepad-check.md](crates/telepad-check.md) |
+
+`cargo build` builds the two binaries (`default-members` = `telepad-gui`, `telepad-check`);
+`cargo test --workspace` tests all four.
 
 The rule that keeps this manageable: **all behaviour is in `telepad-app` and testable without
 a window, a network or a disk**; `telepad-gui` only draws and runs effects.
+
+**Outside libraries** — eframe / egui, egui_extras, arboard, rfd, regex, rusqlite, rustls,
+keyring, the database drivers, the export and key-format crates — are each described in
+[DEPENDENCIES.md](DEPENDENCIES.md): what it is, which crate and modules use it, when it runs,
+why Telepad uses it and how (features, API, rules). GUI libraries stay in `telepad-gui`,
+`telepad-app` has none, and everything else is in `telepad-core`. A PR that adds a library
+adds its entry there.
 
 ## Model–View–Update
 

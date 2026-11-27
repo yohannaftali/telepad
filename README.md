@@ -336,6 +336,11 @@ Everything else is in the [user manual](docs/USER_MANUAL.md).
 - [Developer guide](docs/DEVELOPER_GUIDE.md): how the code is built — the egui UI (inner windows, the table
   component with filters, value lists and paging, the editor), the Model–View–Update core, and
   how Telepad authorizes against hosts, databases and the Portainer API
+- Crates: [telepad-core](docs/crates/telepad-core.md), [telepad-app](docs/crates/telepad-app.md),
+  [telepad-gui](docs/crates/telepad-gui.md), [telepad-check](docs/crates/telepad-check.md) — what
+  each workspace crate holds, its rules and how to extend it
+- [Outside libraries](docs/DEPENDENCIES.md): every library Telepad uses (eframe / egui,
+  rusqlite, rustls, keyring, …) — what, who, where, when, why and how
 - [Contributing](CONTRIBUTING.md): building from source, reporting bugs, making a change, releasing
 - [Security](SECURITY.md): security model and how to report a vulnerability
 - [AGENTS.md](AGENTS.md): architecture and conventions
