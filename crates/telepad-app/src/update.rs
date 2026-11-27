@@ -75,6 +75,7 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             d.overview_cards = ui_prefs.overview_cards;
             d.theme = ui_prefs.theme;
             d.editor_scheme = ui_prefs.editor_scheme.clone();
+            d.editor_keymap = ui_prefs.editor_keymap.clone();
             m.ws_legacy = ui_prefs.workspace.clone();
             m.ws.sidebar_collapsed = ui_prefs.sidebar_collapsed;
             match prefs {
@@ -501,6 +502,12 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
         Msg::SetEditorScheme(key) => {
             if d.editor_scheme != key {
                 d.editor_scheme = key;
+                fx.push(Effect::SaveUiPrefs(d.ui_prefs(m)));
+            }
+        }
+        Msg::SetEditorKeymap(key) => {
+            if d.editor_keymap != key {
+                d.editor_keymap = key;
                 fx.push(Effect::SaveUiPrefs(d.ui_prefs(m)));
             }
         }

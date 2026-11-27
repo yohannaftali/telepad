@@ -770,3 +770,93 @@ fn open_dialog_needs_sftp_for_host_files() {
         (false, Some("Editing needs SFTP on the host"))
     );
 }
+
+#[test]
+fn save_as_asks_before_replacing_and_renames_the_tab() {
+    let (mut s, id) = window(Mode::Sftp);
+    let tab = open_compose(&mut s, id, "a: 1\n");
+    // Save as (#205): the folder dialog with the tab's name filled in.
+    let fx = ed(&mut s, id, EdMsg::ShowSaveAs);
+    assert!(matches!(&fx[..], [FmEffect::Browse { path, .. }] if path == "/srv/app"));
+    assert_eq!(edraft(&mut s, id).save_name, "docker-compose.yml");
+    let listing = vec![file("docker-compose.yml", 40), file("old.yml", 3)];
+    ed(&mut s, id, EdMsg::Browsed(Ok(("/srv/app".into(), listing))));
+    // An existing name asks first; nothing is written yet.
+    let fx = ed(&mut s, id, EdMsg::SaveAsPath("old.yml".into()));
+    assert!(fx.is_empty());
+    assert_eq!(
+        editor(&s).open.as_ref().unwrap().replace.as_deref(),
+        Some("/srv/app/old.yml")
+    );
+    let fx = ed(&mut s, id, EdMsg::SaveAsReplace);
+    assert!(
+        matches!(&fx[..], [FmEffect::Save { path, expect: None, .. }] if path == "/srv/app/old.yml")
+    );
+    assert!(editor(&s).open.is_none());
+    ed(
+        &mut s,
+        id,
+        EdMsg::Saved {
+            tab,
+            result: Ok(stamp(5, 9)),
+        },
+    );
+    let t = editor(&s).tab(tab).unwrap();
+    assert_eq!(
+        (t.path.as_str(), t.name.as_str()),
+        ("/srv/app/old.yml", "old.yml")
+    );
+    // A new name (or a full path) is written straight away.
+    ed(&mut s, id, EdMsg::ShowSaveAs);
+    ed(&mut s, id, EdMsg::Browsed(Ok(("/srv/app".into(), vec![]))));
+    let fx = ed(&mut s, id, EdMsg::SaveAsPath("/tmp/copy.yml".into()));
+    assert!(matches!(&fx[..], [FmEffect::Save { path, .. }] if path == "/tmp/copy.yml"));
+}
+
+#[test]
+fn insert_a_file_loads_it_for_the_cursor() {
+    let (mut s, id) = window(Mode::Sftp);
+    let tab = open_compose(&mut s, id, "a: 1\n");
+    ed(&mut s, id, EdMsg::ShowInsert);
+    ed(
+        &mut s,
+        id,
+        EdMsg::Browsed(Ok(("/srv/app".into(), vec![file("part.yml", 4)]))),
+    );
+    let fx = ed(&mut s, id, EdMsg::PickOpen("part.yml".into()));
+    assert!(
+        matches!(&fx[..], [FmEffect::Load { tab: t, load: Load::Insert, path, .. }] if *t == tab && path == "/srv/app/part.yml")
+    );
+    assert_eq!(editor(&s).tabs.len(), 1, "no new tab");
+    ed(
+        &mut s,
+        id,
+        EdMsg::Loaded {
+            tab,
+            load: Load::Insert,
+            result: Ok((
+                Doc {
+                    text: "b: 2\n".into(),
+                    ..Default::default()
+                },
+                stamp(4, 1),
+            )),
+        },
+    );
+    assert_eq!(edraft(&mut s, id).insert, Some((tab, "b: 2\n".to_string())));
+    // A refused file shows why on the tab; its text is untouched.
+    ed(
+        &mut s,
+        id,
+        EdMsg::Loaded {
+            tab,
+            load: Load::Insert,
+            result: Err("Binary file".into()),
+        },
+    );
+    assert_eq!(
+        editor(&s).tab(tab).unwrap().error.as_deref(),
+        Some("Binary file")
+    );
+    assert_eq!(edraft(&mut s, id).texts[&tab], "a: 1\n");
+}

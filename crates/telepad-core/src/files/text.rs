@@ -167,6 +167,88 @@ pub fn byte_to_char(text: &str, bi: usize) -> usize {
     text[..bi.min(text.len())].chars().count()
 }
 
+/// The whole lines a character range touches, with the last line's `\n`
+/// (#205: cut / copy / delete line when nothing is selected).
+pub fn line_span(text: &str, r: Range<usize>) -> Range<usize> {
+    let chars: Vec<char> = text.chars().collect();
+    let (a, b) = (r.start.min(chars.len()), r.end.min(chars.len()));
+    let mut start = a;
+    while start > 0 && chars[start - 1] != '\n' {
+        start -= 1;
+    }
+    // A selection that ends at the start of a line does not take that line.
+    let mut end = if b > a && chars[b - 1] == '\n' {
+        b - 1
+    } else {
+        b
+    };
+    while end < chars.len() && chars[end] != '\n' {
+        end += 1;
+    }
+    if end < chars.len() {
+        end += 1;
+    }
+    start..end
+}
+
+/// The bracket that pairs with the one at (or just before) character `at`
+/// (#205: go to matching bracket): `()`, `[]`, `{}`; brackets in strings
+/// and comments of `lang` are skipped. Returns the partner's index.
+pub fn matching_bracket(text: &str, lang: crate::files::syntax::Lang, at: usize) -> Option<usize> {
+    use crate::files::syntax::{Tok, highlight};
+    let chars: Vec<char> = text.chars().collect();
+    let mut code = vec![true; chars.len()];
+    let mut byte_to_char = Vec::with_capacity(text.len() + 1);
+    for (ci, c) in chars.iter().enumerate() {
+        for _ in 0..c.len_utf8() {
+            byte_to_char.push(ci);
+        }
+    }
+    byte_to_char.push(chars.len());
+    for (r, tok) in highlight(lang, text) {
+        if matches!(tok, Tok::Str | Tok::Comment) {
+            let (a, b) = (byte_to_char[r.start], byte_to_char[r.end.min(text.len())]);
+            code[a..b].iter_mut().for_each(|x| *x = false);
+        }
+    }
+    let pair = |c: char| match c {
+        '(' => Some((')', true)),
+        '[' => Some((']', true)),
+        '{' => Some(('}', true)),
+        ')' => Some(('(', false)),
+        ']' => Some(('[', false)),
+        '}' => Some(('{', false)),
+        _ => None,
+    };
+    let start = [at, at.wrapping_sub(1)]
+        .into_iter()
+        .find(|&i| i < chars.len() && code[i] && pair(chars[i]).is_some())?;
+    let open = chars[start];
+    let (close, forward) = pair(open)?;
+    let mut depth = 0usize;
+    let mut i = start;
+    loop {
+        if code[i] {
+            if chars[i] == open {
+                depth += 1;
+            } else if chars[i] == close {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+        }
+        if forward {
+            i += 1;
+            if i >= chars.len() {
+                return None;
+            }
+        } else {
+            i = i.checked_sub(1)?;
+        }
+    }
+}
+
 /// 1-based line and column of a character index.
 pub fn line_col(text: &str, ci: usize) -> (usize, usize) {
     let (mut line, mut col) = (1, 1);
@@ -612,6 +694,31 @@ mod tests {
         );
         let big = vec![b'a'; MAX_EDIT as usize + 1];
         assert!(decode(&big).unwrap_err().contains("10 MiB"));
+    }
+
+    #[test]
+    fn line_span_and_matching_bracket() {
+        use crate::files::syntax::Lang;
+        let t = "one\ntwo\nthree";
+        assert_eq!(line_span(t, 5..5), 4..8, "the line with its newline");
+        assert_eq!(line_span(t, 9..9), 8..13, "last line has no newline");
+        assert_eq!(line_span(t, 1..5), 0..8, "a selection over two lines");
+        assert_eq!(line_span(t, 0..4), 0..4, "ending at a line start");
+        // Brackets in strings and comments do not count.
+        let js = "f(a, \"(\", [1]) // )\n";
+        assert_eq!(matching_bracket(js, Lang::JavaScript, 1), Some(13));
+        assert_eq!(
+            matching_bracket(js, Lang::JavaScript, 14),
+            Some(1),
+            "just after the bracket"
+        );
+        assert_eq!(matching_bracket(js, Lang::JavaScript, 10), Some(12));
+        assert_eq!(
+            matching_bracket(js, Lang::JavaScript, 3),
+            None,
+            "not on a bracket"
+        );
+        assert_eq!(matching_bracket("{ (", Lang::Plain, 0), None, "unclosed");
     }
 
     #[test]

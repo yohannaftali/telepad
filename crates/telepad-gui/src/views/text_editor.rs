@@ -9,10 +9,12 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use eframe::egui::{
-    self, Color32, Key, KeyboardShortcut, Modifiers, RichText,
+    self, Color32, Key, Modifiers, RichText,
     text::{CCursor, CCursorRange, LayoutJob, TextFormat},
 };
-use telepad_app::editor::{Answer, Bar, EdDraft, EdMsg, EdTab, TabState, Unsaved, indent_allowed};
+use telepad_app::editor::{
+    Answer, Bar, EdDraft, EdMsg, EdTab, OpenMode, TabState, Unsaved, indent_allowed,
+};
 use telepad_app::files::{FileSession, FmMsg, Side};
 use telepad_app::workspace::{Win, WsMsg};
 use telepad_app::{Drafts, Model, Msg};
@@ -23,6 +25,7 @@ use telepad_core::files::time_text;
 
 use crate::editor_theme;
 use crate::icons::{self, label as il};
+use crate::keymap::{self, Cmd};
 use crate::widgets::{Act, act_text, usage_color};
 
 /// Larger texts are shown without colours (fast enough to type in).
@@ -134,61 +137,23 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
     };
     let tid = t.id;
     let ready = t.state == TabState::Ready;
-    // Shortcuts first: the text field would take Ctrl+H / Ctrl+W as edits.
-    if focused && e.ask.is_none() {
-        let sc = |m: Modifiers, k: Key| {
-            ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)))
-        };
-        if sc(Modifiers::COMMAND, Key::S) {
-            send(out, id, EdMsg::Save(tid));
-        }
-        if sc(Modifiers::COMMAND, Key::W) {
-            send(out, id, EdMsg::Close(tid));
-        }
-        if sc(Modifiers::COMMAND, Key::O) {
-            send(out, id, EdMsg::ShowOpen);
+    // Shortcuts first (#205: the chosen profile): the text field would take
+    // Ctrl+H / Ctrl+W as edits.
+    if focused && e.ask.is_none() && e.open.is_none() {
+        for c in take_keys(ui, id, tid, ready) {
+            match c {
+                Cmd::Save => send(out, id, EdMsg::Save(tid)),
+                Cmd::SaveAs if ready => send(out, id, EdMsg::ShowSaveAs),
+                Cmd::Open => send(out, id, EdMsg::ShowOpen),
+                Cmd::InsertFile if ready => send(out, id, EdMsg::ShowInsert),
+                Cmd::CloseTab => send(out, id, EdMsg::Close(tid)),
+                Cmd::Help => show_keymap_help(ui.ctx()),
+                c if ready => find_cmd(ui, id, tid, dr, c, true),
+                _ => {}
+            }
         }
         if ready {
-            let find = sc(Modifiers::COMMAND, Key::F);
-            let replace = sc(Modifiers::COMMAND, Key::H);
-            let goto = sc(Modifiers::COMMAND, Key::G);
-            if find || replace {
-                dr.bar = if replace { Bar::Replace } else { Bar::Find };
-                // A selection on one line becomes the search text.
-                if let (Some(r), Some(txt)) = (cursor_of(ui.ctx(), id, tid), dr.texts.get(&tid))
-                    && !r.is_empty()
-                {
-                    let (a, b) = (
-                        text::char_to_byte(txt, r.start),
-                        text::char_to_byte(txt, r.end),
-                    );
-                    if !txt[a..b].contains('\n') {
-                        dr.find = txt[a..b].to_string();
-                    }
-                }
-                focus_field(ui.ctx(), id, "find");
-            }
-            if goto {
-                dr.bar = Bar::Goto;
-                dr.goto.clear();
-                focus_field(ui.ctx(), id, "goto");
-            }
-            if dr.bar != Bar::None && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
-            {
-                dr.bar = Bar::None;
-                // Back in the text with the current match selected.
-                match current(ui.ctx(), id, tid) {
-                    Some(r) => select_later(ui.ctx(), id, tid, r, true),
-                    None => ui.memory_mut(|m| m.request_focus(edit_id(id, tid))),
-                }
-                set_current(ui.ctx(), id, tid, None);
-            }
-            if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F3)) {
-                step(ui.ctx(), id, tid, dr, true);
-            }
-            if ui.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::F3)) {
-                step(ui.ctx(), id, tid, dr, false);
-            }
+            escape_bar(ui, id, tid, dr);
         }
     }
     // Diff of the file window (#131): both files side by side.
@@ -251,7 +216,12 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
                 let dirty = dr.dirty(t);
                 if ui
                     .add_enabled(ready, egui::Button::new(il(icons::SEARCH, "Find")).small())
-                    .on_hover_text("Find (Ctrl+F), replace (Ctrl+H), go to line (Ctrl+G)")
+                    .on_hover_text(format!(
+                        "Find ({}), replace ({}), go to line ({})",
+                        keymap::keys_of(Cmd::Find),
+                        keymap::keys_of(Cmd::Replace),
+                        keymap::keys_of(Cmd::GotoLine)
+                    ))
                     .clicked()
                 {
                     dr.bar = Bar::Find;
@@ -262,7 +232,11 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
                         dirty && t.saving.is_none(),
                         egui::Button::new(il(icons::SAVE, "Save")).small(),
                     )
-                    .on_hover_text("Save (Ctrl+S)")
+                    .on_hover_text(format!(
+                        "Save ({}); Save as: {}",
+                        keymap::keys_of(Cmd::Save),
+                        keymap::keys_of(Cmd::SaveAs)
+                    ))
                     .clicked()
                 {
                     send(out, id, EdMsg::Save(tid));
@@ -270,8 +244,10 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
                 if ui
                     .add(egui::Button::new(il(icons::FOLDER, "Open…")).small())
                     .on_hover_text(format!(
-                        "Open another file of {} (Ctrl+O)",
-                        place(s, t.side)
+                        "Open another file of {} ({}); insert a file: {}",
+                        place(s, t.side),
+                        keymap::keys_of(Cmd::Open),
+                        keymap::keys_of(Cmd::InsertFile)
                     ))
                     .clicked()
                 {
@@ -944,6 +920,7 @@ fn status(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, dr: &EdDraft, out: &mut
         if let Some(n) = ui.ctx().data_mut(|m| m.get_temp::<usize>(replaced)) {
             ui.label(RichText::new(format!("{n} replaced")).weak());
         }
+        pending_hint(ui, id, t.id);
         if t.state != TabState::Ready {
             return;
         }
@@ -954,6 +931,8 @@ fn status(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, dr: &EdDraft, out: &mut
             eol_menu(ui, id, t, out);
             ui.separator();
             scheme_menu(ui, out);
+            ui.separator();
+            keymap_menu(ui, out);
             ui.separator();
             let detected = Lang::detect(&t.path, txt.lines().next().unwrap_or(""));
             if let Some(l) = lang_menu(ui, ("ed-lang", id, t.id), t.lang, detected) {
@@ -988,6 +967,324 @@ fn status(ui: &mut egui::Ui, s: &FileSession, t: &EdTab, dr: &EdDraft, out: &mut
 
 /// The language used for syntax colours (#183): every language, and Auto
 /// detect (from the name / first line). Only the colours change, not the file.
+/// This frame's shortcut commands of the chosen profile (#205). Text
+/// commands are only taken while the text has the focus and are left for
+/// [`code`] to apply; the others are returned.
+fn take_keys(ui: &mut egui::Ui, win: u64, tab: u64, ready: bool) -> Vec<Cmd> {
+    let ctx = ui.ctx().clone();
+    let pend_id = egui::Id::unique(("telepad-keymap-pending", win));
+    let mut pending: Vec<keymap::Stroke> = ctx.data(|m| m.get_temp(pend_id)).unwrap_or_default();
+    let text = ready && ctx.memory(|m| m.has_focus(edit_id(win, tab)));
+    let cmds = ui.input_mut(|i| keymap::matcher().take(i, &mut pending, text));
+    ctx.data_mut(|m| m.insert_temp(pend_id, pending));
+    let (on_text, other): (Vec<Cmd>, Vec<Cmd>) = cmds.into_iter().partition(|c| c.on_text());
+    if !on_text.is_empty() {
+        ctx.data_mut(|m| m.insert_temp(edit_id(win, tab).with("cmds"), on_text));
+    }
+    other
+}
+
+/// "Ctrl+X –" while the first key of a two-key shortcut waits (#205).
+fn pending_hint(ui: &mut egui::Ui, win: u64, tab: u64) {
+    let pend_id = egui::Id::unique(("telepad-keymap-pending", win));
+    let pending: Vec<keymap::Stroke> = ui.data(|m| m.get_temp(pend_id)).unwrap_or_default();
+    if !pending.is_empty() {
+        let keys: Vec<String> = pending.iter().map(|k| k.label()).collect();
+        ui.label(RichText::new(format!("{} –", keys.join(" "))).strong())
+            .on_hover_text("Waiting for the next key; Esc cancels");
+    }
+    let mark = ui
+        .data(|m| m.get_temp::<bool>(edit_id(win, tab).with("mark")))
+        .unwrap_or(false);
+    if mark {
+        ui.label(RichText::new("Mark set").strong())
+            .on_hover_text("Moving the cursor selects; the mark key or Esc unsets it");
+    }
+}
+
+/// Find / replace / go to line / next / previous (#205: from any profile).
+fn find_cmd(ui: &mut egui::Ui, win: u64, tab: u64, dr: &mut EdDraft, c: Cmd, editable: bool) {
+    match c {
+        Cmd::Find | Cmd::Replace => {
+            if c == Cmd::Replace && !editable {
+                return;
+            }
+            dr.bar = if c == Cmd::Replace {
+                Bar::Replace
+            } else {
+                Bar::Find
+            };
+            // A selection on one line becomes the search text.
+            if let (Some(r), Some(txt)) = (cursor_of(ui.ctx(), win, tab), dr.texts.get(&tab))
+                && !r.is_empty()
+            {
+                let (a, b) = (
+                    text::char_to_byte(txt, r.start),
+                    text::char_to_byte(txt, r.end),
+                );
+                if !txt[a..b].contains('\n') {
+                    dr.find = txt[a..b].to_string();
+                }
+            }
+            focus_field(ui.ctx(), win, "find");
+        }
+        Cmd::GotoLine => {
+            dr.bar = Bar::Goto;
+            dr.goto.clear();
+            focus_field(ui.ctx(), win, "goto");
+        }
+        Cmd::FindNext | Cmd::FindPrev => {
+            if dr.find.is_empty() {
+                dr.bar = Bar::Find;
+                focus_field(ui.ctx(), win, "find");
+            } else {
+                if dr.bar == Bar::None || dr.bar == Bar::Goto {
+                    dr.bar = Bar::Find;
+                }
+                step(ui.ctx(), win, tab, dr, c == Cmd::FindNext);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Esc closes the find bar and goes back to the text.
+fn escape_bar(ui: &mut egui::Ui, win: u64, tab: u64, dr: &mut EdDraft) {
+    if dr.bar != Bar::None && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        dr.bar = Bar::None;
+        // Back in the text with the current match selected.
+        match current(ui.ctx(), win, tab) {
+            Some(r) => select_later(ui.ctx(), win, tab, r, true),
+            None => ui.memory_mut(|m| m.request_focus(edit_id(win, tab))),
+        }
+        set_current(ui.ctx(), win, tab, None);
+    }
+}
+
+/// A key press for the text field, as if typed (#205: a profile's own key
+/// for undo, redo, select all, start / end of line).
+fn press(ui: &mut egui::Ui, key: Key, modifiers: Modifiers) {
+    ui.input_mut(|i| {
+        i.events.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        })
+    });
+}
+
+/// The text commands taken by [`take_keys`] this frame (#205), and the mark:
+/// while it is set, moving the cursor selects.
+fn text_cmds(ui: &mut egui::Ui, eid: egui::Id, t: &EdTab, buf: &mut String) {
+    let ctx = ui.ctx().clone();
+    let cmds: Vec<Cmd> = ctx
+        .data_mut(|m| m.remove_temp(eid.with("cmds")))
+        .unwrap_or_default();
+    let mark_id = eid.with("mark");
+    let mut mark: bool = ctx.data(|m| m.get_temp(mark_id)).unwrap_or(false);
+    let sel = |ctx: &egui::Context| {
+        egui::TextEdit::load_state(ctx, eid)
+            .and_then(|s| s.cursor.char_range())
+            .map(|c| {
+                let (a, b) = (c.primary.index.0, c.secondary.index.0);
+                (a.min(b)..a.max(b), c.primary.index.0)
+            })
+    };
+    let place = |ctx: &egui::Context, at: usize| {
+        let mut st = egui::TextEdit::load_state(ctx, eid).unwrap_or_default();
+        st.cursor
+            .set_char_range(Some(CCursorRange::one(CCursor::new(at))));
+        st.store(ctx, eid);
+    };
+    for c in cmds {
+        match c {
+            Cmd::CutLine | Cmd::CopyLine | Cmd::DeleteLine => {
+                let Some((r, _)) = sel(&ctx) else {
+                    continue;
+                };
+                let span = if r.is_empty() || c == Cmd::DeleteLine {
+                    text::line_span(buf, r)
+                } else {
+                    r
+                };
+                let (a, b) = (
+                    text::char_to_byte(buf, span.start),
+                    text::char_to_byte(buf, span.end),
+                );
+                if c != Cmd::DeleteLine {
+                    ctx.copy_text(buf[a..b].to_string());
+                }
+                if c != Cmd::CopyLine {
+                    buf.replace_range(a..b, "");
+                    place(&ctx, span.start);
+                }
+                mark = false;
+            }
+            Cmd::CopyAll => ctx.copy_text(buf.clone()),
+            Cmd::Paste => ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+            Cmd::Undo => press(ui, Key::Z, Modifiers::COMMAND),
+            Cmd::Redo => press(ui, Key::Y, Modifiers::COMMAND),
+            Cmd::SelectAll => press(ui, Key::A, Modifiers::COMMAND),
+            Cmd::LineStart => press(ui, Key::Home, Modifiers::NONE),
+            Cmd::LineEnd => press(ui, Key::End, Modifiers::NONE),
+            Cmd::Mark => {
+                mark = !mark;
+                if let Some((_, at)) = sel(&ctx) {
+                    place(&ctx, at);
+                }
+            }
+            Cmd::MatchingBracket => {
+                if let Some((_, at)) = sel(&ctx)
+                    && let Some(to) = text::matching_bracket(buf, t.lang, at)
+                {
+                    place(&ctx, to);
+                }
+            }
+            _ => {}
+        }
+    }
+    if mark {
+        let off = ui.input_mut(|i| {
+            let cancel = i.consume_key(Modifiers::NONE, Key::Escape)
+                || i.consume_key(Modifiers::CTRL, Key::G);
+            for ev in i.events.iter_mut() {
+                if let egui::Event::Key { key, modifiers, .. } = ev
+                    && matches!(
+                        key,
+                        Key::ArrowLeft
+                            | Key::ArrowRight
+                            | Key::ArrowUp
+                            | Key::ArrowDown
+                            | Key::Home
+                            | Key::End
+                            | Key::PageUp
+                            | Key::PageDown
+                    )
+                {
+                    modifiers.shift = true;
+                }
+            }
+            cancel
+        });
+        if off {
+            mark = false;
+        }
+    }
+    ctx.data_mut(|m| m.insert_temp(mark_id, mark));
+}
+
+fn keymap_help_id() -> egui::Id {
+    egui::Id::unique("telepad-keymap-help")
+}
+
+fn show_keymap_help(ctx: &egui::Context) {
+    ctx.data_mut(|m| m.insert_temp(keymap_help_id(), true));
+}
+
+/// Keyboard shortcuts (#205): picks the profile for every editor; saved.
+fn keymap_menu(ui: &mut egui::Ui, out: &mut Vec<Msg>) {
+    let cur = keymap::current();
+    ui.menu_button(il(icons::KEY, cur.name), |ui| {
+        ui.label(RichText::new("Keyboard shortcuts").weak());
+        for p in &keymap::PROFILES {
+            if ui.selectable_label(p.key == cur.key, p.name).clicked() {
+                out.push(Msg::SetEditorKeymap(if p.key == "vscode" {
+                    String::new()
+                } else {
+                    p.key.to_string()
+                }));
+                ui.close();
+            }
+        }
+        ui.separator();
+        if ui
+            .button(format!(
+                "Show all shortcuts  ({})",
+                keymap::keys_of(Cmd::Help)
+            ))
+            .clicked()
+        {
+            show_keymap_help(ui.ctx());
+            ui.close();
+        }
+    })
+    .response
+    .on_hover_text("Keyboard shortcut style of the editor");
+}
+
+/// The shortcut list of the chosen profile (#205), with a search box.
+pub fn keymap_help(ctx: &egui::Context, d: &mut Drafts, out: &mut Vec<Msg>) {
+    if !ctx.data(|m| m.get_temp::<bool>(keymap_help_id()).unwrap_or(false)) {
+        return;
+    }
+    let p = keymap::current();
+    let search_id = keymap_help_id().with("search");
+    let mut search: String = ctx.data(|m| m.get_temp(search_id)).unwrap_or_default();
+    let modal = egui::Modal::new(keymap_help_id().with("modal")).show(ctx, |ui| {
+        ui.set_width(620.0);
+        ui.horizontal(|ui| {
+            ui.heading(il(icons::KEY, &format!("Keyboard shortcuts — {}", p.name)));
+        });
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut search)
+                    .hint_text("Search commands and keys")
+                    .desired_width(260.0),
+            );
+            ui.label(RichText::new("Style:").weak());
+            for q in &keymap::PROFILES {
+                if ui.selectable_label(q.key == p.key, q.name).clicked() {
+                    out.push(Msg::SetEditorKeymap(if q.key == "vscode" {
+                        String::new()
+                    } else {
+                        q.key.to_string()
+                    }));
+                }
+            }
+        });
+        let needle = search.to_lowercase();
+        let rows: Vec<Vec<String>> = keymap::help_rows(p)
+            .into_iter()
+            .map(|(c, k)| vec![c.name().to_string(), k])
+            .filter(|r| {
+                needle.is_empty()
+                    || r[0].to_lowercase().contains(&needle)
+                    || r[1].to_lowercase().contains(&needle)
+            })
+            .collect();
+        let cols = [crate::table::Col::new("Command"), crate::table::Col::new("Keys")];
+        let title = format!("Keyboard shortcuts ({})", p.name);
+        let st = crate::table::state(d, "editor-keymap-help");
+        let o = crate::table::show(
+            ui,
+            &crate::table::Spec::new("editor-keymap-help", &title, &cols),
+            st,
+            &rows,
+            |ui, ev| {
+                if let crate::table::Ev::Cell { row, col } = ev {
+                    crate::table::text(ui, &rows[row][col]);
+                }
+            },
+        );
+        out.extend(o.msgs);
+        ui.label(
+            RichText::new(
+                "(Telepad) = that editor has no default for it. Keys that are not listed type as usual.",
+            )
+            .weak(),
+        );
+        if ui.button("Close").clicked() {
+            ui.ctx().data_mut(|m| m.insert_temp(keymap_help_id(), false));
+        }
+    });
+    ctx.data_mut(|m| m.insert_temp(search_id, search));
+    if modal.should_close() {
+        ctx.data_mut(|m| m.insert_temp(keymap_help_id(), false));
+    }
+}
+
 /// Select End of Line Sequence (#203): LF (suggested) or CRLF.
 fn eol_menu(ui: &mut egui::Ui, id: u64, t: &EdTab, out: &mut Vec<Msg>) {
     let name = |crlf: bool| if crlf { "CRLF" } else { "LF" };
@@ -1084,12 +1381,14 @@ fn open_dialog(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, out: &mut V
     let Some(o) = &s.editor.open else {
         return;
     };
+    let what = match o.mode {
+        OpenMode::Open => "Open a file",
+        OpenMode::SaveAs(_) => "Save as",
+        OpenMode::Insert(_) => "Insert a file",
+    };
     let modal = egui::Modal::new(egui::Id::unique(("telepad-ed-open", id))).show(ui.ctx(), |ui| {
         ui.set_width(560.0);
-        ui.heading(il(
-            icons::FOLDER,
-            &format!("Open a file of {}", place(s, o.side)),
-        ));
+        ui.heading(il(icons::FOLDER, &format!("{what} — {}", place(s, o.side))));
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(!o.loading, egui::Button::new(icons::ARROW_LINE_UP))
@@ -1156,6 +1455,9 @@ fn open_dialog(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, out: &mut V
                     let r = ui.selectable_label(dr.open_sel.as_deref() == Some(&e.name), label);
                     if r.clicked() {
                         dr.open_sel = Some(e.name.clone());
+                        if matches!(o.mode, OpenMode::SaveAs(_)) && !e.is_dir() {
+                            dr.save_name = e.name.clone();
+                        }
                     }
                     if r.double_clicked() {
                         send(out, id, EdMsg::PickOpen(e.name.clone()));
@@ -1163,22 +1465,68 @@ fn open_dialog(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, out: &mut V
                 }
             });
         ui.add_space(6.0);
+        if matches!(o.mode, OpenMode::SaveAs(_)) {
+            ui.horizontal(|ui| {
+                ui.label("File name");
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut dr.save_name)
+                        .hint_text("name, or a full path")
+                        .desired_width(ui.available_width()),
+                );
+                if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                    send(out, id, EdMsg::SaveAsPath(dr.save_name.clone()));
+                }
+            });
+            if let Some(p) = &o.replace {
+                ui.colored_label(
+                    usage_color(80.0),
+                    format!("{} {p} exists. Replace it?", icons::WARNING),
+                );
+            }
+        }
         ui.horizontal(|ui| {
             let sel = dr.open_sel.clone();
-            if ui
-                .add_enabled(
-                    sel.is_some() && !o.loading,
-                    egui::Button::new(il(icons::FOLDER, "Open")),
-                )
-                .clicked()
-                && let Some(n) = sel
-            {
-                send(out, id, EdMsg::PickOpen(n));
+            match o.mode {
+                OpenMode::SaveAs(_) => {
+                    if o.replace.is_some() {
+                        if ui
+                            .add(egui::Button::new(act_text(Act::Danger, "Replace")))
+                            .clicked()
+                        {
+                            send(out, id, EdMsg::SaveAsReplace);
+                        }
+                    } else if ui
+                        .add_enabled(
+                            !dr.save_name.trim().is_empty() && !o.loading,
+                            egui::Button::new(il(icons::SAVE, "Save")),
+                        )
+                        .clicked()
+                    {
+                        send(out, id, EdMsg::SaveAsPath(dr.save_name.clone()));
+                    }
+                }
+                _ => {
+                    let label = if matches!(o.mode, OpenMode::Insert(_)) {
+                        "Insert"
+                    } else {
+                        "Open"
+                    };
+                    if ui
+                        .add_enabled(
+                            sel.is_some() && !o.loading,
+                            egui::Button::new(il(icons::FOLDER, label)),
+                        )
+                        .clicked()
+                        && let Some(n) = sel
+                    {
+                        send(out, id, EdMsg::PickOpen(n));
+                    }
+                }
             }
             if ui.button("Cancel").clicked() {
                 send(out, id, EdMsg::CloseOpen);
             }
-            ui.label(RichText::new("Double-click a folder to enter it, a file to open it").weak());
+            ui.label(RichText::new("Double-click a folder to enter it").weak());
         });
     });
     if modal.should_close() {
@@ -1449,6 +1797,35 @@ fn code(
         return (egui::Vec2::ZERO, 14.0);
     };
     let mono = egui::TextStyle::Monospace.resolve(ui.style());
+    if ui.memory(|m| m.has_focus(eid)) {
+        text_cmds(ui, eid, t, buf);
+    }
+    // Insert a file (#205): its text at the cursor, replacing a selection.
+    if let Some((tab, ins)) = dr.insert.take() {
+        if tab == t.id {
+            let mut st = egui::TextEdit::load_state(&ctx, eid).unwrap_or_default();
+            let r = st
+                .cursor
+                .char_range()
+                .map(|c| {
+                    let (a, b) = (c.primary.index.0, c.secondary.index.0);
+                    a.min(b)..a.max(b)
+                })
+                .unwrap_or(0..0);
+            let (a, b) = (
+                text::char_to_byte(buf, r.start),
+                text::char_to_byte(buf, r.end),
+            );
+            buf.replace_range(a..b, &ins);
+            let end = r.start + ins.chars().count();
+            st.cursor
+                .set_char_range(Some(CCursorRange::one(CCursor::new(end))));
+            st.store(&ctx, eid);
+            ctx.memory_mut(|m| m.request_focus(eid));
+        } else {
+            dr.insert = Some((tab, ins));
+        }
+    }
     // Tab / Shift+Tab: indent / outdent the selected lines.
     if ui.memory(|m| m.has_focus(eid)) {
         let out = ui.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::Tab));
@@ -1758,45 +2135,15 @@ pub fn embedded(
         )
     };
     if focused {
-        let sc = |m: Modifiers, k: Key| {
-            ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(m, k)))
-        };
-        let find = sc(Modifiers::COMMAND, Key::F);
-        let replace = editable && sc(Modifiers::COMMAND, Key::H);
-        if find || replace {
-            dr.bar = if replace { Bar::Replace } else { Bar::Find };
-            if let (Some(r), Some(txt)) = (cursor_of(ui.ctx(), win, TAB), dr.texts.get(&TAB))
-                && !r.is_empty()
-            {
-                let (a, b) = (
-                    text::char_to_byte(txt, r.start),
-                    text::char_to_byte(txt, r.end),
-                );
-                if !txt[a..b].contains('\n') {
-                    dr.find = txt[a..b].to_string();
-                }
+        // The chosen shortcut profile (#205); file commands do not apply here.
+        for c in take_keys(ui, win, TAB, true) {
+            match c {
+                Cmd::Help => show_keymap_help(ui.ctx()),
+                Cmd::Save | Cmd::SaveAs | Cmd::Open | Cmd::InsertFile | Cmd::CloseTab => {}
+                c => find_cmd(ui, win, TAB, &mut dr, c, editable),
             }
-            focus_field(ui.ctx(), win, "find");
         }
-        if sc(Modifiers::COMMAND, Key::G) {
-            dr.bar = Bar::Goto;
-            dr.goto.clear();
-            focus_field(ui.ctx(), win, "goto");
-        }
-        if dr.bar != Bar::None && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
-            dr.bar = Bar::None;
-            match current(ui.ctx(), win, TAB) {
-                Some(r) => select_later(ui.ctx(), win, TAB, r, true),
-                None => ui.memory_mut(|m| m.request_focus(edit_id(win, TAB))),
-            }
-            set_current(ui.ctx(), win, TAB, None);
-        }
-        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F3)) {
-            step(ui.ctx(), win, TAB, &dr, true);
-        }
-        if ui.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::F3)) {
-            step(ui.ctx(), win, TAB, &dr, false);
-        }
+        escape_bar(ui, win, TAB, &mut dr);
     }
     ui.horizontal(|ui| {
         ui.label(RichText::new(il(icons::CODE, name)).monospace().weak());
@@ -1805,6 +2152,8 @@ pub fn embedded(
                 ui.data_mut(|m| m.insert_temp(lang_slot, l));
             }
             scheme_menu(ui, out);
+            keymap_menu(ui, out);
+            pending_hint(ui, win, TAB);
             if editable {
                 let sel = cursor_of(ui.ctx(), win, TAB).unwrap_or(0..0);
                 match indent_menu(ui, indent, lang, !sel.is_empty()) {

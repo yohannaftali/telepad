@@ -1277,6 +1277,12 @@ fn theme_choice_is_saved_once_per_change() {
         matches!(&fx[..], [Effect::SaveUiPrefs(p)] if p.editor_scheme == "monokai" && p.theme == ThemePref::Light)
     );
     assert!(update(&mut s, Msg::SetEditorScheme("monokai".into()), t0).is_empty());
+    // Keyboard shortcut profile (#205): saved with the other view settings.
+    let fx = update(&mut s, Msg::SetEditorKeymap("nano".into()), t0);
+    assert!(
+        matches!(&fx[..], [Effect::SaveUiPrefs(p)] if p.editor_keymap == "nano" && p.editor_scheme == "monokai")
+    );
+    assert!(update(&mut s, Msg::SetEditorKeymap("nano".into()), t0).is_empty());
 }
 
 #[test]

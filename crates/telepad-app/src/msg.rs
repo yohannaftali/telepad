@@ -171,6 +171,8 @@ pub enum Msg {
     SetTheme(telepad_core::store::ThemePref),
     /// Editor colour scheme (#183) by key; empty = follow the app theme.
     SetEditorScheme(String),
+    /// Editor keyboard shortcut profile (#205) by key; empty = VS Code.
+    SetEditorKeymap(String),
     /// Overview order chosen in the card view's "Sort by" picker.
     SetSort(crate::table::Sort),
     /// Overview header clicked.

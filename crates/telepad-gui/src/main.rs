@@ -7,6 +7,7 @@
 mod app;
 mod editor_theme;
 mod icons;
+mod keymap;
 mod runtime;
 mod table;
 mod views;

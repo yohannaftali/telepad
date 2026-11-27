@@ -532,8 +532,8 @@ front; they come back with the [workspace](#workspaces) as portainer:<name>):
 - **Stack editor** (the Stack page's **Editor** tab): the
   `docker-compose.yml` in Telepad's own text editor (the one of the file windows, see
   [Editor](#editor)): YAML colours, line numbers, the current line, Tab / Shift+Tab indent,
-  **Find** (Ctrl+F), **Replace** (Ctrl+H), **Go to line** (Ctrl+G), F3 / Shift+F3 for the next /
-  previous match, Esc closes the bar. **Variables (n)…** opens the stack's variables on their
+  **Find**, **Replace**, **Go to line**, next / previous match with the keys of the chosen
+  [shortcut style](#editor) (VS Code: Ctrl+F, Ctrl+H, Ctrl+G, F3 / Shift+F3), Esc closes the bar. **Variables (n)…** opens the stack's variables on their
   own page (below). **Re-pull image and redeploy** and **Prune services** are Portainer's update
   options.
 
@@ -1442,7 +1442,7 @@ looks and works like VS Code. One editor window per file window: each file is a 
 of this computer and of the host side by side (the tab's icon says which; hover it for the
 full path). Opening a file that already has a tab switches to it.
 
-- **Open…** (#204; the toolbar button, or **Ctrl+O**) opens another file without going back to
+- **Open…** (#204; the toolbar button, or **Ctrl+O** in the VS Code style) opens another file without going back to
   the file window: a dialog lists the folder of the file you are editing on the same side —
   the host, or this computer — with a path box (type a folder or a file path, Enter), a parent
   button, a name filter, folders first. Double-click a folder to enter it, a file to open it as
@@ -1509,17 +1509,54 @@ full path). Opening a file that already has a tab switches to it.
 
   ![The indentation menu of a YAML file: tabs are off](images/editor-indent.png)
 
-| Key | Does |
-|---|---|
-| Ctrl+S | Save (also the **Save** button) |
-| Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) | Undo / redo, per tab |
-| Ctrl+F | Find (a selection on one line becomes the search text) |
-| Ctrl+H | Replace |
-| Ctrl+G | Go to line |
-| Enter / Shift+Enter, F3 / Shift+F3 | Next / previous match |
-| Esc | Close the find bar, back to the text with the match selected |
-| Tab / Shift+Tab | Indent / outdent the selected lines (one line: Tab inserts at the cursor) |
-| Ctrl+W | Close the tab |
+- **Keyboard shortcuts** (#205): the key button in the status bar (also in the Portainer stack
+  editor's header) picks the shortcut style for every editor: **VS Code** (the default),
+  **Sublime Text**, **JetBrains**, **Notepad++**, **Emacs** or **nano**; the choice is saved.
+  **Show all shortcuts** (or the style's help key, e.g. Ctrl+G in nano, Ctrl+K Ctrl+S in VS Code)
+  lists the keys of the chosen style in a searchable table. Two-key shortcuts such as Emacs'
+  **Ctrl+X Ctrl+S** show the first key in the status bar (*Ctrl+X –*) until the second; Esc
+  cancels. In Emacs and nano the mark (**Ctrl+Space**, **Alt+A**) makes moving the cursor
+  select (*Mark set* in the status bar; the same key or Esc unsets it). *Cut / copy line*
+  takes the selection, or the whole line when nothing is selected. Keys a style does not use
+  type as usual; copy and paste in the find bar and dialogs always use Ctrl+C / Ctrl+V.
+  Modal styles (Vim, Helix) are not offered.
+
+| Command | VS Code | Sublime Text | JetBrains | Notepad++ | Emacs | nano |
+|---|---|---|---|---|---|---|
+| Save | Ctrl+S | Ctrl+S | Ctrl+S | Ctrl+S | Ctrl+X Ctrl+S | Ctrl+S |
+| Save as / write out | Ctrl+Shift+S | Ctrl+Shift+S | Ctrl+Shift+S* | Ctrl+Alt+S | Ctrl+X Ctrl+W | Ctrl+O |
+| Open another file | Ctrl+O | Ctrl+O | Ctrl+Shift+N | Ctrl+O | Ctrl+X Ctrl+F | Ctrl+Shift+O* |
+| Insert a file | Ctrl+Shift+I* | Ctrl+Shift+I* | Ctrl+Shift+I* | Ctrl+Shift+I* | Ctrl+X I | Ctrl+R |
+| Close tab | Ctrl+W, Ctrl+F4 | Ctrl+W, Ctrl+F4 | Ctrl+F4 | Ctrl+W | Ctrl+X K | Ctrl+X |
+| Find | Ctrl+F | Ctrl+F | Ctrl+F | Ctrl+F | Ctrl+S | Ctrl+W, Ctrl+F |
+| Replace | Ctrl+H | Ctrl+H | Ctrl+R | Ctrl+H | Alt+% | Alt+R, Ctrl+\ |
+| Find next | F3 | F3 | F3 | F3 | F3* | Alt+W, F3* |
+| Find previous / search backward | Shift+F3 | Shift+F3 | Shift+F3 | Shift+F3 | Ctrl+R | Ctrl+Q, Ctrl+B |
+| Go to line | Ctrl+G | Ctrl+G | Ctrl+G | Ctrl+G | Alt+G G, Alt+G Alt+G | Alt+G, Ctrl+_ |
+| Go to matching bracket | Ctrl+Shift+\ | Ctrl+M | Ctrl+Shift+M | Ctrl+B | Ctrl+Alt+F | Alt+] |
+| Cut line / selection | Ctrl+X | Ctrl+X | Ctrl+X | Ctrl+X, Ctrl+L | Ctrl+K, Ctrl+W | Ctrl+K |
+| Copy line / selection | Ctrl+C | Ctrl+C | Ctrl+C | Ctrl+C | Alt+W | Alt+6 |
+| Paste | Ctrl+V | Ctrl+V | Ctrl+V | Ctrl+V | Ctrl+Y | Ctrl+U |
+| Copy all | Ctrl+Shift+C* | Ctrl+Shift+C* | Ctrl+Shift+C* | Ctrl+Shift+C* | Ctrl+Shift+C* | Ctrl+Shift+C* |
+| Delete line | Ctrl+Shift+K | Ctrl+Shift+K | Ctrl+Y | Ctrl+Shift+L | Ctrl+Shift+Backspace | Alt+Delete |
+| Undo | Ctrl+Z | Ctrl+Z | Ctrl+Z | Ctrl+Z | Ctrl+/, Ctrl+X U | Alt+U |
+| Redo | Ctrl+Y, Ctrl+Shift+Z | Ctrl+Y, Ctrl+Shift+Z | Ctrl+Shift+Z | Ctrl+Y | Ctrl+? | Alt+E |
+| Select all | Ctrl+A | Ctrl+A | Ctrl+A | Ctrl+A | Ctrl+X H | Ctrl+Shift+A* |
+| Set / unset mark (select by moving) | — | — | — | — | Ctrl+Space | Alt+A, Ctrl+6 |
+| Start of line | Home | Home | Home | Home | Ctrl+A | Ctrl+A |
+| End of line | End | End | End | End | Ctrl+E | Ctrl+E |
+| Keyboard shortcuts (this list) | Ctrl+K Ctrl+S | F1* | F1* | F1* | Ctrl+H B | Ctrl+G |
+
+\* = that editor has no default for the command; Telepad's choice.
+
+Also in every style: Enter / Shift+Enter in the find bar for the next / previous match, Esc to
+close the find bar (back to the text with the match selected), Tab / Shift+Tab to indent /
+outdent the selected lines.
+
+- **Save as** opens the folder dialog of **Open…** with a **File name** box (a name in the folder
+  shown, or a full path); an existing file is replaced only after **Replace**. The tab then
+  edits the new file. **Insert a file** picks a file in the same dialog and puts its text in at
+  the cursor (replacing a selection); the tab shows *Not saved*.
 
 - **Find / replace**: **Aa** match case, **ab** whole word, **.\*** regular expression;
   every match is highlighted, the current one stronger, with *3 of 12*. **Replace** replaces

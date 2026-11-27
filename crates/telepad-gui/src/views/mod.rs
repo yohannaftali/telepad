@@ -89,6 +89,7 @@ pub fn draw(root: &mut egui::Ui, m: &Model, d: &mut Drafts, now: Instant) -> Vec
     host_sync::host_sync_dialogs(&ctx, m, d, &mut out);
     workspaces::dialogs(&ctx, d, &mut out);
     portainer::dialogs(&ctx, m, d, &mut out);
+    text_editor::keymap_help(&ctx, d, &mut out);
     out
 }
 

@@ -41,6 +41,7 @@ outside libraries: [DEPENDENCIES.md](../DEPENDENCIES.md)
 | `src/table.rs` | The shared table component: columns, sort, filter row, value dropdown, pager, right-click menu, exports |
 | `src/widgets.rs` | Drawing helpers and colours: bars, status dot, action buttons by risk (`Act`), host right-click menu, light / dark visuals, `Palette` |
 | `src/editor_theme.rs` | Editor colour schemes (`SCHEMES`) |
+| `src/keymap.rs` | Editor keyboard shortcut profiles (#205): commands, the six profiles, the matcher that takes their keys out of a frame's input before the text field sees them |
 | `src/icons.rs` | Phosphor icon font, font setup (`install`, `definitions`), OS logo detection |
 | `assets/` | Fonts (`Phosphor.ttf`), OS logos (SVG), app icon (`.png`, `.ico`, `.icns`) |
 | `build.rs` | Windows only: embeds `telepad.ico` and version info into `telepad.exe` with `winresource` |
