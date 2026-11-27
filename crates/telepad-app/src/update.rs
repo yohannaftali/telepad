@@ -160,14 +160,24 @@ pub fn update(state: &mut State, msg: Msg, now: Instant) -> Vec<Effect> {
             }
             local_due(m, now, &mut fx);
         }
-        Msg::LocalRefresh => collect_local(m, &mut fx),
-        Msg::LocalCollected { result, elapsed } => {
+        Msg::LocalRefresh => collect_local(m, true, &mut fx),
+        Msg::LocalCollected {
+            result,
+            elapsed,
+            slow,
+        } => {
+            if slow && result.is_ok() {
+                m.local_slow = Some(now);
+            }
             let l = &mut m.local;
             l.loading = false;
             l.updated = Some(now);
             l.elapsed = Some(elapsed);
             match result {
-                Ok(r) => {
+                Ok(mut r) => {
+                    if !slow && let Some(prev) = &l.report {
+                        telepad_core::local::keep_slow(&mut r, prev);
+                    }
                     l.report = Some(*r);
                     l.error = None;
                 }
@@ -2567,14 +2577,15 @@ fn host_of(hosts: &[HostState], alias: &str) -> Option<HostEntry> {
         .map(|h| h.entry.clone())
 }
 
-/// Read this computer (#129) unless a read is running.
-fn collect_local(m: &mut Model, fx: &mut Vec<Effect>) {
+/// Read this computer (#129) unless a read is running; `slow` also reads
+/// the slow facts (#211).
+fn collect_local(m: &mut Model, slow: bool, fx: &mut Vec<Effect>) {
     if m.local.loading {
         return;
     }
     m.local.entry = HostEntry::local();
     m.local.loading = true;
-    fx.push(Effect::CollectLocal);
+    fx.push(Effect::CollectLocal { slow });
 }
 
 /// My Computer is read while its page is open: once when it opens, then at
@@ -2589,6 +2600,11 @@ fn local_due(m: &mut Model, now: Instant, fx: &mut Vec<Effect>) {
         Some(e) => !st.paused && st.live.on && e >= st.live.every(),
     };
     if due {
-        collect_local(m, fx);
+        // Slow facts on the first read and then at the slow interval.
+        let slow = match elapsed(m.local_slow, now) {
+            None => true,
+            Some(e) => st.slow.on && e >= st.slow.every(),
+        };
+        collect_local(m, slow, fx);
     }
 }

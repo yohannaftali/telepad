@@ -73,10 +73,12 @@ pub enum Msg {
     // ---- My Computer (#129)
     /// Read this computer again now.
     LocalRefresh,
-    /// This computer was read (`elapsed`: how long it took).
+    /// This computer was read (`elapsed`: how long it took; `slow`: with
+    /// the slow facts, #211).
     LocalCollected {
         result: Result<Box<telepad_core::model::HostReport>, String>,
         elapsed: std::time::Duration,
+        slow: bool,
     },
     /// A shell of this computer in a new terminal window.
     LocalTerminal,
@@ -427,8 +429,11 @@ pub enum Effect {
     Sets(crate::sets::StEffect),
     /// Portainers (#171): store changes, tokens, reads through a tunnel.
     Portainer(crate::portainer::PtEffect),
-    /// Read this computer (#129, background) → [`Msg::LocalCollected`].
-    CollectLocal,
+    /// Read this computer (#129, background) → [`Msg::LocalCollected`];
+    /// `slow`: also Windows Update and installed programs (#211).
+    CollectLocal {
+        slow: bool,
+    },
     /// Errors come back as [`Msg::Notice`].
     OpenLocalTerminal,
     /// Save dialog, then write the table on a thread (#153) →

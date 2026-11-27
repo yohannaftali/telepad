@@ -80,6 +80,9 @@ pub const ROW_PLUS: &str = "\u{e59e}";
 pub const X: &str = "\u{e4f6}";
 pub const SIDEBAR: &str = "\u{ec24}";
 pub const APP_WINDOW: &str = "\u{e5da}";
+/// Windows Security (#211): shield-check / shield-warning.
+pub const SHIELD: &str = "\u{e40c}";
+pub const SHIELD_WARNING: &str = "\u{e412}";
 pub const CIRCLE_HALF: &str = "\u{e18c}";
 pub const CORNERS_OUT: &str = "\u{e1d0}";
 pub const CORNERS_IN: &str = "\u{e1ce}";
@@ -461,6 +464,8 @@ mod tests {
             X,
             SIDEBAR,
             APP_WINDOW,
+            SHIELD,
+            SHIELD_WARNING,
             CIRCLE_HALF,
             CORNERS_OUT,
             CORNERS_IN,

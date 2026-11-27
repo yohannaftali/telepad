@@ -631,13 +631,14 @@ impl Runtime {
             Effect::MyKeys(e) => self.run_mykeys(e),
             Effect::Files(e) => self.run_files(e),
             Effect::Logins(e) => self.run_logins(e),
-            Effect::CollectLocal => {
-                self.background(|| {
+            Effect::CollectLocal { slow } => {
+                self.background(move || {
                     let start = Instant::now();
-                    let result = telepad_core::local::collect().map(Box::new);
+                    let result = telepad_core::local::collect(slow).map(Box::new);
                     Msg::LocalCollected {
                         result,
                         elapsed: start.elapsed(),
+                        slow,
                     }
                 });
                 None

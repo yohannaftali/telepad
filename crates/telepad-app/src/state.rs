@@ -107,6 +107,9 @@ pub struct Model {
     /// My Computer (#129): this computer's report, read without SSH while
     /// its page is open. `entry` is [`HostEntry::local`].
     pub local: HostState,
+    /// When My Computer's slow facts were last read (#211: Windows Update,
+    /// installed programs; at the Update Strategy's slow interval).
+    pub local_slow: Option<Instant>,
     /// Groups and clusters (#144, #145) with descriptions, in display order.
     pub sets: BTreeMap<SetKind, Vec<HostSet>>,
     /// They have been read (restored `group:` / `cluster:` pages wait for it).

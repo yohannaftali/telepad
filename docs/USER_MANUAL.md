@@ -751,21 +751,48 @@ and [Portainers](#portainers).
 computer Telepad runs on. It needs no SSH and is not in the inventory, so it is never
 exported, imported or written into `telepad.ssh_config`. It shows the same sections as a
 [host](#host-detail): **System**, **Maintenance**, **Usage**, **Disks**, **Network**,
-**Sensors**, **Docker** and **Ports in use**. A section this computer cannot fill says so.
+**Ports in use** (right after Network here), **Sensors** and **Docker**; on Windows also
+**Installed applications**. A section this computer cannot fill says so.
 
 - It is read when the page opens and then at the **live** interval of the
   [Update Strategy](#update-strategy) while the page stays open (not while everything is
   paused); **Refresh** reads it now. Reading is read-only and needs no administrator
   rights: on Windows from the system, `netstat -ano` (listening ports and their program),
-  `reg query` (reboot pending) and the `docker` / `podman` command; on Linux and macOS
-  the same script that runs on hosts, run locally.
+  `reg query` (reboot pending, firewall, SmartScreen, installed programs), WMI (Microsoft
+  Defender and Windows Security Center), Windows Update's local cache and the `docker` /
+  `podman` command; on Linux and macOS the same script that runs on hosts, run locally.
+  Windows Update and the installed programs are read on the first read, at the **slow**
+  interval and on **Refresh**; the rest at the live interval.
+- On Windows, **Maintenance** also shows (#211):
+
+  | Row | What it shows | Read from |
+  |---|---|---|
+  | **Windows Update** | *up to date* or *n pending*, and *last installed* (date of the last successful update install) | Windows Update's **local cache** (offline search): Telepad never starts a scan, download or install and never contacts Microsoft, so the count is as fresh as Windows' own last check |
+  | **Antivirus update** | the active antivirus, its definition version and when they were updated; amber *out of date* when the product says so or they are older than 7 days | Microsoft Defender's status (`MSFT_MpComputerStatus`); another antivirus from Windows Security Center |
+  | **Virus & threat protection** | **On** when an antivirus has real-time protection on, else **Off** (red) | the same |
+  | **Firewall & network protection** | **On** when the Domain, Private and Public profiles are all on (or another firewall registered with Windows Security is on); else *Off for* the profiles that are off | the firewall profiles in the registry, Group Policy first |
+  | **App & browser control** | **On** / **Off** of SmartScreen for apps and files | the registry: the Group Policy `EnableSmartScreen` wins over the setting; not set = on (Windows' default) |
+
+  Anything off or old definitions also show as a **security** flag next to the computer's
+  name (red when protection is off, amber for old definitions; hover for what).
+
+  ![My Computer's Maintenance on Windows: Windows Update, antivirus and Windows Security](images/my-computer-security.png)
+
+- On Windows, **Installed applications** lists the desktop programs Windows knows (as in
+  Settings ▸ Apps, without Microsoft Store apps): **Application Name**, **Version**,
+  **Developer**, **Installed** (the date the program recorded) and **Size** (as the program
+  reports it; often empty). They come from the Uninstall keys of the registry (all users,
+  32-bit programs and your own); system components and updates are left out and a program
+  listed twice is shown once. Like every table it sorts, filters and exports (right-click).
+  A name with characters outside the console's code page may show `�`.
+
+  ![Installed applications, filtered to one program](images/my-computer-apps.png)
 - On Windows, **Sensors** shows an NVIDIA graphics card's temperature, fan and power
   (`nvidia-smi`, part of the NVIDIA driver) and the board's thermal zone when it has one.
   CPU and board temperatures sit behind the hardware, where only a kernel driver can read
   them; Telepad installs no driver, so many desktop PCs show only the graphics card (running
   Telepad as administrator does not change that) and the section says why. See
-  [Sensors on each computer](#sensors-on-each-computer). Pending updates are *unknown*
-  (Windows Update is not asked).
+  [Sensors on each computer](#sensors-on-each-computer).
 - **Open Terminal** opens a shell of this computer in a new terminal window, in your home
   folder (Windows Terminal, else PowerShell; Terminal on macOS; the first terminal
   emulator found on Linux).

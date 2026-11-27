@@ -1216,6 +1216,7 @@ fn maintenance_flags_are_ordered_by_severity_and_sortable() {
         updates: Some(98),
         security_updates: Some(6),
         end_of_support: Some("2021-04-30".into()),
+        last_update: None,
     };
     let f = maintenance_flags(&eol);
     let kinds: Vec<FlagKind> = f.iter().map(|f| f.kind).collect();

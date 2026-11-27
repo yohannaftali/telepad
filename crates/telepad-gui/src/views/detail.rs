@@ -256,10 +256,11 @@ pub fn local_page(
         status_dot(ui, h);
         icons::os_logo(ui, host_os(h), 26.0);
         ui.heading("My Computer");
-        if let Some(r) = &h.report
-            && !r.hostname.is_empty()
-        {
-            ui.label(RichText::new(&r.hostname).monospace());
+        if let Some(r) = &h.report {
+            if !r.hostname.is_empty() {
+                ui.label(RichText::new(&r.hostname).monospace());
+            }
+            crate::widgets::flag_chips(ui, &telepad_app::host_flags(r));
         }
     });
     ui.horizontal_wrapped(|ui| {
@@ -384,7 +385,7 @@ fn report_body(
                 }
             });
 
-            maintenance(ui, &r.maintenance);
+            maintenance(ui, r);
 
             section(ui, &il(icons::GAUGE, "Usage"));
             egui::Grid::new("usage")
@@ -435,6 +436,13 @@ fn report_body(
             section(ui, &il(icons::NETWORK, "Network"));
             network(ui, r, alias, d, out);
 
+            // My Computer lists its ports right after the network (#211).
+            let local = host.is_none();
+            if local {
+                section(ui, &il(icons::PLUGS, "Ports in use"));
+                ports_in_use(ui, r, alias, d, out);
+            }
+
             section(ui, &il(icons::THERMOMETER, "Sensors"));
             sensors(ui, r, host, alias, d, out);
 
@@ -460,8 +468,14 @@ fn report_body(
                 super::cluster::cluster(ui, r, i, alias, cluster_shown_by, d, out);
             }
 
-            section(ui, &il(icons::PLUGS, "Ports in use"));
-            ports_in_use(ui, r, alias, d, out);
+            if !local {
+                section(ui, &il(icons::PLUGS, "Ports in use"));
+                ports_in_use(ui, r, alias, d, out);
+            }
+            if let Some(apps) = &r.apps {
+                section(ui, &il(icons::APP_WINDOW, "Installed applications"));
+                installed_apps(ui, apps, alias, d, out);
+            }
             ui.add_space(20.0);
         });
 }
@@ -572,9 +586,126 @@ fn network(
     out.extend(o.msgs);
 }
 
-/// Reboot, pending updates and end of vendor support, with what to do.
-fn maintenance(ui: &mut egui::Ui, m: &telepad_core::model::Maintenance) {
+/// Installed programs of My Computer (#211).
+fn installed_apps(
+    ui: &mut egui::Ui,
+    apps: &[telepad_core::model::App],
+    alias: &str,
+    d: &mut telepad_app::Drafts,
+    out: &mut Vec<Msg>,
+) {
+    use crate::table::{self, Col, Spec};
+    if apps.is_empty() {
+        ui.label(RichText::new("No installed applications found").weak());
+        return;
+    }
+    let cols = [
+        Col::new("Application Name").initial(360.0),
+        Col::new("Version").initial(150.0),
+        Col::new("Developer").initial(260.0),
+        Col::new("Installed")
+            .initial(110.0)
+            .tip("Date the program recorded when it was installed"),
+        Col::new("Size")
+            .remainder()
+            .tip("As the program reports it"),
+    ];
+    let cells: Vec<Vec<String>> = apps
+        .iter()
+        .map(|a| {
+            vec![
+                a.name.clone(),
+                a.version.clone(),
+                a.publisher.clone(),
+                a.installed.clone().unwrap_or_default(),
+                a.size_kb.map(human_kb).unwrap_or_default(),
+            ]
+        })
+        .collect();
+    let title = format!("Installed applications of {alias}");
+    let st = table::state(d, format!("apps:{alias}"));
+    let o = table::show(
+        ui,
+        &Spec::new(("apps", alias), &title, &cols),
+        st,
+        &cells,
+        |ui, ev| {
+            if let table::Ev::Cell { row, col } = ev {
+                match col {
+                    1 | 3 => table::mono(ui, &cells[row][col]),
+                    2 => table::weak(ui, &cells[row][col]),
+                    c => table::text(ui, &cells[row][c]),
+                }
+            }
+        },
+    );
+    out.extend(o.msgs);
+}
+
+/// Windows Security rows of My Computer's Maintenance (#211).
+fn security_rows(ui: &mut egui::Ui, s: &telepad_core::model::Security) {
+    let unknown = || RichText::new("unknown").weak();
+    let on_off = |ui: &mut egui::Ui, v: Option<bool>, off_text: String| match v {
+        Some(true) => {
+            ui.colored_label(usage_color(10.0), format!("{} On", icons::SHIELD));
+        }
+        Some(false) => {
+            ui.colored_label(usage_color(95.0), off_text);
+        }
+        None => {
+            ui.label(unknown());
+        }
+    };
+    ui.label(RichText::new("Antivirus update").strong());
+    match s.active_antivirus() {
+        Some(a) => {
+            let mut t = a.name.clone();
+            if let Some(v) = &a.version {
+                t.push_str(&format!(" · definitions {v}"));
+            }
+            match (&a.updated, a.age_days) {
+                (Some(u), Some(0)) => t.push_str(&format!(" · updated {u} (less than a day ago)")),
+                (Some(u), Some(n)) => t.push_str(&format!(" · updated {u} ({n} days ago)")),
+                (Some(u), None) => t.push_str(&format!(" · updated {u}")),
+                (None, _) => {}
+            }
+            if s.definitions_stale() {
+                ui.colored_label(usage_color(80.0), format!("{t} — out of date"));
+            } else {
+                ui.label(t);
+            }
+        }
+        None => {
+            ui.label(unknown());
+        }
+    }
+    ui.end_row();
+    ui.label(RichText::new("Virus & threat protection").strong());
+    on_off(
+        ui,
+        s.virus_protection(),
+        "Off — real-time protection is off".into(),
+    );
+    ui.end_row();
+    ui.label(RichText::new("Firewall & network protection").strong());
+    on_off(
+        ui,
+        s.firewall(),
+        format!("Off for {}", s.firewall_off().join(", ")),
+    );
+    ui.end_row();
+    ui.label(RichText::new("App & browser control").strong())
+        .on_hover_text("SmartScreen for apps and files (Group Policy wins over the setting)");
+    on_off(ui, s.app_control, "Off — SmartScreen is off".into());
+    ui.end_row();
+}
+
+/// Reboot, pending updates and end of vendor support, with what to do;
+/// on My Computer (Windows) also Windows Update and Windows Security (#211).
+fn maintenance(ui: &mut egui::Ui, r: &telepad_core::model::HostReport) {
     use telepad_core::eol::Support;
+    let m = &r.maintenance;
+    let windows = r.os_id == "windows";
     section(ui, &il(icons::WARNING, "Maintenance"));
     let unknown = || RichText::new("unknown").weak();
     egui::Grid::new("maint")
@@ -597,8 +728,21 @@ fn maintenance(ui: &mut egui::Ui, m: &telepad_core::model::Maintenance) {
                 }
             }
             ui.end_row();
-            ui.label(RichText::new("Updates").strong());
+            ui.label(RichText::new(if windows { "Windows Update" } else { "Updates" }).strong());
+            let last = m
+                .last_update
+                .as_ref()
+                .map_or(String::new(), |d| format!(" · last installed {d}"));
             match (m.updates, m.security_updates) {
+                (Some(0), _) if windows => {
+                    ui.label(format!("up to date (Windows Update's local cache){last}"));
+                }
+                (Some(n), _) if windows => {
+                    ui.colored_label(usage_color(80.0), format!("{n} pending{last}"));
+                }
+                (None, _) if windows && !last.is_empty() => {
+                    ui.label(format!("pending unknown{last}"));
+                }
                 (Some(0), _) => {
                     ui.label("up to date (local package cache)");
                 }
@@ -637,6 +781,9 @@ fn maintenance(ui: &mut egui::Ui, m: &telepad_core::model::Maintenance) {
                 }
             }
             ui.end_row();
+            if let Some(sec) = &r.security {
+                security_rows(ui, sec);
+            }
         });
 }
 

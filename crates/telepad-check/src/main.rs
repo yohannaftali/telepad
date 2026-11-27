@@ -41,7 +41,7 @@ fn main() -> ExitCode {
         }
     }
     if local {
-        let r = telepad_core::local::collect();
+        let r = telepad_core::local::collect(true);
         return report(&[(telepad_core::config::HostEntry::local(), r)], json);
     }
     let ws = match open_workspace(cfg.as_deref(), db.as_deref()) {
@@ -195,6 +195,42 @@ fn report(results: &[Collected], json: bool) -> ExitCode {
                     }
                     if let Some(n) = &r.sensors_note {
                         println!("   Sensors : {n}");
+                    }
+                    if r.maintenance.last_update.is_some() || r.security.is_some() {
+                        let on = |v: Option<bool>| match v {
+                            Some(true) => "on",
+                            Some(false) => "OFF",
+                            None => "unknown",
+                        };
+                        println!(
+                            "   Windows Update: {} pending, last installed {}",
+                            r.maintenance.updates.map_or("?".into(), |n| n.to_string()),
+                            r.maintenance.last_update.as_deref().unwrap_or("?")
+                        );
+                        if let Some(s) = &r.security {
+                            if let Some(a) = s.active_antivirus() {
+                                println!(
+                                    "   Antivirus: {} definitions {} updated {}{}",
+                                    a.name,
+                                    a.version.as_deref().unwrap_or("?"),
+                                    a.updated.as_deref().unwrap_or("?"),
+                                    if s.definitions_stale() {
+                                        " (OUT OF DATE)"
+                                    } else {
+                                        ""
+                                    }
+                                );
+                            }
+                            println!(
+                                "   Security: virus & threat {}, firewall {}, app & browser control {}",
+                                on(s.virus_protection()),
+                                on(s.firewall()),
+                                on(s.app_control)
+                            );
+                        }
+                    }
+                    if let Some(apps) = &r.apps {
+                        println!("   Apps    : {} installed applications", apps.len());
                     }
                     match &r.docker.unavailable {
                         Some(why) => println!("   Docker  : {why}"),
