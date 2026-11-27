@@ -2,6 +2,15 @@
 
 Newest first.
 
+## [2026-11-27] — fix(local): My Computer read takes ~19 s on Windows (#198)
+- Issue #198 addressed on GitHub (branch `198-local-docker-speed`)
+- Cause: `docker inspect` of every container; Docker Desktop takes ~0.45 s (up to 3 s) per running container
+- Fix (Windows My Computer, Docker only): network names and mounts from `docker ps -a --format '{{.ID}}|{{.Networks}}|{{.Mounts}}'`, IPs from one `docker network inspect` over all networks; `local::docker_net_lines` builds the same `id|net=ip |mounts` lines, so `parse_docker` is unchanged; stopped containers keep their network names with an empty IP; Podman keeps `inspect`
+- Remote hosts: measured on dockercenter (owner approved, read-only): `inspect` of 87 running containers 0.12 s, `network inspect` 0.08 s → `script.sh` unchanged
+- Files: core `local.rs` (+ test with made-up containers); `AGENTS.md`
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace`; `telepad-check --local` 19.2 s → 1.6 s on the test PC; networks, IPs and socket flag of all 49 containers identical to the old `inspect` output
+- Not verified: Podman on Windows (not installed; its path is unchanged)
+
 ## [2026-11-27] — fix(local): My Computer read takes ~19 s on Windows — docker inspect of every running container
 - Issue #198 created on GitHub (found while testing #193)
 - Scope: local (core local.rs docker(), parse.rs; maybe script.sh DOCKERNET)
