@@ -329,22 +329,108 @@ Everything else is in the [user manual](docs/USER_MANUAL.md).
 
 ## Documentation
 
-- [User manual](docs/USER_MANUAL.md): how Telepad works, window layout and workspaces,
-  overview and host detail, adding and importing hosts, Remote Desktop settings, files and
-  their history, Authorized keys and My keys, the database browser and its SQL log, BMC
-  sensors, updates, troubleshooting, command line — with annotated screenshots
-- [Developer guide](docs/DEVELOPER_GUIDE.md): how the code is built — the egui UI (inner windows, the table
-  component with filters, value lists and paging, the editor), the Model–View–Update core, and
-  how Telepad authorizes against hosts, databases and the Portainer API
-- Crates: [telepad-core](docs/crates/telepad-core.md), [telepad-app](docs/crates/telepad-app.md),
-  [telepad-gui](docs/crates/telepad-gui.md), [telepad-check](docs/crates/telepad-check.md) — what
-  each workspace crate holds, its rules and how to extend it
-- [Outside libraries](docs/DEPENDENCIES.md): every library Telepad uses (eframe / egui,
-  rusqlite, rustls, keyring, …) — what, who, where, when, why and how
-- [Contributing](CONTRIBUTING.md): building from source, reporting bugs, making a change, releasing
-- [Security](SECURITY.md): security model and how to report a vulnerability
-- [AGENTS.md](AGENTS.md): architecture and conventions
-- [Change history](CHANGE_HISTORY.md)
+Telepad's documentation is split by reader: people who **use** Telepad start with the user
+manual; people who **change** it read the developer guide, then the crate pages and the
+library guide; everyone who sends a change reads Contributing and Security. Each document is
+described below with what it is for and what you will find in it.
+
+### User manual
+
+**Link:** [docs/USER_MANUAL.md](docs/USER_MANUAL.md) · **For:** everyone who uses Telepad
+
+The complete guide to the app, screen by screen, with annotated screenshots from a demo lab.
+It starts with how Telepad works (hosts in `telepad.db`, plain OpenSSH, a read-only script) and
+the window layout (page sidebar, inner windows, workspaces), then covers every page: Hosts,
+Overview, groups and clusters, Portainers and container management, My Computer, the host
+detail page, Log info, Docker / Swarm / Kubernetes, refreshing and the Update Strategy. After
+that come the jobs you do with hosts — adding, importing, exporting, Host Management against an
+OpenSSH config — and the tools: the file window and its editor, Authorized keys and My keys,
+the database browser, BMC sensors. It ends with updates, troubleshooting and the command line.
+Read it when you want to know what a button does, what a message means, or how to do a task.
+
+### Developer guide
+
+**Link:** [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) · **For:** developers changing the code
+
+The walk-through of how Telepad is built. It shows the four crates and the one rule that keeps
+them manageable (all behaviour is in `telepad-app`, testable without a window, network or disk),
+explains Model–View–Update with a real feature traced end to end, and then the parts that are
+not plain egui: inner windows and workspaces, the shared table component (sort, filter row,
+searchable value list, paging and continuous mode, exports), and the text editor (highlighting,
+colour schemes, indentation). It also explains how Telepad authorizes against hosts, databases
+and the Portainer API (SSH options, tunnels, the OS password store, the pinned certificate),
+where each SQLite file is kept, and how the tests are organised. Read it first, before you
+change anything.
+
+### Crate pages
+
+**Links:** [telepad-core](docs/crates/telepad-core.md) · [telepad-app](docs/crates/telepad-app.md) ·
+[telepad-gui](docs/crates/telepad-gui.md) · [telepad-check](docs/crates/telepad-check.md) ·
+**For:** developers working inside one crate
+
+One page per workspace crate, all in the same shape: what the crate is and what it may depend
+on, its rules, its modules grouped by area, how the other crates use it, how to extend it and how
+it is tested.
+
+- **telepad-core** — the domain and I/O library: ssh collection and the remote script, parsers,
+  the SQLite stores, files / SFTP, the database client, the Portainer client, key formats,
+  self-update and everything OS-specific. Includes the path of one host collection through all
+  crates.
+- **telepad-app** — the state and all behaviour (`State`, `Msg`, `Effect`, `update()`), the
+  per-feature models and their tests; no GUI, no I/O, no outside libraries.
+- **telepad-gui** — the `telepad` executable: the eframe window, the runtime that runs effects on
+  threads, the views, the table component, widgets and themes.
+- **telepad-check** — the headless `telepad-check` command: every command, its exit codes and how
+  to add one.
+
+Read the page of the crate you are about to change; it tells you where code belongs.
+
+### Outside libraries
+
+**Link:** [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) · **For:** developers and reviewers
+
+Every library Telepad depends on directly — eframe / egui, egui_extras, rfd, arboard, rusqlite,
+serde, regex, ureq, rustls, keyring, the MySQL and PostgreSQL drivers, the CSV / Excel / PDF
+export crates, the key-format and cryptography crates, sysinfo, windows-sys, winresource —
+each answered the same way: **what** it is, **who** (which crate) uses it, **where** (which
+modules), **when** it runs, **why** Telepad uses it instead of something else, and **how**
+(features turned on or off, the API we call, the rules around it). An overview table lists them
+all on one screen. Read it before adding, upgrading or removing a library.
+
+### Contributing
+
+**Link:** [CONTRIBUTING.md](CONTRIBUTING.md) · **For:** anyone sending a bug report or a change
+
+How to report a bug (what to include, what to remove first), how to make a change (branch, the
+rules from AGENTS.md that matter most, test data, the checks that must pass, conventional
+commits), how to build Telepad from source on Windows, macOS and Linux, and how maintainers
+make a release.
+
+### Security
+
+**Link:** [SECURITY.md](SECURITY.md) · **For:** users, reviewers and security researchers
+
+How to report a vulnerability privately, and Telepad's security model: why the collection is
+read-only, which in-app changes exist and what guards them, how SSH host keys are trusted, where
+passwords and tokens are kept (never in Telepad's own files), and how self-update verifies what it
+downloads.
+
+### AGENTS.md
+
+**Link:** [AGENTS.md](AGENTS.md) · **For:** contributors and coding agents
+
+The project map: every module of every crate with its role in one line, the data flow, the
+conventions (read-only rule and its exceptions, platform code, schema changes, tests, docs), where
+each setting and file is kept, the validate commands, the release steps and the tracked issues.
+Use it as the reference to look things up; the developer guide is the one to read top to bottom.
+
+### Change history
+
+**Link:** [CHANGE_HISTORY.md](CHANGE_HISTORY.md) · **For:** users and maintainers
+
+Every release and every merged change, newest first, from the first public release (0.4.0)
+onward: what changed, which issue it closed and how it was tested. Read it to see what a new
+version brings or when a behaviour was introduced.
 
 ## License
 
