@@ -449,7 +449,7 @@ pub fn indent_unit(text: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Indent {
     pub tabs: bool,
-    /// Columns per level (2, 4 or 8; also a tab's width).
+    /// Columns per level ([`Indent::MIN`]..=[`Indent::MAX`]; also a tab's width).
     pub size: usize,
 }
 
@@ -463,7 +463,23 @@ impl Default for Indent {
 }
 
 impl Indent {
+    /// The sizes offered in the menu; any size in `MIN..=MAX` can be typed (#201).
     pub const SIZES: [usize; 3] = [2, 4, 8];
+    pub const MIN: usize = 1;
+    pub const MAX: usize = 16;
+
+    /// A typed size (#201): a whole number from `MIN` to `MAX`, else `None`.
+    pub fn parse_size(s: &str) -> Option<usize> {
+        s.trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|n| (Self::MIN..=Self::MAX).contains(n))
+    }
+
+    /// A size the editor accepts.
+    pub fn size_ok(self) -> bool {
+        (Self::MIN..=Self::MAX).contains(&self.size)
+    }
 
     /// What Tab inserts.
     pub fn unit(self) -> String {
@@ -610,6 +626,51 @@ pub fn indent(text: &str, sel: Range<usize>, unit: &str, outdent: bool) -> (Stri
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn typed_indent_size_is_checked() {
+        // #201
+        assert_eq!(Indent::parse_size("3"), Some(3));
+        assert_eq!(Indent::parse_size(" 16 "), Some(16));
+        assert_eq!(Indent::parse_size("1"), Some(1));
+        for bad in ["", "0", "17", "-2", "2.5", "four", "4x"] {
+            assert_eq!(Indent::parse_size(bad), None, "{bad:?}");
+        }
+        assert!(
+            Indent {
+                tabs: false,
+                size: 3
+            }
+            .size_ok()
+        );
+        assert!(
+            !Indent {
+                tabs: true,
+                size: 0
+            }
+            .size_ok()
+        );
+        assert!(
+            !Indent {
+                tabs: false,
+                size: 17
+            }
+            .size_ok()
+        );
+        // A file indented with 3 spaces keeps its size.
+        assert_eq!(
+            Indent::detect(
+                "a
+   b
+      c
+"
+            ),
+            Indent {
+                tabs: false,
+                size: 3
+            }
+        );
+    }
+
     #[test]
     fn indentation_converts_and_reindents() {
         // #182

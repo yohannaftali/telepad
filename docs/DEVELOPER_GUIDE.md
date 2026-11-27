@@ -374,7 +374,10 @@ gutter that stays at the left edge when the text scrolls sideways.
 **Indentation** (#182) is `EdTab::indent` (detected on load with `Indent::detect`).
 `EdMsg::SetIndent` changes what Tab inserts; `EdMsg::ConvertIndent { tab, to, sel }` rewrites
 the draft text with `convert_indent` (leading whitespace only; levels are rescaled, a partial
-level stays as spaces; YAML refuses tabs via `editor::indent_allowed`).
+level stays as spaces; YAML refuses tabs via `editor::indent_allowed`). The menu's Size is a
+text field (#201, `text_editor::size_field`): the typed text lives in egui temp memory keyed by
+window and tab until it is applied, `Indent::parse_size` accepts `Indent::MIN..=MAX` (1–16), and
+`indent_allowed` also refuses a size outside that range, so `update()` never stores one.
 
 **The embedded editor** (`text_editor::embedded`) is the same editor for a text that is not a
 file — the Portainer stack's compose file. It builds a throwaway `EdTab` each frame, keeps its

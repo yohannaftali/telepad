@@ -587,6 +587,45 @@ fn indentation_is_detected_set_and_converted_without_saving() {
 }
 
 #[test]
+fn a_typed_indent_size_is_set_only_in_range() {
+    // #201
+    use telepad_core::files::text::Indent;
+    let sp = |size| Indent { tabs: false, size };
+    let (mut s, id) = window(Mode::Sftp);
+    let text = "a:
+   b: 1
+   c:
+      d: 2
+";
+    let tab = open_compose(&mut s, id, text);
+    let t = |s: &State| editor(s).tabs.iter().find(|t| t.id == tab).unwrap().indent;
+    // A detected size outside 2 / 4 / 8 is kept.
+    assert_eq!(t(&s), sp(3));
+    assert_eq!(t(&s).label(), "Spaces: 3");
+    // A typed size in range is used; the text is unchanged.
+    ed(&mut s, id, EdMsg::SetIndent(tab, sp(6)));
+    assert_eq!(t(&s), sp(6));
+    assert_eq!(t(&s).unit(), "      ");
+    assert_eq!(edraft(&mut s, id).texts[&tab], text);
+    // Out of range: nothing changes.
+    for bad in [0, 17] {
+        ed(&mut s, id, EdMsg::SetIndent(tab, sp(bad)));
+        assert_eq!(t(&s), sp(6), "size {bad}");
+        let fx = ed(
+            &mut s,
+            id,
+            EdMsg::ConvertIndent {
+                tab,
+                to: sp(bad),
+                sel: None,
+            },
+        );
+        assert!(fx.is_empty());
+        assert_eq!(edraft(&mut s, id).texts[&tab], text);
+    }
+}
+
+#[test]
 fn line_ending_and_encoding_are_chosen_and_saved() {
     use telepad_core::files::text::{Charset, GUESS};
     let (mut s, id) = window(Mode::Sftp);
