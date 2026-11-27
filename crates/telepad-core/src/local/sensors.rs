@@ -4,17 +4,22 @@
 //!
 //! 1. `nvidia-smi` (NVIDIA GPUs: temperature, fan %, power), parsed like the
 //!    remote script's `===NVIDIA===` section;
-//! 2. LibreHardwareMonitor's WMI namespace `root\LibreHardwareMonitor` while
-//!    the user runs it (CPU, board, fans, drives and GPUs of every vendor);
-//!    Telepad never installs or starts it;
+//! 2. LibreHardwareMonitor's WMI namespace `root\LibreHardwareMonitor`, only
+//!    if the user happens to run it (CPU, board, fans, drives and GPUs of every
+//!    vendor). Owner decision on #193: Telepad never needs, suggests, installs
+//!    or starts another program, so no message mentions it;
 //! 3. the ACPI thermal zone (`sysinfo`), which many desktop boards lack.
 //!
 //! [`merge`] puts them together and says why readings are missing.
 
 use crate::model::{Sensor, SensorKind};
 
-/// Hint shown when CPU / board readings are missing on Windows.
-pub const LHM_HINT: &str = "start LibreHardwareMonitor for CPU, board and fan readings";
+/// Why a Windows PC shows no CPU / board temperatures: they sit behind the
+/// hardware (MSRs, sensor chips), which only a kernel driver can read.
+pub const NO_BOARD_TEMPS: &str = "this PC publishes no CPU or board temperatures to Windows (reading them needs a hardware driver, which Telepad does not install)";
+
+/// Why a Windows PC shows no thermal zone to a normal user.
+pub const ADMIN_ONLY: &str = "Windows shows this PC's temperatures only to administrators";
 
 /// What the Windows thermal zone answered, for the note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,15 +111,13 @@ pub fn merge(
         return (out, None);
     }
     let why = match probe() {
-        ZoneProbe::AccessDenied => "Windows shows this PC's temperatures only to administrators",
-        ZoneProbe::Missing | ZoneProbe::Other => {
-            "this PC publishes no temperature sensors to Windows"
-        }
+        ZoneProbe::AccessDenied => ADMIN_ONLY,
+        ZoneProbe::Missing | ZoneProbe::Other => NO_BOARD_TEMPS,
     };
     let note = if out.is_empty() {
-        format!("{why} — {LHM_HINT}")
+        why.to_string()
     } else {
-        format!("only the GPU is readable: {why} — {LHM_HINT}")
+        format!("only the GPU is readable: {why}")
     };
     (out, Some(note))
 }
@@ -336,17 +339,18 @@ mod tests {
         assert_eq!(
             note.as_deref(),
             Some(
-                "only the GPU is readable: this PC publishes no temperature sensors to Windows — start LibreHardwareMonitor for CPU, board and fan readings"
+                "only the GPU is readable: this PC publishes no CPU or board temperatures to Windows (reading them needs a hardware driver, which Telepad does not install)"
             )
+        );
+        assert!(
+            !note.unwrap_or_default().contains("LibreHardwareMonitor"),
+            "no other program is suggested (owner decision)"
         );
         // Nothing at all, zone refused for non-administrators.
         let (v, note) = merge(vec![], vec![], vec![], || ZoneProbe::AccessDenied);
         assert!(v.is_empty());
-        assert_eq!(
-            note.as_deref(),
-            Some(
-                "Windows shows this PC's temperatures only to administrators — start LibreHardwareMonitor for CPU, board and fan readings"
-            )
-        );
+        assert_eq!(note.as_deref(), Some(ADMIN_ONLY));
+        let (_, note) = merge(vec![], vec![], vec![], || ZoneProbe::Missing);
+        assert_eq!(note.as_deref(), Some(NO_BOARD_TEMPS));
     }
 }

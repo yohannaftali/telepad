@@ -760,10 +760,10 @@ exported, imported or written into `telepad.ssh_config`. It shows the same secti
   `reg query` (reboot pending) and the `docker` / `podman` command; on Linux and macOS
   the same script that runs on hosts, run locally.
 - On Windows, **Sensors** shows an NVIDIA graphics card's temperature, fan and power
-  (`nvidia-smi`), and CPU, board, fan and drive readings of every brand while
-  [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) runs.
-  Without it, many desktop PCs publish no temperatures to Windows at all (running Telepad as
-  administrator does not change that); the section then says so. See
+  (`nvidia-smi`, part of the NVIDIA driver) and the board's thermal zone when it has one.
+  CPU and board temperatures sit behind the hardware, where only a kernel driver can read
+  them; Telepad installs no driver, so many desktop PCs show only the graphics card (running
+  Telepad as administrator does not change that) and the section says why. See
   [Sensors on each computer](#sensors-on-each-computer). Pending updates are *unknown*
   (Windows Update is not asked).
 - **Open Terminal** opens a shell of this computer in a new terminal window, in your home
@@ -1895,19 +1895,18 @@ what the computer publishes to a normal user:
 | Linux host or My Computer on Linux | CPU (Intel, AMD), NVMe drives, AMD graphics cards, board fans when the board's sensor driver is loaded (often after `sensors-detect` once) | `/sys/class/hwmon`, `/sys/class/thermal` |
 | Linux with an NVIDIA graphics card | the above plus the card's temperature, fan % and power | `nvidia-smi` (the NVIDIA driver publishes nothing in `/sys`) |
 | Physical server with a BMC | fans and inlet / exhaust temperatures, after the one-time setup | `ipmitool` (see below) |
-| Windows (My Computer) with LibreHardwareMonitor running | CPU, board, fans, drives and graphics cards of every brand (Intel, AMD, NVIDIA) | LibreHardwareMonitor's WMI data |
-| Windows with an NVIDIA graphics card | the card's temperature, fan % and power | `nvidia-smi` |
-| Windows without either | the ACPI thermal zone, if the board publishes one; many desktop boards do not | Windows (WMI) |
+| Windows (My Computer) with an NVIDIA graphics card | the card's temperature, fan % and power | `nvidia-smi` (installed with the NVIDIA driver) |
+| Windows (My Computer), CPU and board | the ACPI thermal zone, if the board publishes one; many desktop boards do not | Windows (WMI) |
 | macOS | *not available on macOS* | macOS needs administrator rights for its sensors |
 | Virtual machine | usually nothing | VMs have no sensors |
 
-On Windows, LibreHardwareMonitor is a free program you start yourself (it needs
-administrator rights for its own driver). While it runs, Telepad reads what it publishes;
-Telepad never installs, starts or changes it. A graphics card read by both
-LibreHardwareMonitor and `nvidia-smi` is shown once. When the CPU and board are missing,
-**Sensors** says why: *this PC publishes no temperature sensors to Windows* (running as
-administrator would not help) or *Windows shows this PC's temperatures only to
-administrators*, and suggests starting LibreHardwareMonitor.
+On Windows, CPU and board temperatures and fan speeds are read by the hardware's sensor
+chips, which only a kernel driver can reach. Telepad installs no driver and needs no other
+program, so when the board publishes no thermal zone, **Sensors** says why: *this PC
+publishes no CPU or board temperatures to Windows* (running as administrator would not help),
+or *Windows shows this PC's temperatures only to administrators*. If a hardware monitor that
+publishes its readings in WMI (LibreHardwareMonitor) happens to run, Telepad also shows those
+readings, read-only; a graphics card it reports and `nvidia-smi` also reports is shown once.
 
 ## Fan speeds and BMC temperatures (IPMI)
 
@@ -1966,7 +1965,7 @@ also pauses automatic installs until the next start.
 | `connection timed out` + `(host answers ping …)` | The machine is up but SSH is blocked or not running. |
 | `no common SSH algorithm (legacy host)` | Add e.g. `KexAlgorithms +diffie-hellman-group1-sha1` under **Other ssh options**. |
 | Sensors: `ipmitool not installed` / `sudo rule missing` | Use **Set up BMC access…** on that host. |
-| My Computer Sensors: `this PC publishes no temperature sensors to Windows` / `only the GPU is readable` | The board does not publish temperatures to Windows. Start LibreHardwareMonitor for CPU, board and fan readings ([Sensors on each computer](#sensors-on-each-computer)). |
+| My Computer Sensors: `this PC publishes no CPU or board temperatures to Windows` / `only the GPU is readable` | Expected on many desktop PCs: the board does not publish its temperatures to Windows, and reading them needs a hardware driver, which Telepad does not install ([Sensors on each computer](#sensors-on-each-computer)). |
 | Update check: `cannot reach GitHub` | No internet or a proxy blocks `api.github.com`; Telepad keeps working without updates. |
 | `Database from a newer Telepad` / `was upgraded by a newer Telepad` | A newer Telepad upgraded the database schema beyond what this copy supports. Your data is unchanged; click **Update Telepad** on that screen (or download the latest release) and restart. Newer databases with additive changes still open with a status-bar note (`database from a newer Telepad (schema n): some features need an update`) without touching the newer data. |
 

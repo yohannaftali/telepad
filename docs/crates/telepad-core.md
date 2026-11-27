@@ -60,7 +60,7 @@ outside libraries: [DEPENDENCIES.md](../DEPENDENCIES.md)
 | `cluster.rs` | Docker Swarm and Kubernetes model and parsers |
 | `eol.rs` | End-of-support dates per distribution release |
 | `local.rs` | My Computer: collect this PC without SSH (Windows via `sysinfo` and `netstat`; Linux / macOS by running `script.sh` locally) |
-| `local/sensors.rs` | My Computer sensors on Windows (#193): `nvidia-smi`, LibreHardwareMonitor's WMI namespace while it runs, the ACPI thermal zone as fallback; `merge` (no duplicates) and the note that says why readings are missing (`HostReport::sensors_note`) |
+| `local/sensors.rs` | My Computer sensors on Windows (#193): `nvidia-smi`, LibreHardwareMonitor's WMI namespace only if it happens to run (never suggested), the ACPI thermal zone as fallback; `merge` (no duplicates) and the note that says why readings are missing (`HostReport::sensors_note`) |
 | `login_log.rs` | Log info: read SSH logins from the systemd journal, parse `Accepted` lines |
 
 ### Actions on hosts (user-started only)

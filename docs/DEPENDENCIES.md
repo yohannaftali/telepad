@@ -52,7 +52,7 @@ library at all in `telepad-app`), and add an entry here in the same PR.
 | [p12-keystore](#p12-keystore) | core | PKCS#12 (`.p12` / `.pfx`) keys |
 | [pgp](#pgp) | core | OpenPGP key import / export |
 | [sysinfo](#sysinfo) | core (Windows) | My Computer facts on Windows |
-| [wmi](#wmi) | core (Windows) | LibreHardwareMonitor sensors and the thermal zone check on My Computer |
+| [wmi](#wmi) | core (Windows) | thermal zone check and, if it runs, LibreHardwareMonitor's sensors on My Computer |
 | [windows-sys](#windows-sys) | core (Windows) | Windows Credential Manager for RDP passwords |
 | [winresource](#winresource) | gui (build, Windows) | icon and version info in `telepad.exe` |
 
@@ -449,8 +449,9 @@ derivation (Argon2, bcrypt-pbkdf, scrypt) and big-number maths are very slow uno
 - **Where:** `local/sensors.rs` (`wmi_read::lhm`, `wmi_read::thermal_zone_probe`, #193).
 - **When:** each My Computer read on Windows (page open, live interval, Refresh,
   `telepad-check --local`).
-- **Why:** LibreHardwareMonitor, while the user runs it, publishes CPU, board, fan, drive and
-  GPU sensors of every vendor in the WMI namespace `root\LibreHardwareMonitor`, readable without
+- **Why:** the direct ACPI thermal-zone query (below), and LibreHardwareMonitor: if the user
+  happens to run it (Telepad never needs, suggests, installs or starts it — owner decision on
+  #193), it publishes CPU, board, fan, drive and GPU sensors of every vendor in the WMI namespace `root\LibreHardwareMonitor`, readable without
   administrator rights. And the direct ACPI thermal-zone query returns the WMI error code
   `sysinfo` hides, which tells "needs administrator" (`WBEM_E_ACCESS_DENIED`) from "this PC
   publishes none" (`WBEM_E_NOT_SUPPORTED`) for the note under **Sensors**. Calling COM ourselves
@@ -458,7 +459,8 @@ derivation (Argon2, bcrypt-pbkdf, scrypt) and big-number maths are very slow uno
 - **How:** `default-features = false` (no `chrono`). `WMIConnection::with_namespace_path` and
   `raw_query` into small `serde` structs (`Sensor`: Name, SensorType, Value, Parent; `Hardware`:
   Identifier, Name). A missing namespace (LibreHardwareMonitor not running) simply gives no
-  rows. Read-only: only `SELECT` queries, nothing is installed, started or written.
+  rows and no message. Read-only: only `SELECT` queries, nothing is installed, started or
+  written.
 
 ### windows-sys
 
