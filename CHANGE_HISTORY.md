@@ -2,6 +2,13 @@
 
 Newest first.
 
+## [2026-11-27] — feat(sensors): drive temperatures on Windows My Computer (#196, part)
+- Issue #196 partly addressed on GitHub: NVMe / SATA drive temperature through `IOCTL_STORAGE_QUERY_PROPERTY` (drive opened without read / write access), `Disk <n>` rows named after the drive model, LibreHardwareMonitor drive rows de-duplicated, the #193 note names what is readable (GPU / drives)
+- Not done: AMD graphics through ADLX — the ADLX SDK licence (`ADLX SDK License Agreement.pdf`, metadata title "Non-disclosure and limited use agreement", text not read) is not cleared for this MIT project; left for the owner
+- Files: core `platform.rs` (`StorageProperty`, `storage_property`), `local/sensors.rs` (`drive_name`, `drive_temperatures`, `drive_sensors`, `merge(drives)`), `Cargo.toml` (windows-sys features); `docs/USER_MANUAL.md`, `docs/DEPENDENCIES.md`, `docs/crates/telepad-core.md`, `AGENTS.md`
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace` (descriptor parsers, de-duplication, note); live on Windows 11: drive 0 opened and its model read without admin; its temperature query fails (error 1117) and Windows' own `Get-StorageReliabilityCounter` is refused to non-administrators too, so the row is left out silently as specified
+- Not verified: a PC whose drive gives its temperature to a normal user
+
 ## [2026-11-27] — Telepad 0.9.15
 - #193 Sensors: NVIDIA graphics cards (nvidia-smi) on hosts and on Windows My Computer; LibreHardwareMonitor readings when it happens to run; a note says why Sensors is empty (Windows without CPU / board temperatures, macOS)
 - #198 My Computer reads in about 1.5 s instead of ~19 s with Docker Desktop (container IPs per network instead of inspecting each container)

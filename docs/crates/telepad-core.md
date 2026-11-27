@@ -23,7 +23,8 @@ outside libraries: [DEPENDENCIES.md](../DEPENDENCIES.md)
 - **No GUI.** Nothing here may depend on egui, eframe, rfd or arboard. A function that needs
   a file chosen takes the path; the GUI's runtime opens the dialog.
 - **OS-specific code only in `platform.rs`**, behind `#[cfg(target_os = ...)]`. The one
-  `unsafe` in the project (Windows Credential Manager via `windows-sys`) is there.
+  `unsafe` in the project (Windows Credential Manager and the drive property query of #196 via
+  `windows-sys`) is there.
 - **Read-only on remote hosts.** The collection script and every background read change
   nothing; the few in-app changes (authorized keys, database edits, file operations,
   Portainer actions) are separate functions only called from a user action — see
@@ -60,7 +61,7 @@ outside libraries: [DEPENDENCIES.md](../DEPENDENCIES.md)
 | `cluster.rs` | Docker Swarm and Kubernetes model and parsers |
 | `eol.rs` | End-of-support dates per distribution release |
 | `local.rs` | My Computer: collect this PC without SSH (Windows via `sysinfo` and `netstat`; Linux / macOS by running `script.sh` locally) |
-| `local/sensors.rs` | My Computer sensors on Windows (#193): `nvidia-smi`, LibreHardwareMonitor's WMI namespace only if it happens to run (never suggested), the ACPI thermal zone as fallback; `merge` (no duplicates) and the note that says why readings are missing (`HostReport::sensors_note`) |
+| `local/sensors.rs` | My Computer sensors on Windows (#193; drives #196: `drive_name` / `drive_temperatures` parse the storage descriptors from `platform::storage_property`, chip `Disk <n>`, LibreHardwareMonitor drive rows dropped when present): `nvidia-smi`, LibreHardwareMonitor's WMI namespace only if it happens to run (never suggested), the ACPI thermal zone as fallback; `merge` (no duplicates) and the note that says why readings are missing (`HostReport::sensors_note`) |
 | `login_log.rs` | Log info: read SSH logins from the systemd journal, parse `Accepted` lines |
 
 ### Actions on hosts (user-started only)

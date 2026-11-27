@@ -484,13 +484,18 @@ derivation (Argon2, bcrypt-pbkdf, scrypt) and big-number maths are very slow uno
 
 - **What:** Microsoft's raw Rust bindings to the Win32 API.
 - **Who:** `telepad-core`, **Windows only**.
-- **Where:** `platform.rs` (`CredWriteW`, `CredReadW`, `CredDeleteW`).
-- **When:** saving, checking or removing a Remote Desktop password for a host (#108).
+- **Where:** `platform.rs` (`CredWriteW`, `CredReadW`, `CredDeleteW`; `storage_property`:
+  `CreateFileW`, `DeviceIoControl`, `CloseHandle`).
+- **When:** saving, checking or removing a Remote Desktop password for a host (#108);
+  reading drive names and temperatures for My Computer's Sensors (#196).
 - **Why:** `mstsc` only reads credentials stored as `TERMSRV/<host>` domain passwords;
-  `keyring` writes generic credentials, so we call the API directly.
-- **How:** features `Win32_Foundation`, `Win32_Security_Credentials`. This is the **only
-  `unsafe` code in Telepad**, kept small and in `platform.rs`. The password is written, its
-  existence checked, or deleted — never read back.
+  `keyring` writes generic credentials, so we call the API directly. Drive temperatures are
+  only published through `IOCTL_STORAGE_QUERY_PROPERTY`; no safe crate wraps it.
+- **How:** features `Win32_Foundation`, `Win32_Security_Credentials`, `Win32_Storage_FileSystem`,
+  `Win32_System_IO`, `Win32_System_Ioctl`. This is the **only `unsafe` code in Telepad**,
+  kept small and in `platform.rs`, each call commented. The password is written, its
+  existence checked, or deleted — never read back. Drives are opened with no read or write
+  access, queried, and the handle closed at once.
 
 ## Build
 

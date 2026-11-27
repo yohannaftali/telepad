@@ -974,3 +974,81 @@ mod tests {
         assert!(!super::rdp_credential_saved(a));
     }
 }
+
+/// Which storage property [`storage_property`] asks for (#196).
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy)]
+pub enum StorageProperty {
+    /// `STORAGE_DEVICE_DESCRIPTOR`: vendor / product / bus.
+    Device,
+    /// `STORAGE_TEMPERATURE_DATA_DESCRIPTOR`: the drive's temperature sensors.
+    Temperature,
+}
+
+/// The raw answer of `IOCTL_STORAGE_QUERY_PROPERTY` for `\.\PhysicalDrive<n>`
+/// (#196), `None` when the drive does not exist or does not answer. The
+/// drive is opened with no read or write access (property queries need
+/// none, so no administrator rights); nothing is read from or written to it.
+#[cfg(target_os = "windows")]
+pub fn storage_property(drive: u32, property: StorageProperty) -> Option<Vec<u8>> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::IO::DeviceIoControl;
+    use windows_sys::Win32::System::Ioctl::{
+        IOCTL_STORAGE_QUERY_PROPERTY, PropertyStandardQuery, STORAGE_PROPERTY_QUERY,
+        StorageDeviceProperty, StorageDeviceTemperatureProperty,
+    };
+
+    let path = wide(&format!(r"\\.\PhysicalDrive{drive}"));
+    // SAFETY: `path` is NUL-terminated; access 0 asks for no read / write
+    // rights; the handle is checked and closed below on every path.
+    let handle = unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+        return None;
+    }
+    let query = STORAGE_PROPERTY_QUERY {
+        PropertyId: match property {
+            StorageProperty::Device => StorageDeviceProperty,
+            StorageProperty::Temperature => StorageDeviceTemperatureProperty,
+        },
+        QueryType: PropertyStandardQuery,
+        AdditionalParameters: [0],
+    };
+    let mut buf = vec![0u8; 4096];
+    let mut got = 0u32;
+    // SAFETY: `query` and `buf` outlive the call and their sizes are passed
+    // exactly; the call is synchronous (no OVERLAPPED).
+    let ok = unsafe {
+        DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_QUERY_PROPERTY,
+            std::ptr::from_ref(&query).cast(),
+            u32::try_from(std::mem::size_of::<STORAGE_PROPERTY_QUERY>()).unwrap_or(0),
+            buf.as_mut_ptr().cast(),
+            u32::try_from(buf.len()).unwrap_or(0),
+            &mut got,
+            std::ptr::null_mut(),
+        )
+    } != 0;
+    // SAFETY: `handle` is the valid handle opened above, closed once.
+    unsafe {
+        CloseHandle(handle);
+    }
+    if !ok {
+        return None;
+    }
+    buf.truncate(usize::try_from(got).unwrap_or(0));
+    Some(buf)
+}

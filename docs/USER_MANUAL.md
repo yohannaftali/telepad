@@ -1958,6 +1958,8 @@ what the computer publishes to a normal user:
 | Physical server with a BMC | fans and inlet / exhaust temperatures, after the one-time setup | `ipmitool` (see below) |
 | Windows (My Computer) with an NVIDIA graphics card | the card's temperature, fan % and power | `nvidia-smi` (installed with the NVIDIA driver) |
 | Windows (My Computer), CPU and board | the ACPI thermal zone, if the board publishes one; many desktop boards do not | Windows (WMI) |
+| Windows (My Computer), drives | each NVMe / SATA drive's temperature as *Disk 0*, *Disk 1*, … with its model, **when Windows gives it to a normal user**; many drives and drivers answer only to administrators, and then no row appears | Windows' storage temperature query (the drive is opened without read or write access) |
+| Windows (My Computer), AMD graphics | *not read yet*: AMD's ADLX library is not used until its licence is cleared for Telepad | — |
 | macOS | *not available on macOS* | macOS needs administrator rights for its sensors |
 | Virtual machine | usually nothing | VMs have no sensors |
 
@@ -1967,7 +1969,9 @@ program, so when the board publishes no thermal zone, **Sensors** says why: *thi
 publishes no CPU or board temperatures to Windows* (running as administrator would not help),
 or *Windows shows this PC's temperatures only to administrators*. If a hardware monitor that
 publishes its readings in WMI (LibreHardwareMonitor) happens to run, Telepad also shows those
-readings, read-only; a graphics card it reports and `nvidia-smi` also reports is shown once.
+readings, read-only; a graphics card it reports and `nvidia-smi` also reports is shown once,
+and so is a drive that Windows already reported. When only the graphics card and / or the
+drives can be read, the note says so (*only the GPU and the drives are readable: …*).
 
 ## Fan speeds and BMC temperatures (IPMI)
 
