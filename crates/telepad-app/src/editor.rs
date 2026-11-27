@@ -911,7 +911,7 @@ fn reopen(id: u64, e: &mut FileEditor, tab: TabId, charset: Charset, fx: &mut Ve
 
 /// Tabs are not valid YAML indentation (#182).
 pub fn indent_allowed(lang: Lang, to: Indent) -> bool {
-    !(to.tabs && lang == Lang::Yaml)
+    to.size_ok() && !(to.tabs && lang == Lang::Yaml)
 }
 
 /// Write the tab's text (`check`: only if the file is still as loaded).

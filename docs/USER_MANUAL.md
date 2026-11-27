@@ -1497,8 +1497,12 @@ full path). Opening a file that already has a tab switches to it.
 
   ![The same compose file in Monokai](images/editor-monokai.png)
 - **Indentation** (#182): click *Spaces: 4* (also in the Portainer stack editor's header):
-  - **Indent using spaces** / **Indent using tabs** and **Size 2 / 4 / 8** change only what Tab
-    and Shift+Tab insert; the text stays as it is.
+  - **Indent using spaces** / **Indent using tabs** and **Size** (**Tab size** with tabs) change
+    only what Tab and Shift+Tab insert and how wide a tab is drawn; the text stays as it is.
+  - **Size** (#201) is a field with a dropdown: pick 2, 4 or 8 from the ▾ button, or type any size
+    from 1 to 16 and press Enter (or click elsewhere). Text that is not a size from 1 to 16 gets a
+    red outline (hover: *1 to 16*) and is not used; Esc puts the current size back. A file
+    indented with another size, e.g. 3 spaces, opens as *Spaces: 3* and keeps it.
   - **Convert indentation to spaces / to tabs** rewrites the leading whitespace of every line
     (only the selected lines when text is selected); a rest that is not a whole level (6 spaces
     at size 4) stays as spaces.
@@ -1507,7 +1511,7 @@ full path). Opening a file that already has a tab switches to it.
   - Conversions mark the tab *Not saved* and are undone with Ctrl+Z; nothing is written before
     Save. YAML files cannot use tabs (not valid YAML), so those choices are off there.
 
-  ![The indentation menu of a YAML file: tabs are off](images/editor-indent.png)
+  ![The indentation menu of a YAML file indented with 3 spaces: Size field and its 2 / 4 / 8 dropdown; tabs are off](images/editor-indent.png)
 
 - **Keyboard shortcuts** (#205): the key button in the status bar (also in the Portainer stack
   editor's header) picks the shortcut style for every editor: **VS Code** (the default),
