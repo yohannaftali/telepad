@@ -676,3 +676,97 @@ fn line_ending_and_encoding_are_chosen_and_saved() {
     let fx = ed(&mut s, id, EdMsg::Reload(tab));
     assert!(matches!(&fx[..], [FmEffect::Load { charset: None, .. }]));
 }
+
+#[test]
+fn open_dialog_lists_the_same_side_and_opens_files_as_tabs() {
+    let (mut s, id) = window(Mode::Sftp);
+    let tab = open_compose(&mut s, id, "a: 1\n");
+    let dir = |name: &str| Entry {
+        name: name.into(),
+        kind: Kind::Dir,
+        ..Default::default()
+    };
+    // Open… lists the active file's folder on its side (#204).
+    let fx = ed(&mut s, id, EdMsg::ShowOpen);
+    assert!(
+        matches!(&fx[..], [FmEffect::Browse { side: Side::Remote, path, .. }] if path == "/srv/app")
+    );
+    assert!(editor(&s).open.as_ref().unwrap().loading);
+    let listing = vec![
+        file("docker-compose.yml", 40),
+        file("app.env", 5),
+        dir("conf"),
+    ];
+    ed(
+        &mut s,
+        id,
+        EdMsg::Browsed(Ok(("/srv/app".into(), listing.clone()))),
+    );
+    let names: Vec<_> = editor(&s)
+        .open
+        .as_ref()
+        .unwrap()
+        .entries
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+    assert_eq!(
+        names,
+        ["conf", "app.env", "docker-compose.yml"],
+        "folders first"
+    );
+    // Into a folder and back up.
+    let fx = ed(&mut s, id, EdMsg::PickOpen("conf".into()));
+    assert!(matches!(&fx[..], [FmEffect::Browse { path, .. }] if path == "/srv/app/conf"));
+    ed(
+        &mut s,
+        id,
+        EdMsg::Browsed(Ok(("/srv/app/conf".into(), vec![file("nginx.conf", 9)]))),
+    );
+    assert_eq!(edraft(&mut s, id).open_path, "/srv/app/conf");
+    let fx = ed(&mut s, id, EdMsg::PickOpen("..".into()));
+    assert!(matches!(&fx[..], [FmEffect::Browse { path, .. }] if path == "/srv/app"));
+    ed(
+        &mut s,
+        id,
+        EdMsg::Browsed(Ok(("/srv/app".into(), listing.clone()))),
+    );
+    // A file that is open already: switched to, not loaded again.
+    let fx = ed(&mut s, id, EdMsg::PickOpen("docker-compose.yml".into()));
+    assert!(fx.is_empty());
+    assert_eq!(
+        (editor(&s).active, editor(&s).open.is_none()),
+        (Some(tab), true)
+    );
+    // Another file opens as a new tab.
+    ed(&mut s, id, EdMsg::ShowOpen);
+    ed(&mut s, id, EdMsg::Browsed(Ok(("/srv/app".into(), listing))));
+    let fx = ed(&mut s, id, EdMsg::PickOpen("app.env".into()));
+    assert!(
+        matches!(&fx[..], [FmEffect::Load { path, load: Load::Open, .. }] if path == "/srv/app/app.env")
+    );
+    assert_eq!(editor(&s).tabs.len(), 2);
+    // The file window's own folders did not move.
+    assert_eq!(s.model.files[0].remote.path, "/srv/app");
+    // A listing error stays in the dialog; Cancel closes it.
+    ed(&mut s, id, EdMsg::ShowOpen);
+    ed(&mut s, id, EdMsg::Browsed(Err("Permission denied".into())));
+    assert_eq!(
+        editor(&s).open.as_ref().unwrap().error.as_deref(),
+        Some("Permission denied")
+    );
+    ed(&mut s, id, EdMsg::CloseOpen);
+    assert!(editor(&s).open.is_none());
+}
+
+#[test]
+fn open_dialog_needs_sftp_for_host_files() {
+    let (mut s, id) = window(Mode::Fallback);
+    let fx = ed(&mut s, id, EdMsg::ShowOpen);
+    assert!(fx.is_empty());
+    let o = editor(&s).open.clone().unwrap();
+    assert_eq!(
+        (o.loading, o.error.as_deref()),
+        (false, Some("Editing needs SFTP on the host"))
+    );
+}

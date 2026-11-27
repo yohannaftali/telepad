@@ -90,6 +90,8 @@ struct FileWorker {
 /// Work for a file window's worker thread (it holds the SFTP connection).
 enum FileJob {
     List(Side, String),
+    /// The editor's Open… dialog (#204): listed like a pane, answered to the editor.
+    Browse(Side, String),
     Op(Side, FileOp),
     /// Editor (#64): read a file / write it back.
     Load {
@@ -1091,8 +1093,9 @@ impl Runtime {
                     // this computer too for My Computer.
                     let on = |side: Side| if both_local { Side::Local } else { side };
                     for job in inbox {
-                        let (side, path) = match job {
-                            FileJob::List(side, path) => (side, path),
+                        let (side, path, browse) = match job {
+                            FileJob::List(side, path) => (side, path, false),
+                            FileJob::Browse(side, path) => (side, path, true),
                             FileJob::Load {
                                 tab,
                                 side,
@@ -1176,11 +1179,27 @@ impl Runtime {
                                 None => fallback::list(&ssh, &host, &path),
                             },
                         };
-                        send(fm(FmMsg::Listed { id, side, result }));
+                        if browse {
+                            send(fm(FmMsg::Editor {
+                                id,
+                                msg: EdMsg::Browsed(result),
+                            }));
+                        } else {
+                            send(fm(FmMsg::Listed { id, side, result }));
+                        }
                     }
                 });
                 None
             }
+            FmEffect::Browse { id, side, path } => match self.files.get(&id) {
+                Some(w) => w.jobs.send(FileJob::Browse(side, path)).err().map(|_| {
+                    fm(FmMsg::Editor {
+                        id,
+                        msg: EdMsg::Browsed(Err("Not connected — click Retry".into())),
+                    })
+                }),
+                None => None,
+            },
             FmEffect::List { id, side, path } => match self.files.get(&id) {
                 Some(w) => w.jobs.send(FileJob::List(side, path)).err().map(|_| {
                     fm(FmMsg::Listed {

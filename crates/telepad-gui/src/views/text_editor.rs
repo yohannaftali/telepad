@@ -123,6 +123,7 @@ pub fn editor_page(
     window(ui, s, &mut dr.editor, focused, out);
     question(ui, s, &dr.editor, out);
     reopen_question(ui, s, out);
+    open_dialog(ui, s, &mut dr.editor, out);
 }
 
 fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, out: &mut Vec<Msg>) {
@@ -143,6 +144,9 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
         }
         if sc(Modifiers::COMMAND, Key::W) {
             send(out, id, EdMsg::Close(tid));
+        }
+        if sc(Modifiers::COMMAND, Key::O) {
+            send(out, id, EdMsg::ShowOpen);
         }
         if ready {
             let find = sc(Modifiers::COMMAND, Key::F);
@@ -234,7 +238,7 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
                 Side::Remote => icons::DISKS,
             };
             let full = format!("{icon} {}: {}", place(s, t.side), t.path);
-            let w = (ui.available_width() - 160.0).max(80.0);
+            let w = (ui.available_width() - 250.0).max(80.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(w, ui.spacing().interact_size.y),
                 egui::Layout::left_to_right(egui::Align::Center),
@@ -262,6 +266,16 @@ fn window(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, focused: bool, o
                     .clicked()
                 {
                     send(out, id, EdMsg::Save(tid));
+                }
+                if ui
+                    .add(egui::Button::new(il(icons::FOLDER, "Open…")).small())
+                    .on_hover_text(format!(
+                        "Open another file of {} (Ctrl+O)",
+                        place(s, t.side)
+                    ))
+                    .clicked()
+                {
+                    send(out, id, EdMsg::ShowOpen);
                 }
             });
         });
@@ -1061,6 +1075,115 @@ fn encoding_list(
             }
         });
     pick
+}
+
+/// Open… (#204): a folder of the same side as the file window, listed in
+/// the window (no native dialog); a file opens as a new tab.
+fn open_dialog(ui: &mut egui::Ui, s: &FileSession, dr: &mut EdDraft, out: &mut Vec<Msg>) {
+    let id = s.id;
+    let Some(o) = &s.editor.open else {
+        return;
+    };
+    let modal = egui::Modal::new(egui::Id::unique(("telepad-ed-open", id))).show(ui.ctx(), |ui| {
+        ui.set_width(560.0);
+        ui.heading(il(
+            icons::FOLDER,
+            &format!("Open a file of {}", place(s, o.side)),
+        ));
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(!o.loading, egui::Button::new(icons::ARROW_LINE_UP))
+                .on_hover_text("Parent folder")
+                .clicked()
+            {
+                send(out, id, EdMsg::PickOpen("..".into()));
+            }
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut dr.open_path)
+                    .hint_text("Folder or file path, then Enter")
+                    .desired_width((ui.available_width() - 40.0).max(120.0)),
+            );
+            let go = ui.button("Go").clicked();
+            if go || (r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+                let typed = dr.open_path.trim().to_string();
+                // A typed file name of the folder shown opens it.
+                let name = typed.rsplit(['/', '\\']).next().unwrap_or("");
+                let in_dir = o.entries.iter().any(|e| e.name == name && !e.is_dir())
+                    && typed.len() > name.len()
+                    && typed[..typed.len() - name.len()].trim_end_matches(['/', '\\'])
+                        == o.dir.trim_end_matches(['/', '\\']);
+                if in_dir {
+                    send(out, id, EdMsg::PickOpen(name.to_string()));
+                } else {
+                    send(out, id, EdMsg::Browse(typed));
+                }
+            }
+        });
+        ui.add(
+            egui::TextEdit::singleline(&mut dr.open_filter)
+                .hint_text("Filter names")
+                .desired_width(ui.available_width()),
+        );
+        if o.loading {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new("Reading the folder…").weak());
+            });
+        }
+        if let Some(err) = &o.error {
+            ui.colored_label(red(), format!("{} {err}", icons::X_CIRCLE));
+        }
+        let needle = dr.open_filter.to_lowercase();
+        egui::ScrollArea::vertical()
+            .max_height(360.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for e in o
+                    .entries
+                    .iter()
+                    .filter(|e| needle.is_empty() || e.name.to_lowercase().contains(&needle))
+                {
+                    let icon = if e.is_dir() {
+                        icons::FOLDER
+                    } else {
+                        icons::CODE
+                    };
+                    let label = if e.is_dir() {
+                        format!("{icon} {}", e.name)
+                    } else {
+                        format!("{icon} {}    {}", e.name, human_size(e.size))
+                    };
+                    let r = ui.selectable_label(dr.open_sel.as_deref() == Some(&e.name), label);
+                    if r.clicked() {
+                        dr.open_sel = Some(e.name.clone());
+                    }
+                    if r.double_clicked() {
+                        send(out, id, EdMsg::PickOpen(e.name.clone()));
+                    }
+                }
+            });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let sel = dr.open_sel.clone();
+            if ui
+                .add_enabled(
+                    sel.is_some() && !o.loading,
+                    egui::Button::new(il(icons::FOLDER, "Open")),
+                )
+                .clicked()
+                && let Some(n) = sel
+            {
+                send(out, id, EdMsg::PickOpen(n));
+            }
+            if ui.button("Cancel").clicked() {
+                send(out, id, EdMsg::CloseOpen);
+            }
+            ui.label(RichText::new("Double-click a folder to enter it, a file to open it").weak());
+        });
+    });
+    if modal.should_close() {
+        send(out, id, EdMsg::CloseOpen);
+    }
 }
 
 /// Reopen with Encoding of a tab with unsaved changes (#203).
