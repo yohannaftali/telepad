@@ -18,8 +18,10 @@ minimized, maximized, tabbed and arranged, kept in named workspaces like MikroTi
 - **Open SSH** (a terminal logged in to the host), **Copy ssh command**, and **Open RDP**
   for Windows hosts without SSH
 - **My Computer**: the same page for the PC Telepad runs on (system, maintenance, usage,
-  disks, network, sensors, Docker, ports), without SSH; **Open Terminal**, **Open files…**
-  with this computer on both sides, and its local MariaDB / MySQL / PostgreSQL
+  disks, network, ports, sensors, Docker), without SSH; on Windows also Windows Update,
+  antivirus definitions, Windows Security (virus & threat protection, firewall, app & browser
+  control) and the installed applications; **Open Terminal**, **Open files…** with this
+  computer on both sides, and its local MariaDB / MySQL / PostgreSQL
 - **Groups** and **Clusters**: optional, independent labels for your hosts (a host can be in
   group *Office* and cluster *Web*); each has a "Hosts - [name]" page like the Hosts page
 - **Portainers**: register your Portainer servers (API token in the OS password store) and see

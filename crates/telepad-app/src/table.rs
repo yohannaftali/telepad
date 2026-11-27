@@ -246,6 +246,8 @@ pub enum FlagKind {
     EndOfSupport,
     /// Swarm / Kubernetes nodes or services not healthy.
     Cluster,
+    /// Windows Security of My Computer: protection off or old definitions (#211).
+    Security,
 }
 
 /// One maintenance flag: what, how urgent, a short label and a hover text.
@@ -317,9 +319,31 @@ pub fn maintenance_flags(m: &Maintenance) -> Vec<Flag> {
     flags
 }
 
-/// Maintenance flags plus a degraded Swarm / Kubernetes cluster.
+/// Maintenance flags plus a degraded Swarm / Kubernetes cluster and Windows
+/// Security problems (#211).
 pub fn host_flags(r: &HostReport) -> Vec<Flag> {
     let mut flags = maintenance_flags(&r.maintenance);
+    let security = r
+        .security
+        .as_ref()
+        .map(|s| s.problems())
+        .unwrap_or_default();
+    if !security.is_empty() {
+        let off = security.iter().any(|p| p.contains("off"));
+        flags.insert(
+            0,
+            Flag {
+                kind: FlagKind::Security,
+                severity: if off {
+                    Severity::Danger
+                } else {
+                    Severity::Warn
+                },
+                short: "security".into(),
+                detail: security.join("; "),
+            },
+        );
+    }
     let problems = r.cluster.degraded();
     if !problems.is_empty() {
         flags.insert(

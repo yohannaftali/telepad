@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-27] — feat(local): My Computer — Windows security and update status, installed applications
+- Issue #211 addressed on GitHub
+- Files: core `local/security.rs` (new), `local.rs` (`collect(slow)`, `keep_slow`), `model.rs` (`Security`, `Antivirus`, `FirewallProfile`, `App`, `Maintenance::last_update`); app `msg.rs` (`CollectLocal { slow }`, `LocalCollected::slow`), `state.rs` (`Model::local_slow`), `update.rs`, `table.rs` (`FlagKind::Security`), `tests_local.rs`, `tests.rs`; gui `views/detail.rs` (Maintenance rows, Installed applications table, Ports in use after Network on My Computer, flags in the header), `icons.rs` (shield), `widgets.rs`, `runtime.rs`; `telepad-check` text output; `README.md`, `docs/USER_MANUAL.md`, `docs/crates/telepad-core.md`, `AGENTS.md`, `docs/images/my-computer-security.png`, `docs/images/my-computer-apps.png`
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace`; `telepad-check --local [--json]` on Windows 11 (Defender on, definitions read with the +07:00 offset converted to UTC, 3 firewall profiles, SmartScreen, Windows Update offline search 0 pending / last install, 104 programs); release GUI on the demo db: Maintenance rows, Installed applications table (sort, filter), order Network → Ports in use → Sensors, live read 1.2 s, slow read 4.6 s
+- Not verified: a third-party antivirus / firewall (none on the test PC; covered by unit tests), Windows Server without Security Center, a PC with security switched off (flag covered by tests), program names outside the console code page (`reg` output)
+
 ## [2026-11-27] — feat(editor): indentation Size as an editable field with a 2 / 4 / 8 dropdown
 - Issue #201 addressed on GitHub
 - Files: core `files/text.rs` (`Indent::MIN` / `MAX`, `parse_size`, `size_ok`), app `editor.rs` (`indent_allowed` refuses sizes outside 1–16), `tests_editor.rs`, gui `views/text_editor.rs` (`size_field`, ▾ submenu, menu closes only on outside click or a choice), `docs/USER_MANUAL.md`, `docs/DEVELOPER_GUIDE.md`, `docs/images/editor-indent.png`

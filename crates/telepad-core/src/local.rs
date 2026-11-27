@@ -4,7 +4,8 @@
 //!
 //! - Windows has no `sh`: system facts come from the OS (`sysinfo`), listening
 //!   ports from `netstat -ano`, pending reboot from `reg query`, Docker /
-//!   Podman from their CLI with the same formats the remote script uses.
+//!   Podman from their CLI with the same formats the remote script uses;
+//!   security, Windows Update and installed programs in [`security`] (#211).
 //! - Linux / macOS run the remote script itself with `sh -s`.
 
 use std::process::{Command, Stdio};
@@ -13,14 +14,17 @@ use std::time::Duration;
 use crate::model::{HostReport, Listener};
 use crate::platform;
 
+pub mod security;
 pub mod sensors;
 
 /// Longest a local read may take (Docker can be slow to answer).
 pub const TIMEOUT: Duration = Duration::from_secs(40);
 
 /// Collect everything about this computer. Blocks (run it on a thread).
-pub fn collect() -> Result<HostReport, String> {
-    let mut r = collect_impl()?;
+/// `slow`: also the slow facts (#211: Windows Update and installed programs
+/// on Windows); without it they are left empty for [`keep_slow`].
+pub fn collect(slow: bool) -> Result<HostReport, String> {
+    let mut r = collect_impl(slow)?;
     if r.hostname.is_empty() {
         r.hostname = std::env::var("COMPUTERNAME")
             .or_else(|_| std::env::var("HOSTNAME"))
@@ -29,8 +33,21 @@ pub fn collect() -> Result<HostReport, String> {
     Ok(r)
 }
 
+/// Facts read only on a slow read (#211), kept from the last report.
+pub fn keep_slow(new: &mut HostReport, prev: &HostReport) {
+    if new.apps.is_none() {
+        new.apps.clone_from(&prev.apps);
+    }
+    if new.os_id == "windows" {
+        new.maintenance.updates = prev.maintenance.updates;
+        new.maintenance
+            .last_update
+            .clone_from(&prev.maintenance.last_update);
+    }
+}
+
 #[cfg(not(target_os = "windows"))]
-fn collect_impl() -> Result<HostReport, String> {
+fn collect_impl(_slow: bool) -> Result<HostReport, String> {
     use std::io::Write;
     let script = crate::collector::Scope::FULL.script();
     let mut child = Command::new("sh")
@@ -101,7 +118,7 @@ fn run(program: &str, args: &[&str]) -> Option<(bool, String)> {
 }
 
 #[cfg(target_os = "windows")]
-fn collect_impl() -> Result<HostReport, String> {
+fn collect_impl(slow: bool) -> Result<HostReport, String> {
     use crate::model::{Disk, Memory, NetAddr};
     use sysinfo::{Disks, Networks, ProcessesToUpdate, System};
 
@@ -182,6 +199,11 @@ fn collect_impl() -> Result<HostReport, String> {
     }
     r.maintenance.reboot_required = Some(reboot_pending());
     r.maintenance.today = Some(crate::eol::today());
+    r.security = Some(security::read_security(run));
+    if slow {
+        (r.maintenance.updates, r.maintenance.last_update) = security::read_update(run);
+        r.apps = Some(security::read_apps(run));
+    }
     r.docker = docker();
     Ok(r)
 }

@@ -39,6 +39,124 @@ pub struct HostReport {
     pub ping_ms: Option<f32>,
     /// RDP port accepted a TCP connection (RDP hosts).
     pub rdp_open: bool,
+    /// Windows Security and antivirus of My Computer (#211); `None` elsewhere.
+    pub security: Option<Security>,
+    /// Installed programs of My Computer on Windows (#211); `None` = not read.
+    pub apps: Option<Vec<App>>,
+}
+
+/// Windows Security of this computer (#211), as Windows Security shows it.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Security {
+    /// Antivirus products Windows knows (Microsoft Defender and third-party).
+    pub antivirus: Vec<Antivirus>,
+    /// Windows Firewall profiles (Domain / Private / Public).
+    pub firewall_profiles: Vec<FirewallProfile>,
+    /// Third-party firewalls registered with Windows Security that are on.
+    pub firewall_products: Vec<String>,
+    /// SmartScreen for apps and files ("App & browser control").
+    pub app_control: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Antivirus {
+    pub name: String,
+    /// Real-time protection on.
+    pub on: bool,
+    /// Definitions up to date as the product reports it.
+    pub up_to_date: Option<bool>,
+    pub version: Option<String>,
+    /// When the definitions were updated (`YYYY-MM-DD HH:MM UTC`).
+    pub updated: Option<String>,
+    pub age_days: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct FirewallProfile {
+    pub name: String,
+    pub on: bool,
+}
+
+/// Definitions older than this many days are flagged (#211).
+pub const DEFINITIONS_MAX_AGE_DAYS: u32 = 7;
+
+impl Security {
+    /// "Virus & threat protection": some antivirus has real-time protection on.
+    pub fn virus_protection(&self) -> Option<bool> {
+        (!self.antivirus.is_empty()).then(|| self.antivirus.iter().any(|a| a.on))
+    }
+
+    /// "Firewall & network protection": every Windows Firewall profile on, or
+    /// a third-party firewall on.
+    pub fn firewall(&self) -> Option<bool> {
+        if !self.firewall_products.is_empty() {
+            return Some(true);
+        }
+        (!self.firewall_profiles.is_empty()).then(|| self.firewall_profiles.iter().all(|p| p.on))
+    }
+
+    /// Windows Firewall profiles that are off.
+    pub fn firewall_off(&self) -> Vec<&str> {
+        self.firewall_profiles
+            .iter()
+            .filter(|p| !p.on)
+            .map(|p| p.name.as_str())
+            .collect()
+    }
+
+    /// The antivirus that protects now (else the first one listed).
+    pub fn active_antivirus(&self) -> Option<&Antivirus> {
+        self.antivirus
+            .iter()
+            .find(|a| a.on)
+            .or_else(|| self.antivirus.first())
+    }
+
+    /// The active antivirus' definitions are out of date or older than
+    /// [`DEFINITIONS_MAX_AGE_DAYS`].
+    pub fn definitions_stale(&self) -> bool {
+        self.active_antivirus().is_some_and(|a| {
+            a.up_to_date == Some(false) || a.age_days.is_some_and(|d| d > DEFINITIONS_MAX_AGE_DAYS)
+        })
+    }
+
+    /// What is off or out of date, for flags (empty = all fine or unknown).
+    pub fn problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        if self.virus_protection() == Some(false) {
+            p.push("Virus & threat protection is off".to_string());
+        }
+        if self.definitions_stale()
+            && let Some(a) = self.active_antivirus()
+        {
+            p.push(match a.age_days {
+                Some(d) => format!("{} definitions are {d} days old", a.name),
+                None => format!("{} definitions are out of date", a.name),
+            });
+        }
+        if self.firewall() == Some(false) {
+            p.push(format!(
+                "Firewall off for: {}",
+                self.firewall_off().join(", ")
+            ));
+        }
+        if self.app_control == Some(false) {
+            p.push("App & browser control (SmartScreen) is off".to_string());
+        }
+        p
+    }
+}
+
+/// An installed program (#211), from the Windows Uninstall registry keys.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct App {
+    pub name: String,
+    pub version: String,
+    pub publisher: String,
+    /// `YYYY-MM-DD`, when the program recorded it.
+    pub installed: Option<String>,
+    /// As the program reports it (`EstimatedSize`).
+    pub size_kb: Option<u64>,
 }
 
 /// What needs doing on a host: reboot, updates, OS release past end of support.
@@ -53,6 +171,8 @@ pub struct Maintenance {
     pub reboot_packages: Vec<String>,
     pub updates: Option<u32>,
     pub security_updates: Option<u32>,
+    /// Last update installed (`YYYY-MM-DD`; Windows Update on My Computer, #211).
+    pub last_update: Option<String>,
     /// End of vendor support for this release (`YYYY-MM-DD`), when known.
     pub end_of_support: Option<String>,
 }

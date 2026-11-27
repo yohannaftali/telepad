@@ -703,6 +703,7 @@ pub fn flag_icon(k: FlagKind) -> &'static str {
         FlagKind::Reboot => icons::REFRESH,
         FlagKind::Updates => icons::IMPORT,
         FlagKind::Cluster => icons::STACK,
+        FlagKind::Security => icons::SHIELD_WARNING,
     }
 }
 

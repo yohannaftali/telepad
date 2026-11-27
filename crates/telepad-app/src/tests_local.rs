@@ -34,7 +34,7 @@ fn tick(s: &mut State, now: Instant) -> Vec<Effect> {
 
 fn reads(fx: &[Effect]) -> usize {
     fx.iter()
-        .filter(|e| matches!(e, Effect::CollectLocal))
+        .filter(|e| matches!(e, Effect::CollectLocal { .. }))
         .count()
 }
 
@@ -62,6 +62,7 @@ fn my_computer_is_read_while_its_page_is_open() {
         Msg::LocalCollected {
             result: Ok(report()),
             elapsed: Duration::from_millis(1800),
+            slow: true,
         },
         t0,
     );
@@ -77,6 +78,7 @@ fn my_computer_is_read_while_its_page_is_open() {
         Msg::LocalCollected {
             result: Err("netstat failed".into()),
             elapsed: Duration::from_secs(1),
+            slow: false,
         },
         t0 + live,
     );
@@ -98,6 +100,7 @@ fn pausing_everything_stops_the_periodic_read_but_not_refresh() {
         Msg::LocalCollected {
             result: Ok(report()),
             elapsed: Duration::from_secs(1),
+            slow: false,
         },
         t0,
     );
@@ -227,4 +230,106 @@ fn databases_of_my_computer_open_without_an_inventory_host() {
         s.model.db[0].target.title(),
         "MariaDB / MySQL :3306 on This computer"
     );
+}
+
+fn slow_of(fx: &[Effect]) -> Option<bool> {
+    fx.iter().find_map(|e| match e {
+        Effect::CollectLocal { slow } => Some(*slow),
+        _ => None,
+    })
+}
+
+#[test]
+fn slow_facts_are_read_at_the_slow_interval_and_kept_between() {
+    // #211: Windows Update and installed programs only on slow reads.
+    use telepad_core::model::App;
+    let mut s = state();
+    let t0 = Instant::now();
+    update(&mut s, Msg::Ws(WsMsg::Open(Win::MyComputer)), t0);
+    assert_eq!(slow_of(&tick(&mut s, t0)), Some(true), "first read is slow");
+    let mut first = report();
+    first.os_id = "windows".into();
+    first.maintenance.updates = Some(2);
+    first.maintenance.last_update = Some("2026-11-20".into());
+    first.apps = Some(vec![App {
+        name: "Example Editor".into(),
+        ..Default::default()
+    }]);
+    update(
+        &mut s,
+        Msg::LocalCollected {
+            result: Ok(first),
+            elapsed: Duration::from_secs(2),
+            slow: true,
+        },
+        t0,
+    );
+    let live = s.model.strategy.live.every();
+    assert_eq!(slow_of(&tick(&mut s, t0 + live)), Some(false));
+    let mut quick = report();
+    quick.os_id = "windows".into();
+    update(
+        &mut s,
+        Msg::LocalCollected {
+            result: Ok(quick),
+            elapsed: Duration::from_secs(1),
+            slow: false,
+        },
+        t0 + live,
+    );
+    let r = s.model.local.report.as_ref().unwrap();
+    assert_eq!(r.maintenance.updates, Some(2), "kept from the slow read");
+    assert_eq!(r.maintenance.last_update.as_deref(), Some("2026-11-20"));
+    assert_eq!(r.apps.as_ref().map(Vec::len), Some(1));
+    // Due again after the slow interval; Refresh is always a slow read.
+    let slow = s.model.strategy.slow.every();
+    assert_eq!(slow_of(&tick(&mut s, t0 + slow)), Some(true));
+    update(
+        &mut s,
+        Msg::LocalCollected {
+            result: Err("busy".into()),
+            elapsed: Duration::from_secs(1),
+            slow: true,
+        },
+        t0 + slow,
+    );
+    assert_eq!(
+        slow_of(&update(&mut s, Msg::LocalRefresh, t0 + slow)),
+        Some(true)
+    );
+}
+
+#[test]
+fn windows_security_problems_become_a_flag() {
+    // #211
+    use crate::table::{FlagKind, Severity};
+    use telepad_core::model::{Antivirus, FirewallProfile, Security};
+    let mut r = *report();
+    r.security = Some(Security {
+        antivirus: vec![Antivirus {
+            name: "Microsoft Defender".into(),
+            on: true,
+            age_days: Some(1),
+            ..Default::default()
+        }],
+        firewall_profiles: vec![FirewallProfile {
+            name: "Public".into(),
+            on: true,
+        }],
+        app_control: Some(true),
+        ..Default::default()
+    });
+    assert!(crate::host_flags(&r).is_empty());
+    if let Some(sec) = r.security.as_mut() {
+        sec.antivirus[0].age_days = Some(10);
+    }
+    let f = crate::host_flags(&r);
+    assert_eq!(f[0].kind, FlagKind::Security);
+    assert_eq!(f[0].severity, Severity::Warn, "old definitions only");
+    if let Some(sec) = r.security.as_mut() {
+        sec.firewall_profiles[0].on = false;
+    }
+    let f = crate::host_flags(&r);
+    assert_eq!(f[0].severity, Severity::Danger);
+    assert!(f[0].detail.contains("Firewall off for: Public"));
 }

@@ -60,6 +60,7 @@ outside libraries: [DEPENDENCIES.md](../DEPENDENCIES.md)
 | `cluster.rs` | Docker Swarm and Kubernetes model and parsers |
 | `eol.rs` | End-of-support dates per distribution release |
 | `local.rs` | My Computer: collect this PC without SSH (Windows via `sysinfo` and `netstat`; Linux / macOS by running `script.sh` locally) |
+| `local/security.rs` | My Computer on Windows (#211): Windows Security (`antivirus`: Defender's `MSFT_MpComputerStatus` + Security Center `productState`, `firewall_profiles` with Group Policy first, `smartscreen`), Windows Update from the local cache (`UPDATE_SCRIPT`, offline search, `parse_update`), installed programs from the Uninstall keys (`parse_reg`, `apps`: no system components / updates, one row per name + version); slow facts kept between reads by `local::keep_slow` |
 | `local/sensors.rs` | My Computer sensors on Windows (#193): `nvidia-smi`, LibreHardwareMonitor's WMI namespace only if it happens to run (never suggested), the ACPI thermal zone as fallback; `merge` (no duplicates) and the note that says why readings are missing (`HostReport::sensors_note`) |
 | `login_log.rs` | Log info: read SSH logins from the systemd journal, parse `Accepted` lines |
 
