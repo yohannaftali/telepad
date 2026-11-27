@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-27] — feat(sensors): driver-free Windows sensors — AMD graphics via ADLX, NVMe drive temperature
+- Issue #196 created on GitHub (follow-up of #193, owner decision: no kernel driver, no third-party program)
+- Scope: sensors (core local/sensors.rs, platform.rs FFI; manual)
+- Labels: enhancement
+- Note on the issue: check the ADLX licence before adding a binding
+
 ## [2026-11-27] — Tested and merged: #193 GPU and Windows sensors
 - Owner decisions during testing: test on My Computer only (no hosts); keep reading LibreHardwareMonitor if it runs but never suggest it (note texts, manual and docs changed on the branch); CPU / board temperatures on Windows need a kernel driver, which Telepad will not ship; vendor-native driver-free sources (AMD ADLX, NVMe temperature) go to a follow-up issue
 - Windows 11 (AMD Ryzen 7 7700X, MSI MS-7D76, RTX 3070 Ti, not administrator), release build: fmt, clippy `-D warnings`, `cargo test --workspace` (core 247, app 220, gui 20); `telepad-check --local` and `--json`: GPU 0 temperature, fan %, power and the note; GUI on a scratch inventory via UI Automation and window captures: My Computer ▸ Sensors shows the note (no other program named), Fans with 0 % and the fan drawing, Temperatures, Power

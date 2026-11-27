@@ -378,3 +378,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #187 | docs: refresh README and user manual — no version tour, new screenshots, more detail on groups, clusters, Swarm, Kubernetes, Portainer, containers, keys, Host Management | closed | 2026-11-27 |
 | #188 | docs: developer guide — how the egui UI is built (tables, searchable dropdown, pagination, editor) and how authorization and outside APIs work | closed | 2026-11-27 |
 | #193 | feat(sensors): GPU and Windows sensors — nvidia-smi, LibreHardwareMonitor on Windows, and why Sensors is empty | closed | 2026-11-27 |
+| #196 | feat(sensors): driver-free Windows sensors — AMD graphics via ADLX, NVMe drive temperature | open | 2026-11-27 |
