@@ -375,5 +375,5 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #181 | fix(ui): grey secondary text too faint — lighter in the dark theme, darker in the light theme | closed | 2026-11-26 |
 | #182 | feat(editor): change indentation — tabs / spaces, size 2 / 4 / 8, convert and re-indent | closed | 2026-11-26 |
 | #183 | feat(editor): colour schemes (Dark Modern, Light Modern, Monokai, Solarized, Red, …) and a language picker for syntax highlighting | closed | 2026-11-26 |
-| #187 | docs: refresh README and user manual — no version tour, new screenshots, more detail on groups, clusters, Swarm, Kubernetes, Portainer, containers, keys, Host Management | ready-for-review | 2026-11-26 |
-| #188 | docs: developer guide — how the egui UI is built (tables, searchable dropdown, pagination, editor) and how authorization and outside APIs work | ready-for-review | 2026-11-26 |
+| #187 | docs: refresh README and user manual — no version tour, new screenshots, more detail on groups, clusters, Swarm, Kubernetes, Portainer, containers, keys, Host Management | closed | 2026-11-27 |
+| #188 | docs: developer guide — how the egui UI is built (tables, searchable dropdown, pagination, editor) and how authorization and outside APIs work | closed | 2026-11-27 |
