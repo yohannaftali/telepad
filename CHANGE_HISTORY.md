@@ -2,6 +2,22 @@
 
 Newest first.
 
+## [2026-11-27] — feat(editor): keyboard shortcut profiles — VS Code, Sublime, JetBrains, Notepad++, Emacs, nano — with go to line, matching bracket, copy all
+- Issue #205 created on GitHub
+- Scope: editor (gui keymap + text_editor.rs; core files/text.rs; app editor.rs; settings ui_editor_keymap); depends on #204
+- Labels: enhancement
+- Owner decisions: split into #203 / #204 / #205; Helix (modal) dropped; open dialog on the same side as the file window
+
+## [2026-11-27] — feat(editor): open another file from the editor on the same host or this computer
+- Issue #204 created on GitHub
+- Scope: editor (app editor.rs / files.rs; gui text_editor.rs)
+- Labels: enhancement
+
+## [2026-11-27] — feat(editor): clickable line ending and encoding in the status bar — LF / CRLF, Reopen / Save with Encoding
+- Issue #203 created on GitHub
+- Scope: editor (core files/text.rs, edit.rs; app editor.rs; gui text_editor.rs; encoding_rs)
+- Labels: enhancement
+
 ## [2026-11-27] — feat(editor): indentation Size as an editable field with a 2 / 4 / 8 dropdown
 - Issue #201 created on GitHub
 - Scope: editor (gui views/text_editor.rs, core files/text.rs Indent, app editor.rs; manual)
