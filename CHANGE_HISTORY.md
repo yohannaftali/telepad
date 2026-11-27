@@ -2,6 +2,11 @@
 
 Newest first.
 
+## [2026-11-27] — feat(editor): indentation Size as an editable field with a 2 / 4 / 8 dropdown
+- Issue #201 created on GitHub
+- Scope: editor (gui views/text_editor.rs, core files/text.rs Indent, app editor.rs; manual)
+- Labels: enhancement
+
 ## [2026-11-27] — Tested and merged: #198 My Computer read speed
 - Windows 11, release build: fmt, clippy `-D warnings`, `cargo test --workspace` (core 248, app 220, gui 20)
 - `telepad-check --local`: 19.2 s → 1.6 s; networks, IPs and Docker-socket flag of all 49 containers identical to the old `docker inspect` output
