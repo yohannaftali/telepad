@@ -58,6 +58,8 @@ pub struct EdTab {
     pub saved_format: Format,
     /// Format being written now.
     pub saving_format: Option<Format>,
+    /// Save as (#205): the new path being written now.
+    pub saving_path: Option<String>,
     pub stamp: Option<Stamp>,
     /// The file's text as last loaded or saved (unsaved = draft differs).
     pub saved: String,
@@ -87,6 +89,7 @@ impl EdTab {
             guessed: false,
             saved_format: Format::default(),
             saving_format: None,
+            saving_path: None,
             stamp: None,
             saved: String::new(),
             saving: None,
@@ -141,9 +144,21 @@ pub struct FileEditor {
     next: TabId,
 }
 
-/// The editor's Open… dialog (#204).
+/// What the folder dialog is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenMode {
+    /// Open… (#204): the file opens as a new tab.
+    Open,
+    /// Save as (#205): the tab is written to a new name.
+    SaveAs(TabId),
+    /// Insert a file (#205): its text goes in at the tab's cursor.
+    Insert(TabId),
+}
+
+/// The editor's folder dialog: Open… (#204), Save as, Insert a file (#205).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OpenDialog {
+    pub mode: OpenMode,
     /// The side of the file window it lists (the host, or this computer).
     pub side: Side,
     /// Folder shown (absolute once listed).
@@ -151,6 +166,8 @@ pub struct OpenDialog {
     pub entries: Vec<Entry>,
     pub loading: bool,
     pub error: Option<String>,
+    /// Save as onto a file that exists: the path waiting for "Replace".
+    pub replace: Option<String>,
 }
 
 impl FileEditor {
@@ -190,6 +207,10 @@ pub struct EdDraft {
     pub open_path: String,
     pub open_filter: String,
     pub open_sel: Option<String>,
+    /// Insert a file (#205): text the GUI puts in at the tab's cursor.
+    pub insert: Option<(TabId, String)>,
+    /// Save as (#205): the new name (or a full path).
+    pub save_name: String,
 }
 
 impl EdDraft {
@@ -213,6 +234,8 @@ pub enum Load {
     Reload,
     /// Only to compare with the text (Show diff).
     Diff,
+    /// Insert a file (#205): its text goes in at the cursor.
+    Insert,
 }
 
 #[derive(Debug, Clone)]
@@ -275,6 +298,15 @@ pub enum EdMsg {
     /// Open… / Ctrl+O (#204): list the active file's folder (else the
     /// file window's folder) on the same side.
     ShowOpen,
+    /// Save as (#205): the same dialog, writing the active tab to a new name.
+    ShowSaveAs,
+    /// Insert a file (#205): the same dialog, inserting a file's text.
+    ShowInsert,
+    /// Save as to this path (typed, or a name in the folder shown); asks
+    /// before replacing a file that exists.
+    SaveAsPath(String),
+    /// "Replace" answered for [`OpenDialog::replace`].
+    SaveAsReplace,
     /// List another folder in the Open… dialog (typed path, `..`, a folder).
     Browse(String),
     /// The Open… dialog's listing.
@@ -398,6 +430,8 @@ pub(crate) fn update(
                         c.diff = Some(result.and_then(|(doc, _)| diff(&doc.text, &mine)));
                     }
                 }
+                (Load::Insert, Ok((doc, _))) => dr.insert = Some((tab, doc.text)),
+                (Load::Insert, Err(why)) => t.error = Some(why),
             }
         }
         EdMsg::Activate(tab) => {
@@ -423,9 +457,14 @@ pub(crate) fn update(
             };
             let written = t.saving.take();
             let format = t.saving_format.take();
+            let new_path = t.saving_path.take();
             match result {
                 Ok(stamp) => {
                     t.saved = written.unwrap_or_default();
+                    if let Some(p) = new_path {
+                        t.name = p.rsplit(['/', '\\']).next().unwrap_or(&p).to_string();
+                        t.path = p;
+                    }
                     if let Some(f) = format {
                         t.saved_format = f;
                         t.guessed = false;
@@ -609,10 +648,20 @@ pub(crate) fn update(
                 reopen(id, e, tab, charset, fx);
             }
         }
-        EdMsg::ShowOpen => {
+        EdMsg::ShowOpen | EdMsg::ShowSaveAs | EdMsg::ShowInsert => {
             if s.status != Status::Ready {
                 return false;
             }
+            let active = s
+                .editor
+                .active
+                .filter(|a| s.editor.tab(*a).is_some_and(|t| t.state == TabState::Ready));
+            let mode = match (&msg_kind(&msg), active) {
+                (0, _) => OpenMode::Open,
+                (1, Some(a)) => OpenMode::SaveAs(a),
+                (2, Some(a)) => OpenMode::Insert(a),
+                _ => return false,
+            };
             let (side, dir) = match s.editor.active.and_then(|a| s.editor.tab(a)) {
                 Some(t) => {
                     let local = s.local_side(t.side);
@@ -627,6 +676,9 @@ pub(crate) fn update(
             d.editor.open_path = dir.clone();
             d.editor.open_filter.clear();
             d.editor.open_sel = None;
+            if let OpenMode::SaveAs(a) = mode {
+                d.editor.save_name = s.editor.tab(a).map(|t| t.name.clone()).unwrap_or_default();
+            }
             let loading = error.is_none();
             if loading {
                 fx.push(FmEffect::Browse {
@@ -636,12 +688,61 @@ pub(crate) fn update(
                 });
             }
             s.editor.open = Some(OpenDialog {
+                mode,
                 side,
                 dir,
                 entries: Vec::new(),
                 loading,
                 error,
+                replace: None,
             });
+        }
+        EdMsg::SaveAsPath(typed) => {
+            let Some(o) = s.editor.open.as_ref() else {
+                return false;
+            };
+            let OpenMode::SaveAs(tab) = o.mode else {
+                return false;
+            };
+            let typed = typed.trim().to_string();
+            let local = s.local_side(o.side);
+            let name = typed.rsplit(['/', '\\']).next().unwrap_or("").to_string();
+            if name.is_empty() {
+                if let Some(o) = s.editor.open.as_mut() {
+                    o.error = Some("Type a file name".into());
+                }
+                return false;
+            }
+            let path = if typed.len() == name.len() {
+                crate::files::join(local, &o.dir, &name)
+            } else {
+                typed.clone()
+            };
+            let in_dir = crate::files::join(local, &o.dir, &name) == path;
+            let existing = in_dir
+                .then(|| o.entries.iter().find(|e| e.name == name))
+                .flatten();
+            if existing.is_some_and(|e| e.is_dir()) {
+                if let Some(o) = s.editor.open.as_mut() {
+                    o.error = Some(format!("{name} is a folder"));
+                }
+                return false;
+            }
+            if existing.is_some() && o.replace.as_deref() != Some(path.as_str()) {
+                if let Some(o) = s.editor.open.as_mut() {
+                    o.replace = Some(path);
+                    o.error = None;
+                }
+                return false;
+            }
+            s.editor.open = None;
+            save_as(id, &mut s.editor, &d.editor, tab, path, fx);
+        }
+        EdMsg::SaveAsReplace => {
+            let Some(path) = s.editor.open.as_ref().and_then(|o| o.replace.clone()) else {
+                return false;
+            };
+            return update(s, d, EdMsg::SaveAsPath(path), fx);
         }
         EdMsg::Browse(path) => {
             let Some(o) = e.open.as_mut() else {
@@ -685,6 +786,7 @@ pub(crate) fn update(
             let Some(side) = s.editor.open.as_ref().map(|o| o.side) else {
                 return false;
             };
+            let mode = s.editor.open.as_ref().map(|o| o.mode);
             let local = s.local_side(side);
             let Some(o) = s.editor.open.as_ref() else {
                 return false;
@@ -702,12 +804,80 @@ pub(crate) fn update(
             if entry.is_dir() {
                 return update(s, d, EdMsg::Browse(path), fx);
             }
+            match mode {
+                Some(OpenMode::SaveAs(_)) => {
+                    d.editor.save_name = name;
+                    return update(s, d, EdMsg::SaveAsPath(path), fx);
+                }
+                Some(OpenMode::Insert(tab)) => {
+                    s.editor.open = None;
+                    fx.push(FmEffect::Load {
+                        id,
+                        tab,
+                        side,
+                        path,
+                        load: Load::Insert,
+                        charset: None,
+                    });
+                    return false;
+                }
+                _ => {}
+            }
             s.editor.open = None;
             return update(s, d, EdMsg::OpenPath { side, path }, fx);
         }
         EdMsg::CloseOpen => e.open = None,
     }
     false
+}
+
+fn msg_kind(m: &EdMsg) -> u8 {
+    match m {
+        EdMsg::ShowSaveAs => 1,
+        EdMsg::ShowInsert => 2,
+        _ => 0,
+    }
+}
+
+/// Save as (#205): write the tab to `path` (no changed-on-disk check: the
+/// user chose the name, and Replace when it existed); the tab takes the new
+/// path once written.
+fn save_as(
+    id: u64,
+    e: &mut FileEditor,
+    dr: &EdDraft,
+    tab: TabId,
+    path: String,
+    fx: &mut Vec<FmEffect>,
+) {
+    let Some(t) = e.tab_mut(tab) else {
+        return;
+    };
+    if t.state != TabState::Ready || t.saving.is_some() {
+        return;
+    }
+    let Some(text) = dr.texts.get(&tab) else {
+        return;
+    };
+    let bytes = match text::encode_as(text, t.format()) {
+        Ok(b) => b,
+        Err(why) => {
+            t.error = Some(why);
+            return;
+        }
+    };
+    t.error = None;
+    t.saving = Some(text.clone());
+    t.saving_format = Some(t.format());
+    t.saving_path = Some(path.clone());
+    fx.push(FmEffect::Save {
+        id,
+        tab,
+        side: t.side,
+        path,
+        bytes,
+        expect: None,
+    });
 }
 
 /// The encoding to read a tab's file with again (Reload, Show diff): the one

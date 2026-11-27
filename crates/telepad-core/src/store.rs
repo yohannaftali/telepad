@@ -147,6 +147,8 @@ pub struct UiPrefs {
     pub workspace: String,
     /// Editor colour scheme (#183) by its key; empty = follow the app theme.
     pub editor_scheme: String,
+    /// Editor keyboard shortcut profile (#205) by its key; empty = VS Code.
+    pub editor_keymap: String,
 }
 
 impl Default for UiPrefs {
@@ -159,6 +161,7 @@ impl Default for UiPrefs {
             sidebar_collapsed: false,
             workspace: String::new(),
             editor_scheme: String::new(),
+            editor_keymap: String::new(),
         }
     }
 }
@@ -607,6 +610,7 @@ PRAGMA user_version = {SCHEMA_VERSION};"
             sidebar_collapsed: flag("ui_sidebar_collapsed", d.sidebar_collapsed)?,
             workspace: self.setting("ui_workspace")?.unwrap_or_default(),
             editor_scheme: self.setting("ui_editor_scheme")?.unwrap_or_default(),
+            editor_keymap: self.setting("ui_editor_keymap")?.unwrap_or_default(),
         })
     }
 
@@ -620,6 +624,7 @@ PRAGMA user_version = {SCHEMA_VERSION};"
             ("ui_sidebar_collapsed", flag(p.sidebar_collapsed)),
             ("ui_workspace", p.workspace.as_str()),
             ("ui_editor_scheme", p.editor_scheme.as_str()),
+            ("ui_editor_keymap", p.editor_keymap.as_str()),
         ];
         let tx = self.conn.unchecked_transaction()?;
         for (k, v) in rows {
@@ -1929,6 +1934,7 @@ mod tests {
             sidebar_collapsed: true,
             workspace: "0,0,700,500|0|0|overview|overview;docker".into(),
             editor_scheme: "solarized-dark".into(),
+            editor_keymap: "nano".into(),
         };
         s.set_ui_prefs(&p).unwrap();
         assert_eq!(s.ui_prefs().unwrap(), p);

@@ -168,6 +168,8 @@ pub struct Drafts {
     pub theme: ThemePref,
     /// Editor colour scheme key (#183); empty = follow the app theme.
     pub editor_scheme: String,
+    /// Editor keyboard shortcut profile key (#205); empty = VS Code.
+    pub editor_keymap: String,
     /// "How it runs" window.
     pub run_info: Option<RunInfoView>,
     /// "Import from pasted text" window.
@@ -435,6 +437,7 @@ impl Default for Drafts {
             overview_cards: false,
             theme: ThemePref::System,
             editor_scheme: String::new(),
+            editor_keymap: String::new(),
             run_info: None,
             paste: None,
             keys: None,
@@ -832,6 +835,7 @@ impl Drafts {
             sidebar_collapsed: ws.sidebar_collapsed,
             workspace: m.ws_legacy.clone(),
             editor_scheme: self.editor_scheme.clone(),
+            editor_keymap: self.editor_keymap.clone(),
         }
     }
 }

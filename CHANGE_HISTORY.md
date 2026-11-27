@@ -2,6 +2,17 @@
 
 Newest first.
 
+## [2026-11-27] — Tested: #203, #204, #205 (editor: line endings and encodings, Open…, shortcut profiles)
+- Windows 11, release build, scratch Telepad (own database, made-up files; the owner's Telepad untouched), UI Automation + window captures; fmt, clippy `-D warnings`, `cargo test --workspace` green
+- #203: a Windows-1252 file opens with the "Not UTF-8" line and é / € right; CRLF → LF and Windows-1252 → UTF-8 then Ctrl+S wrote exactly `name=café
+price=5 €
+` (UTF-8, LF); Reopen with Encoding ISO-8859-1 shows the expected mojibake; a UTF-16 LE file with BOM is detected
+- #204: Ctrl+O and Open… list the folder in the in-window dialog; a picked file opens as a new tab
+- #205: profile picker (all six); nano Ctrl+K cuts the line, Ctrl+S saves, Ctrl+G opens the shortcut list, Alt+U undid the cut; Emacs Ctrl+X (status "Ctrl+X –") Ctrl+S saves; VS Code Ctrl+X without a selection cuts the line, Ctrl+Shift+\ jumps from `{` (line 1) to `}` (line 3), Ctrl+Shift+S Save as wrote `copy.js` and renamed the tab, Ctrl+Shift+I inserted `sub/part.txt` at the cursor
+- Fixed during testing (#205): keys typed with Shift (`|` on `\`, `_` on `-`, `?` on `/`, `%` on `5`) now match by the key pressed; egui reports Ctrl / Shift / Alt on their own as key presses, which cancelled two-key shortcuts — they are ignored now (unit tests for both)
+- Not verified: other nano Alt shortcuts (Alt+G, Alt+6, Alt+A, Alt+R) — a Chrome extension on the test PC holds Alt+G as a system-wide hotkey, so they were not sent (matcher covered by unit tests); a host over SFTP (only this computer); Linux / macOS (CI builds)
+- Test note: a first test click landed outside Telepad (in VS Code; nothing changed); every later input was guarded to Telepad being in front
+
 ## [2026-11-27] — feat(editor): keyboard shortcut profiles — VS Code, Sublime, JetBrains, Notepad++, Emacs, nano — with go to line, matching bracket, copy all
 - Issue #205 created on GitHub
 - Scope: editor (gui keymap + text_editor.rs; core files/text.rs; app editor.rs; settings ui_editor_keymap); depends on #204
