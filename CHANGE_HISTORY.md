@@ -8,6 +8,18 @@ Newest first.
 - Verified: fmt, clippy `-D warnings`, `cargo test --workspace`; `telepad-check --local [--json]` on Windows 11 (Defender on, definitions read with the +07:00 offset converted to UTC, 3 firewall profiles, SmartScreen, Windows Update offline search 0 pending / last install, 104 programs); release GUI on the demo db: Maintenance rows, Installed applications table (sort, filter), order Network → Ports in use → Sensors, live read 1.2 s, slow read 4.6 s
 - Not verified: a third-party antivirus / firewall (none on the test PC; covered by unit tests), Windows Server without Security Center, a PC with security switched off (flag covered by tests), program names outside the console code page (`reg` output)
 
+## [2026-11-27] — feat(editor): indentation Size as an editable field with a 2 / 4 / 8 dropdown
+- Issue #201 addressed on GitHub
+- Files: core `files/text.rs` (`Indent::MIN` / `MAX`, `parse_size`, `size_ok`), app `editor.rs` (`indent_allowed` refuses sizes outside 1–16), `tests_editor.rs`, gui `views/text_editor.rs` (`size_field`, ▾ submenu, menu closes only on outside click or a choice), `docs/USER_MANUAL.md`, `docs/DEVELOPER_GUIDE.md`, `docs/images/editor-indent.png`
+- Verified: fmt, clippy `-D warnings`, `cargo test --workspace`; release build on the demo db (scratch Telepad, made-up `compose.yml` indented with 3 spaces): *Spaces: 3* detected, 20 + Enter stays red with "1 to 16" and is not applied, Esc restores 3, 6 + Enter → *Spaces: 6* with the file unchanged, dropdown 4 → *Spaces: 4*
+- Not verified: Portainer stack editor (`embedded`, same menu code; demo stacks not running), a host over SFTP
+
+## [2026-11-27] — feat(local): My Computer — Windows security and update status, installed applications
+- Issue #211 created on GitHub
+- Scope: local (core local.rs / platform.rs / model.rs; gui views/detail.rs; telepad-check --local)
+- Labels: enhancement
+- Owner decisions: Usage section and Disks Free column stay; Windows Update = pending from the local cache (offline search) + last install date; installed applications = Windows desktop programs from the Uninstall keys (no Store apps, Linux / macOS later); Ports in use moves directly after Network
+
 ## [2026-11-27] — Telepad 0.9.15
 - #193 Sensors: NVIDIA graphics cards (nvidia-smi) on hosts and on Windows My Computer; LibreHardwareMonitor readings when it happens to run; a note says why Sensors is empty (Windows without CPU / board temperatures, macOS)
 - #198 My Computer reads in about 1.5 s instead of ~19 s with Docker Desktop (container IPs per network instead of inspecting each container)
