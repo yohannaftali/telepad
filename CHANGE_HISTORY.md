@@ -2,6 +2,12 @@
 
 Newest first.
 
+## [2026-11-27] — feat(sensors): GPU and Windows sensors — nvidia-smi, LibreHardwareMonitor on Windows, and why Sensors is empty
+- Issue #193 created on GitHub
+- Scope: sensors (core script.sh, parse.rs, local.rs; gui views/sensors.rs; telepad-check --local; manual)
+- Labels: enhancement
+- Found: My Computer on an MSI MS-7D76 PC shows no sensors because WMI MSAcpi_ThermalZoneTemperature is "Not supported" (not an administrator problem); Linux NVIDIA GPUs and macOS also show none
+
 ## [2026-11-27] — docs: one page per crate and a guide to the outside libraries
 - Documentation only, no release
 - New docs/crates/telepad-core.md, telepad-app.md, telepad-gui.md, telepad-check.md: role, dependencies, rules, modules by area, how the other crates use it, how to extend it, tests (telepad-check: commands and exit codes)
