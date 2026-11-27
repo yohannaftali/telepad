@@ -385,4 +385,4 @@ the updater sets the execute bit on `telepad-check` (`platform::make_executable`
 | #203 | feat(editor): clickable line ending and encoding in the status bar — LF / CRLF, Reopen / Save with Encoding | closed | 2026-11-27 |
 | #204 | feat(editor): open another file from the editor on the same host or this computer | closed | 2026-11-27 |
 | #205 | feat(editor): keyboard shortcut profiles — VS Code, Sublime, JetBrains, Notepad++, Emacs, nano — with go to line, matching bracket, copy all | closed | 2026-11-27 |
-| #211 | feat(local): My Computer — Windows security and update status, installed applications | ready-for-review | 2026-11-27 |
+| #211 | feat(local): My Computer — Windows security and update status, installed applications | closed | 2026-11-27 |
